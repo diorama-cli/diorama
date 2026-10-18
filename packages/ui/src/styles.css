@@ -1,0 +1,238 @@
+/* diorama base styles (M0). Restrained, text-first: the viewport belongs to files. */
+:root {
+  --dio-bg: #ffffff;
+  --dio-panel: #f7f7f8;
+  --dio-border: #e3e3e6;
+  --dio-text: #1f2328;
+  --dio-muted: #6b7280;
+  --dio-accent: #2f6feb;
+  --dio-danger: #b42318;
+  --dio-danger-bg: #fff4f3;
+  --dio-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', sans-serif;
+  --dio-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--dio-bg);
+  color: var(--dio-text);
+  font: 13px/1.5 var(--dio-font);
+}
+
+code {
+  font-family: var(--dio-mono);
+  font-size: 0.95em;
+}
+
+/* Failure surfaces */
+.diorama-failure {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 100%;
+  padding: 48px 24px;
+  text-align: center;
+  background: var(--dio-bg);
+}
+
+.diorama-failure__title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--dio-muted);
+}
+
+.diorama-failure__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--dio-danger);
+  font-family: var(--dio-mono);
+  font-size: 12px;
+}
+
+.diorama-banner {
+  padding: 6px 12px;
+  background: var(--dio-danger-bg);
+  border-bottom: 1px solid #f5c2bf;
+  color: var(--dio-danger);
+  font-size: 12px;
+}
+
+/* Layout piece */
+.diorama-layout {
+  display: grid;
+  grid-template-rows: 1fr;
+  height: 100%;
+}
+
+.diorama-layout--split {
+  grid-template-columns: 260px 1fr;
+}
+
+.diorama-layout__sidebar {
+  min-width: 0;
+  overflow: auto;
+  background: var(--dio-panel);
+  border-right: 1px solid var(--dio-border);
+}
+
+.diorama-layout__main {
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.diorama-layout__seat-error {
+  padding: 12px;
+  color: var(--dio-danger);
+  font-size: 12px;
+}
+
+/* File tree piece */
+.diorama-tree {
+  padding: 8px 0;
+  font-size: 13px;
+  user-select: none;
+}
+
+.diorama-tree__row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 2px 8px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.diorama-tree__row:hover {
+  background: rgba(0, 0, 0, 0.045);
+}
+
+.diorama-tree__row--selected {
+  background: rgba(47, 111, 235, 0.12);
+}
+
+.diorama-tree__caret {
+  width: 12px;
+  flex: none;
+  color: var(--dio-muted);
+  font-size: 10px;
+}
+
+.diorama-tree__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.diorama-tree__error {
+  padding: 8px;
+  color: var(--dio-danger);
+  font-size: 12px;
+}
+
+/* Tabs piece (M0: a single tab, no close affordance) */
+.diorama-tabs {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.diorama-tabs__strip {
+  display: flex;
+  flex: none;
+  height: 32px;
+  border-bottom: 1px solid var(--dio-border);
+  background: var(--dio-panel);
+}
+
+.diorama-tabs__tab {
+  display: flex;
+  align-items: center;
+  max-width: 320px;
+  padding: 0 14px;
+  border-right: 1px solid var(--dio-border);
+  background: var(--dio-bg);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.diorama-tabs__content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.diorama-tabs__empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--dio-muted);
+}
+
+/* Renderer dispatch piece */
+.diorama-renderer {
+  height: 100%;
+}
+
+.diorama-renderer__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 100%;
+  color: var(--dio-muted);
+}
+
+.diorama-renderer__error {
+  padding: 16px;
+  color: var(--dio-danger);
+  font-family: var(--dio-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+/* Plaintext piece */
+.diorama-plaintext {
+  margin: 0;
+  padding: 12px 16px;
+  font-family: var(--dio-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  tab-size: 4;
+  white-space: pre;
+}
+
+.diorama-plaintext__path {
+  display: block;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--dio-border);
+  color: var(--dio-muted);
+  font: 12px var(--dio-font);
+}

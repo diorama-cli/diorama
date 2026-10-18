@@ -4,7 +4,7 @@
 
 在任意目录执行一条命令，这个目录就变成浏览器里一个可以走进去看的场景。代码文件有语法高亮，Markdown 会被渲染，之后还会有 git diff——每一样能力都是场景里的一块景片，装上插件就多一块。
 
-**状态**：命名已定，代码未开始。
+**状态**：M0 完成（左树右文、单 tab、5 条验收全绿），见 [M0 实现说明](docs/m0/spec.md)。
 
 ## 为什么叫 Diorama
 
@@ -28,10 +28,13 @@
 | Slogan | A live diorama of your files. / 把你的目录，摆成一个场景。 |
 
 ```bash
-diorama .                 # 目录 → 浏览器里的场景
-diorama --port 8080
+pnpm install && pnpm build
+node packages/cli/bin/diorama .   # 目录 → 浏览器里的场景（打开打印出的 URL）
+node packages/cli/bin/diorama . --port 8080 --host 127.0.0.1
 ```
 
 ## 文档
 
+- [计划](docs/plan.md) / [契约](docs/contract.md) / [架构](docs/architecture.md) / [功能清单](docs/features.md)
+- [M0 实现说明](docs/m0/spec.md)：M0 确认的契约补充、实现记录与验收结果
 - [命名记录](docs/naming.md)：完整候选、排除项与撞名检查

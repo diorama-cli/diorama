@@ -1,1 +1,9 @@
 .DS_Store
+node_modules/
+dist/
+lib/
+*.tsbuildinfo
+.diorama-verify/
+.diorama-verify-b/
+test-results/
+playwright-report/

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>diorama</title>
+    <!--
+      Module table (docs/m0/spec.md §10.3), served by the kernel and filled in
+      before anything imports a table specifier: the shell bundle and every
+      client half resolve `react`, `cordis`, `diorama-ui`,
+      `diorama-kernel/client` and `diorama-plugin-slots` here, so each exists
+      exactly once per page. The import map and the table bundle are injected
+      by the kernel when it serves this file (packages/kernel/src/server/table.ts).
+    -->
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

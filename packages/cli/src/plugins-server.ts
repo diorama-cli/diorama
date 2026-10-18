@@ -1,0 +1,40 @@
+/**
+ * Server halves of the M0 static assembly — the one place that names which
+ * built-in plugins exist.
+ *
+ * Why this module, and why it imports *lazy*:
+ * - It belongs to the Node program only (`tsconfig.server.json`). The browser
+ *   halves are checked in their own package projects; keeping this list here
+ *   means the server program never compiles React code.
+ * - The imports are lazy so the type-only module declarations of a browser
+ *   half do not join the server Program. Only the plugin's own `name` /
+ *   `apply` exports are read at runtime.
+ *
+ * Removing a package from this list is a deliberate change; adding an id that
+ * is not in `BUILTIN_PLUGIN_IDS` is a type error.
+ */
+import type { BuiltinPluginId } from 'diorama-kernel/server'
+
+type HalfLoader = () => Promise<unknown>
+
+const halves: Record<BuiltinPluginId, HalfLoader> = {
+  // Each package's main entry is the Node-facing ESM build; the browser
+  // artifact (`./client`) is a closure factory the page loads separately.
+  'slots': () => import('diorama-plugin-slots'),
+  'layout': () => import('diorama-plugin-layout'),
+  'file-tree': () => import('diorama-plugin-file-tree'),
+  'tabs': () => import('diorama-plugin-tabs'),
+  'renderer-registry': () => import('diorama-plugin-renderer-registry'),
+  'plaintext': () => import('diorama-plugin-plaintext'),
+}
+
+/** Resolve the server-half module of one plugin id. */
+export async function loadServerHalf(id: string): Promise<unknown> {
+  const load = (halves as Record<string, HalfLoader | undefined>)[id]
+  return load === undefined ? undefined : await load()
+}
+
+/** Every id this build carries a server half for. */
+export function assembledPluginIds(): string[] {
+  return Object.keys(halves)
+}

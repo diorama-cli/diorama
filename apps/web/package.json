@@ -1,0 +1,37 @@
+{
+  "name": "diorama-web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Diorama web shell: mounts the client kernel and draws its root seat",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "playwright test"
+  },
+  "dependencies": {
+    "cordis": "4.0.0-rc.11",
+    "diorama-kernel": "workspace:*",
+    "diorama-plugin-file-tree": "workspace:*",
+    "diorama-plugin-layout": "workspace:*",
+    "diorama-plugin-plaintext": "workspace:*",
+    "diorama-plugin-renderer-registry": "workspace:*",
+    "diorama-plugin-slots": "workspace:*",
+    "diorama-plugin-tabs": "workspace:*",
+    "diorama-ui": "workspace:*",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "diorama-plugin-slots": "workspace:*",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.4"
+  }
+}

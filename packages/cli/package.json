@@ -1,0 +1,39 @@
+{
+  "name": "diorama-cli",
+  "version": "0.0.1-m0",
+  "private": true,
+  "description": "diorama CLI: serve one directory in the foreground",
+  "type": "module",
+  "bin": {
+    "diorama": "./bin/diorama"
+  },
+  "files": [
+    "bin",
+    "lib",
+    "web"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit && tsdown",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "cordis": "4.0.0-rc.11",
+    "diorama-kernel": "workspace:*",
+    "diorama-plugin-file-tree": "workspace:*",
+    "diorama-plugin-layout": "workspace:*",
+    "diorama-plugin-plaintext": "workspace:*",
+    "diorama-plugin-renderer-registry": "workspace:*",
+    "diorama-plugin-slots": "workspace:*",
+    "diorama-plugin-tabs": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "diorama-plugin-file-tree": "workspace:*",
+    "diorama-plugin-layout": "workspace:*",
+    "diorama-plugin-plaintext": "workspace:*",
+    "diorama-plugin-slots": "workspace:*",
+    "diorama-plugin-tabs": "workspace:*",
+    "tsdown": "^0.23.1",
+    "typescript": "^5.9.3"
+  }
+}

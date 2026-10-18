@@ -1,0 +1,14 @@
+{
+  // Declaration-only emit: the runtime JS is bundled by tsdown, but ambient
+  // module augmentations (`declare module 'cordis'`) must survive into the
+  // package's types, which a JS-bundling dts pass drops.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "declarationMap": true,
+    "rootDir": "src",
+    "outDir": "lib/types"
+  }
+}

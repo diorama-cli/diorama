@@ -1,0 +1,52 @@
+{
+  "name": "diorama-plugin-tabs",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Diorama piece: single-tab content area (open / switch, never edit)",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "./lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.mjs"
+    },
+    "./client": {
+      "default": "./lib/client.cjs"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "src"
+  ],
+  "diorama": {
+    "contract": ">=0.1 <0.2",
+    "id": "tabs",
+    "client": {
+      "entry": "./lib/client.cjs"
+    }
+  },
+  "scripts": {
+    "build": "vite build && tsc -p tsconfig.emit.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "cordis": "4.0.0-rc.11",
+    "diorama-kernel": "workspace:*",
+    "react": "^19.3.1"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "diorama-plugin-slots": "workspace:*",
+    "diorama-ui": "workspace:*",
+    "tsdown": "^0.23.1",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.4"
+  }
+}
