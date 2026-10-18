@@ -23,6 +23,11 @@ import type { SlotEntry, SlotName } from 'diorama-plugin-slots'
 
 /** What components need from the page: services plus the mount handle. */
 export interface KernelContextValue {
+  /** Read-only view of any seat's entries (not only the ones a component owns). */
+  registry?: {
+    entriesOf(name: string, key?: string): readonly unknown[]
+    all(): readonly unknown[]
+  }
   /** Read-only slot observation (entries, failures). */
   views: {
     subscribe(listener: () => void): () => void
@@ -62,6 +67,16 @@ function pageBridge(): PageBridge {
 /** Whether a page bridge exists yet (safe during module evaluation). */
 export function isPageBooted(): boolean {
   return (globalThis as unknown as { __diorama_page__?: PageBridge }).__diorama_page__ !== undefined
+}
+
+/**
+ * Entries of one seat, re-read on every page-state change. Unlike `Slot`, this
+ * does not render: a component that *declares* a seat uses it to inspect what
+ * others registered there (e.g. the renderer dispatcher).
+ */
+export function useSeat(name: string, key?: string): readonly unknown[] {
+  usePageVersion()
+  return pageBridge().getKernel()?.registry?.entriesOf(name, key) ?? []
 }
 
 /** The page kernel, re-reading on every page-state change. */
@@ -151,6 +166,41 @@ function seatSnapshot(name: string, key: string | undefined): SeatSnapshot {
   const next: SeatSnapshot = { version, entries: views.entries(name as never, key) }
   seats.set(seat, next)
   return next
+}
+
+/**
+ * Bind every own function of a service object to itself.
+ *
+ * Client halves are separate builds: a consumer in another build receives the
+ * service through Cordis and may call its methods detached from the object
+ * (`const open = ctx.tabs.open`). Binding at provision time makes the service
+ * behave the same in every build (docs/m0/spec.md §11.3 rule 3).
+ */
+export function bindMethods<T extends object>(service: T): T {
+  for (const key of Object.keys(service) as (keyof T)[]) {
+    const value = service[key] as unknown
+    if (typeof value !== 'function') continue
+    ;(service as Record<keyof T, unknown>)[key] = (value as (...args: never[]) => unknown).bind(service)
+  }
+  return service
+}
+
+/** The `ctx.slots` face as a half sees it (structural: no Cordis import here). */
+interface SlotsFace {
+  register(registration: unknown, component: unknown): () => void
+}
+
+/**
+ * Register one slot entry.
+ *
+ * Always call through the service object (`ctx.slots`), never through a class
+ * method that may have arrived detached: each client half carries its own build
+ * of the registry, and a lost `this` would register into another registry —
+ * silently (docs/m0/spec.md §11.3, contract.md §8).
+ */
+export function provideEntry<T>(ctx: { slots: SlotsFace }, registration: T, component: unknown): () => void {
+  const slots = ctx.slots
+  return slots.register(registration, component)
 }
 
 /** Format an unknown throwable for display. */

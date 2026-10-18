@@ -14,10 +14,24 @@
 import type { Context } from 'cordis'
 import type { MountHandle } from './mount.ts'
 
+/**
+ * Read-only view of the seat table: every registered entry of a seat. The
+ * `slots` piece provides the registry; the kernel publishes it here so a
+ * component that declares a seat can read it back (the dispatcher needs the
+ * entries of the seat it draws, contract.md §5).
+ */
+export interface KernelSlotRegistry {
+  entriesOf(name: string, key?: string): readonly unknown[]
+  /** Every entry of every seat, in total order (dispatcher seats). */
+  all(): readonly unknown[]
+}
+
 /** What components need from the page: services plus the mount handle. */
 export interface KernelContextValue {
   /** Read-only slot observation (entries, failures). */
   views: KernelViews
+  /** The seat table (optional: absent only when the boot graph has no `slots`). */
+  registry?: KernelSlotRegistry
   /** The page's Cordis context, for services other pieces provide. */
   ctx: Context
   /** The page handle (`mountCtx`). */

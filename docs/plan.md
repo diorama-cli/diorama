@@ -39,9 +39,14 @@
 - **`ctx.fs` 的 RPC 用最土的方式**：一个 `/api/fs/list` 与 `/api/fs/read` 的 HTTP 接口，不做自动代理。自动代理在 M1 设计。
 - **不引入 zod**：M0 只有内置插件，编译期类型足够；外部插件的运行时校验在 M1 随动态加载一起做。
 
-## M1：插件内核成型
+## M1：插件内核成型 ✅ 已完成（2026-10-18）
 
-**演示脚本**：把一个 `markdown` 插件从 `~/.diorama/plugins` 目录里**动态加载**进来，浏览器里 `.md` 文件渲染成 HTML；删除该插件后回退到 plaintext。
+> 实施记录见 [m1/spec.md](m1/spec.md)。**范围调整（用户决定）**：外部插件
+> （`~/.diorama/plugins` 动态加载、npm source、zod 运行时校验）整体推迟到最后一个
+> 里程碑，契约位保留（contract.md §9）；M1 的「动态加载」只保留浏览器 Loader /
+> 模块表，且演示脚本改为「去掉 markdown 回退 plaintext」（`--plugins`）。
+
+**原演示脚本**：把一个 `markdown` 插件从 `~/.diorama/plugins` 目录里**动态加载**进来，浏览器里 `.md` 文件渲染成 HTML；删除该插件后回退到 plaintext。
 
 | 部分 | 做 |
 |---|---|

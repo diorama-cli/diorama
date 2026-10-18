@@ -166,9 +166,24 @@ importers:
 
   .:
     devDependencies:
+      '@types/dompurify':
+        specifier: ^3.2.0
+        version: 3.2.0
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5
+      '@types/ws':
+        specifier: ^8.18.2
+        version: 8.18.2
+      dompurify:
+        specifier: ^3.4.17
+        version: 3.4.17
+      highlight.js:
+        specifier: ^11.12.0
+        version: 11.12.0
+      marked:
+        specifier: ^18.1.1
+        version: 18.1.1
       rolldown:
         specifier: ^1.2.14
         version: 1.2.14
@@ -178,6 +193,9 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
+      ws:
+        specifier: ^8.22.0
+        version: 8.22.0
 
   apps/web:
     dependencies:
@@ -187,12 +205,18 @@ importers:
       diorama-kernel:
         specifier: workspace:*
         version: link:../../packages/kernel
+      diorama-plugin-code:
+        specifier: workspace:*
+        version: link:../../packages/plugins/code
       diorama-plugin-file-tree:
         specifier: workspace:*
         version: link:../../packages/plugins/file-tree
       diorama-plugin-layout:
         specifier: workspace:*
         version: link:../../packages/plugins/layout
+      diorama-plugin-markdown:
+        specifier: workspace:*
+        version: link:../../packages/plugins/markdown
       diorama-plugin-plaintext:
         specifier: workspace:*
         version: link:../../packages/plugins/plaintext
@@ -245,12 +269,18 @@ importers:
       diorama-kernel:
         specifier: workspace:*
         version: link:../kernel
+      diorama-plugin-code:
+        specifier: workspace:*
+        version: link:../plugins/code
       diorama-plugin-file-tree:
         specifier: workspace:*
         version: link:../plugins/file-tree
       diorama-plugin-layout:
         specifier: workspace:*
         version: link:../plugins/layout
+      diorama-plugin-markdown:
+        specifier: workspace:*
+        version: link:../plugins/markdown
       diorama-plugin-plaintext:
         specifier: workspace:*
         version: link:../plugins/plaintext
@@ -295,6 +325,52 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
+
+  packages/plugins/code:
+    dependencies:
+      cordis:
+        specifier: 4.0.0-rc.11
+        version: 4.0.0-rc.11
+      diorama-kernel:
+        specifier: workspace:*
+        version: link:../../kernel
+      highlight.js:
+        specifier: ^11.12.0
+        version: 11.12.0
+      react:
+        specifier: ^19.3.1
+        version: 19.3.1
+    devDependencies:
+      '@types/react':
+        specifier: ^19.3.0
+        version: 19.3.0
+      '@vitejs/plugin-react':
+        specifier: ^6.1.2
+        version: 6.1.2(vite@8.3.4(@types/node@26.6.5))
+      diorama-plugin-file-tree:
+        specifier: workspace:*
+        version: link:../file-tree
+      diorama-plugin-layout:
+        specifier: workspace:*
+        version: link:../layout
+      diorama-plugin-renderer-registry:
+        specifier: workspace:*
+        version: link:../renderer-registry
+      diorama-plugin-slots:
+        specifier: workspace:*
+        version: link:../slots
+      diorama-plugin-tabs:
+        specifier: workspace:*
+        version: link:../tabs
+      diorama-ui:
+        specifier: workspace:*
+        version: link:../../ui
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vite:
+        specifier: ^8.3.4
+        version: 8.3.4(@types/node@26.6.5)
 
   packages/plugins/file-tree:
     dependencies:
@@ -357,6 +433,52 @@ importers:
       tsdown:
         specifier: ^0.23.1
         version: 0.23.1(typescript@5.9.3)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vite:
+        specifier: ^8.3.4
+        version: 8.3.4(@types/node@26.6.5)
+
+  packages/plugins/markdown:
+    dependencies:
+      cordis:
+        specifier: 4.0.0-rc.11
+        version: 4.0.0-rc.11
+      diorama-kernel:
+        specifier: workspace:*
+        version: link:../../kernel
+      marked:
+        specifier: ^18.1.1
+        version: 18.1.1
+      react:
+        specifier: ^19.3.1
+        version: 19.3.1
+    devDependencies:
+      '@types/react':
+        specifier: ^19.3.0
+        version: 19.3.0
+      '@vitejs/plugin-react':
+        specifier: ^6.1.2
+        version: 6.1.2(vite@8.3.4(@types/node@26.6.5))
+      diorama-plugin-file-tree:
+        specifier: workspace:*
+        version: link:../file-tree
+      diorama-plugin-layout:
+        specifier: workspace:*
+        version: link:../layout
+      diorama-plugin-renderer-registry:
+        specifier: workspace:*
+        version: link:../renderer-registry
+      diorama-plugin-slots:
+        specifier: workspace:*
+        version: link:../slots
+      diorama-plugin-tabs:
+        specifier: workspace:*
+        version: link:../tabs
+      diorama-ui:
+        specifier: workspace:*
+        version: link:../../ui
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -664,6 +786,10 @@ packages:
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
 
+  '@types/dompurify@3.2.0':
+    resolution: {integrity: sha512-Fgg31wv9QbLDA0SpTOXO3MaxySc4DKGLi8sna4/Utjo4r3ZRPdCt4UQee8BWr+Q5z21yifghREPJGYaEOEIACg==}
+    deprecated: This is a stub types definition. dompurify provides its own type definitions, so you do not need this installed.
+
   '@types/node@26.6.5':
     resolution: {integrity: sha512-uMzsv9stDdofIZBx4UGh4Z9ZgXnGC9seRDscilBcTHAeOFk67MZg/k9bWVfO+bk4qZmG+l52hRnLwUiH2LnJTg==}
 
@@ -674,6 +800,12 @@ packages:
 
   '@types/react@19.3.0':
     resolution: {integrity: sha512-N0rFCuH9YoxG9/m61l9MfpJKfmLOVU0em7ipIz6TRgSSkvReLB9vL85GB+yr8Bs5leqpvg96JSwF4ZS1s4viQg==}
+
+  '@types/trusted-types@2.0.7':
+    resolution: {integrity: sha512-ScaPdn1dQczgbl0QFTeTOmVHFULt394XJgOQNoyVhZ6r2vLnMLJfBPd53SB52T/3G36VI1/g2MZaX0cwDuXsfw==}
+
+  '@types/ws@8.18.2':
+    resolution: {integrity: sha512-67MQl+fpWKVTT1NYdnmo3U4sc/xPo/zQBncVnI74qmQa0z/b+1g6iYqNmGCPbxO+zz2aklb08a0oHfegiVd0/w==}
 
   '@vitejs/plugin-react@6.1.2':
     resolution: {integrity: sha512-fhJNGUdscQa4HkI0xFxwonWyhnVReCPDbXI7FH7jmzpnVCrFQI7PRrhWecO263610vOrs9tr2Y4xcf8uAdFxbw==}
@@ -789,6 +921,9 @@ packages:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
 
+  dompurify@3.4.17:
+    resolution: {integrity: sha512-B/pSlYVHQ58kqISD/yDjuJ1yfzI34m1gF4lAod2bwSRhiN4K5Cl3H8Af7hqB2PmTL911tdEudnnXn5FnhRoz0w==}
+
   dts-resolver@3.0.0:
     resolution: {integrity: sha512-1T1f+z+4tl9XD+m+0HBgWoL/nm0bOIffyWaUuUSBlFg/86IWvfx+wjNaO/ybU0AJzG9/Mi5hBUgGV6zCmWEN7Q==}
     engines: {node: ^22.18.0 || >=24.0.0}
@@ -819,6 +954,10 @@ packages:
   get-tsconfig@5.0.0-beta.6:
     resolution: {integrity: sha512-X6fBC0pmImC70gvX2zm56go9hx0MyoGVdG0tUCkg/D+Xnh5TJsOZ7iDbOdI3PvmtrDxnu1YdDufpK2QJX1Meqw==}
     engines: {node: '>=20.20.0'}
+
+  highlight.js@11.12.0:
+    resolution: {integrity: sha512-nbfWpyRMcMrPMmDwJB+dhX/eiaPKtc2RB+0QZskqJ3WjRA/FDS0e9hZrx8EC/lbEv8gXy98FcDbNa/dspAaJMg==}
+    engines: {node: '>=12.0.0'}
 
   hookable@6.1.2:
     resolution: {integrity: sha512-+abwxtiEA52GCVIsQqut3S/uKTbUwYIp4Pe/vv+6py5XiXBCqMZHg6pA6Y5qhgLSEys0/cYuPbO0z1QFj5ZCmg==}
@@ -899,6 +1038,11 @@ packages:
   lightningcss@1.33.0:
     resolution: {integrity: sha512-WkUDrojuJs0xkgGf2udWxa3yGBRxPtxUkB79i6aCZLRgc7PM8fZe9TosfPDcvEpQZbuFASnHYmRLBLUbmLOIIA==}
     engines: {node: '>= 12.0.0'}
+
+  marked@18.1.1:
+    resolution: {integrity: sha512-zEGgrtUG8crk+TrMacJSVABU4DYDDkS8uqgU3ohrn/2fW9C2AEfUrO3m6IhpIpQpl7YcVpiXXC9cSMWDANT3dg==}
+    engines: {node: '>= 20'}
+    hasBin: true
 
   nanoid@3.3.20:
     resolution: {integrity: sha512-uKdg2G3GNCKQn9byYOpxbGqrT2fGO5KRt5J/8b3pok8rT6qxGWF6hxMyJiEYtAf+FVyYuD9hRaDqX5uPFYJ4ZQ==}
@@ -1083,6 +1227,18 @@ packages:
       yaml:
         optional: true
 
+  ws@8.22.0:
+    resolution: {integrity: sha512-Ydggc987+RO0AnWtZ/7Wq9FtNvcrL1b/RO0ud9mWjUPgDrsAAwQSF51sm2hm1XofbU/4jkpGEsLFsZZxU+1DOg==}
+    engines: {node: '>=10.0.0'}
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: '>=5.0.2'
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
+        optional: true
+
   yuku-ast@0.19.0:
     resolution: {integrity: sha512-PyCsiScaelhxBGzL8dyeJkLqvRZycoh78R31Vrt/WqYrm0hMFoKwIw/X7Dx5mBKLWAMlV9I9HEyBOHnj2gZVyw==}
     engines: {node: '>=14.18.0'}
@@ -1160,6 +1316,10 @@ snapshots:
 
   '@standard-schema/spec@1.1.0': {}
 
+  '@types/dompurify@3.2.0':
+    dependencies:
+      dompurify: 3.4.17
+
   '@types/node@26.6.5':
     dependencies:
       undici-types: 8.9.0
@@ -1171,6 +1331,13 @@ snapshots:
   '@types/react@19.3.0':
     dependencies:
       csstype: 3.2.3
+
+  '@types/trusted-types@2.0.7':
+    optional: true
+
+  '@types/ws@8.18.2':
+    dependencies:
+      '@types/node': 26.6.5
 
   '@vitejs/plugin-react@6.1.2(vite@8.3.4(@types/node@26.6.5))':
     dependencies:
@@ -1230,6 +1397,10 @@ snapshots:
 
   detect-libc@2.1.2: {}
 
+  dompurify@3.4.17:
+    optionalDependencies:
+      '@types/trusted-types': 2.0.7
+
   dts-resolver@3.0.0: {}
 
   empathic@2.1.0: {}
@@ -1244,6 +1415,8 @@ snapshots:
   get-tsconfig@5.0.0-beta.6:
     dependencies:
       resolve-pkg-maps: 1.0.0
+
+  highlight.js@11.12.0: {}
 
   hookable@6.1.2: {}
 
@@ -1297,6 +1470,8 @@ snapshots:
       lightningcss-linux-x64-musl: 1.33.0
       lightningcss-win32-arm64-msvc: 1.33.0
       lightningcss-win32-x64-msvc: 1.33.0
+
+  marked@18.1.1: {}
 
   nanoid@3.3.20: {}
 
@@ -1423,6 +1598,8 @@ snapshots:
     optionalDependencies:
       '@types/node': 26.6.5
       fsevents: 2.3.3
+
+  ws@8.22.0: {}
 
   yuku-ast@0.19.0:
     dependencies:

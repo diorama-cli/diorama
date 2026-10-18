@@ -33,7 +33,12 @@ interface HalfRegistration {
   factory: (require: (specifier: string) => unknown) => Record<string, unknown>
 }
 
-/** The platform words a half may require; everything else it carries itself. */
+/**
+ * The page's module table (contract.md §8): the only modules a half may
+ * `require`. Both React specifiers are here — halves use the JSX runtime *and*
+ * React itself (error boundaries need `React.Component`), and the page keeps
+ * exactly one copy of each.
+ */
 const PLATFORM: Record<string, unknown> = {
   'react': React,
   'react/jsx-runtime': ReactJsxRuntime,

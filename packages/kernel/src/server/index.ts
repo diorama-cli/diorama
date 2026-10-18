@@ -1,30 +1,49 @@
-/** Type-only re-exports: the kernel package root is `src/types.ts`. */
-export type { FileInfo, RelPath, TabInfo } from '../shared/types.ts'
-export type { FsErrorCode } from '../shared/errors.ts'
+/** Server-side entry of the kernel (`diorama-kernel/server`). */
+export type { FsWatchEvent, FileInfo, RelPath, TabInfo } from '../shared/types.ts'
+export type { ErrorCode, FsErrorCode, RpcErrorCode } from '../shared/errors.ts'
+export type { FileMatcher, FileRendererProps } from '../shared/matcher.ts'
+export type { DescribedService, MethodDescriptor, RpcRequest, RpcResponse } from '../shared/rpc.ts'
 
-export { KERNEL_NAME, CONTRACT_VERSION } from '../contract.ts'
-export { fsError, FS_HTTP_STATUS } from '../shared/errors.ts'
+export { CONTRACT_RANGE, CONTRACT_VERSION, KERNEL_NAME } from '../contract.ts'
+export { codedError, fsError, isErrorCode, rpcError } from '../shared/errors.ts'
+export { extensionOf, mimeOf } from '../shared/mime.ts'
+export { explainMismatch, parseRange, satisfies } from '../shared/semver.ts'
 
-export { FsService, MAX_TEXT_BYTES, resolveInside } from './fs.ts'
-export { HttpError, ManifestError, PluginLoadError, type PluginManifest } from './errors.ts'
-export { readManifest } from './manifest.ts'
+export { FsService, fsHalf, MAX_BINARY_BYTES, MAX_TEXT_BYTES, resolveInside } from './fs.ts'
+export {
+  ContractMismatchError,
+  HttpError,
+  ManifestError,
+  PluginLoadError,
+  type PluginManifest,
+} from './errors.ts'
+export { readManifest, type ReadManifestOptions } from './manifest.ts'
 export {
   BUILTIN_PLUGIN_IDS,
+  BuiltinSource,
   PLUGIN_PREFIX,
   builtinPackageJson,
+  builtinSource,
   isBuiltinPluginId,
   kernelPackageDir,
   planPlugins,
   type BootManifest,
   type BuiltinPluginId,
   type PluginPlan,
+  type PluginSource,
 } from './plan.ts'
-export { createMountServer, listen, type MountOptions } from './http.ts'
+export { createMountServer, listen, type MountOptions, type MountServer } from './http.ts'
+export { createDispatcher, handleFrame, RpcChannel, RPC_PATH, type RpcDispatcher } from './rpc.ts'
 export {
   bootPlugins,
+  createMounts,
   describePlugin,
   loadPlugins,
   pluginProblem,
+  type DioramaFace,
+  type LoadPluginsResult,
+  type MountInfo,
+  type Mounts,
   type PluginFailure,
   type ServerTree,
 } from './plugins.ts'

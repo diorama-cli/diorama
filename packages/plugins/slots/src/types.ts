@@ -11,7 +11,7 @@
  *   renders the seat already holds `mountCtx`.
  */
 import type { ComponentType } from 'react'
-import type { FileInfo, MountHandle, TabInfo } from 'diorama-kernel'
+import type { FileInfo, FileMatcher, MountHandle, TabInfo } from 'diorama-kernel'
 
 /** How the entries of one slot combine. */
 export type SlotKind = 'single' | 'keyed' | 'list'
@@ -19,6 +19,22 @@ export type SlotKind = 'single' | 'keyed' | 'list'
 /** Runtime declaration a parent entry makes for each child slot it renders. */
 export interface SlotSpec {
   kind: SlotKind
+}
+
+/** A `file.renderer` entry's claim on a file (contract.md §5.1). */
+export interface MatchedSlotSpec extends SlotSpec {
+  matcher?: FileMatcher
+}
+
+/** Props one `file.renderer` entry receives (contract.md §5.1). */
+export interface FileRendererProps {
+  file: FileInfo
+  /** The kernel's pre-read text (absent for binary or oversized files). */
+  text?: string
+  /** The kernel's pre-read bytes (present when the file is not text). */
+  bytes?: Uint8Array
+  /** MIME type inferred from the path (contract.md §5.1). */
+  mime: string
 }
 
 /** Slot names of contract.md §5, typed by their entry props. */
@@ -32,7 +48,7 @@ export interface SlotMap {
   /** Content area below the tab strip, declared by the `tabs` piece. */
   'tabs.content': { tab: TabInfo }
   /** Dispatch seat for file content, declared by `renderer-registry`. */
-  'file.renderer': { file: FileInfo; content: Uint8Array; mountCtx: MountHandle }
+  'file.renderer': FileRendererProps
 }
 
 export type SlotName = keyof SlotMap
@@ -50,6 +66,8 @@ export interface SlotEntry<K extends SlotName = SlotName> {
   /** Ascending; ties break on `id`. Default `100`. */
   order: number
   component: SlotComponent<K>
+  /** `file.renderer` only: how this entry claims a file (contract.md §5.1). */
+  matcher?: FileMatcher
 }
 
 /** Registration input for `ctx.slots.register`. */
@@ -61,6 +79,13 @@ export interface SlotRegistration<K extends SlotName = SlotName> {
   key?: string
   /** Ascending; ties break on `id` (localeCompare). Default `100`. */
   order?: number
+  /** `file.renderer` only: how this entry claims a file. Absent = fallback. */
+  matcher?: FileMatcher
+  /**
+   * Runtime props check for external entries (contract.md §10). Optional at the
+   * type level; the rule is enforced when external plugin sources land.
+   */
+  props?: unknown
   /** Child slots this entry's component renders and exclusively owns. */
   declare?: Partial<Record<SlotName, SlotSpec>>
 }

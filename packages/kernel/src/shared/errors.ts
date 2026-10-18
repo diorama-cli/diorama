@@ -1,6 +1,7 @@
 /**
  * Error codes of the fs service, shared by the server half (which raises them)
- * and the client half (which surfaces them to plugins and components).
+ * and the client half (which surfaces them to plugins and components)
+ * (contract.md §3.1), plus the codes the RPC channel itself raises (§4).
  */
 export type FsErrorCode =
   | 'EINVAL'
@@ -10,19 +11,14 @@ export type FsErrorCode =
   | 'EISDIR'
   | 'EOUTSIDE'
   | 'EBINARY'
+  | 'ETOOLARGE'
 
-/** Code → HTTP status for the M0 `/api/fs/*` transport. */
-export const FS_HTTP_STATUS: Record<FsErrorCode, number> = {
-  EINVAL: 400,
-  EIO: 500,
-  ENOENT: 404,
-  ENOTDIR: 400,
-  EISDIR: 400,
-  EOUTSIDE: 403,
-  EBINARY: 415,
-}
+/** Codes the RPC channel itself raises (contract.md §4). */
+export type RpcErrorCode = 'ESERVICE' | 'EMETHOD' | 'EBADREQUEST' | 'EDISCONNECTED'
 
-const MESSAGES: Record<FsErrorCode, string> = {
+export type ErrorCode = FsErrorCode | RpcErrorCode
+
+const MESSAGES: Record<ErrorCode, string> = {
   EINVAL: 'invalid path',
   EIO: 'cannot read the mounted directory',
   ENOENT: 'no such file or directory',
@@ -30,14 +26,34 @@ const MESSAGES: Record<FsErrorCode, string> = {
   EISDIR: 'is a directory',
   EOUTSIDE: 'path escapes the mount root',
   EBINARY: 'binary file',
+  ETOOLARGE: 'file is larger than the kernel limit',
+  ESERVICE: 'no such service (is the page connected?)',
+  EMETHOD: 'no such method on the service',
+  EBADREQUEST: 'malformed RPC request',
+  EDISCONNECTED: 'the page is not connected to the server',
 }
 
-/** Create an error with one of the kernel's fs codes. */
-export function fsError(code: FsErrorCode, message = MESSAGES[code], cause?: unknown): Error & {
-  code: FsErrorCode
+/** Whether a value is one of the kernel's error codes. */
+export function isErrorCode(code: unknown): code is ErrorCode {
+  return typeof code === 'string' && Object.hasOwn(MESSAGES, code)
+}
+
+/** Create an error carrying one of the kernel's codes. */
+export function codedError<C extends ErrorCode>(code: C, message = MESSAGES[code], cause?: unknown): Error & {
+  code: C
 } {
-  const error = new Error(`${code}: ${message}`) as Error & { code: FsErrorCode; cause?: unknown }
+  const error = new Error(`${code}: ${message}`) as Error & { code: C; cause?: unknown }
   error.code = code
   if (cause !== undefined) error.cause = cause
   return error
+}
+
+/** Create an `ctx.fs` error (`EINVAL`, `EBINARY`, …). */
+export function fsError(code: FsErrorCode, message = MESSAGES[code], cause?: unknown): Error & { code: FsErrorCode } {
+  return codedError(code, message, cause)
+}
+
+/** Create an RPC error (`ESERVICE`, `EMETHOD`, …). */
+export function rpcError(code: RpcErrorCode, message = MESSAGES[code]): Error & { code: RpcErrorCode } {
+  return codedError(code, message)
 }

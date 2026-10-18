@@ -22,7 +22,7 @@
     "src"
   ],
   "diorama": {
-    "contract": ">=0.1 <0.2",
+    "contract": ">=0.2 <0.3",
     "id": "slots",
     "client": {
       "entry": "./lib/client.cjs"

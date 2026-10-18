@@ -27,7 +27,7 @@
     "src"
   ],
   "diorama": {
-    "contract": "0.1",
+    "contract": "0.2",
     "id": "kernel"
   },
   "scripts": {

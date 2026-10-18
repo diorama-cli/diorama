@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url'
 import {
   BUILTIN_PLUGIN_IDS,
   bootPlugins,
+  createDispatcher,
   createMountServer,
   listen,
   planPlugins,
@@ -196,17 +197,38 @@ export async function main(argv: readonly string[], env: NodeJS.ProcessEnv = pro
   }
 
   // Server half: a real Cordis tree per served directory (architecture.md §11).
+  // `fs` is infrastructure on this side — it has no client half, so `--plugins`
+  // (a client-graph selection) can neither add nor remove it.
+  const serverIds = [...new Set(['fs', ...options.plugins])]
   const tree = await bootPlugins({
-    plugins: await selectPlugins(options.plugins, options.breakPlugin),
+    plugins: await selectPlugins(serverIds, options.breakPlugin),
     root,
     mountId,
   })
   const clientEntries = new Map(manifest.plugins.map(plugin => [plugin.id, plugin.clientEntry]))
 
-  const server = createMountServer(
-    { root, mountId, assetsRoot: assets, clientEntries },
+  // RPC (contract.md §4): services on the mount context are proxyable. Only
+  // services a plugin *provided* are exposed; `get` also finds built-in Cordis
+  // names (`logger`, …), which the allow-list below filters out.
+  const proxyable = (): Record<string, unknown> => {
+    const services: Record<string, unknown> = {}
+    for (const name of ['fs'] as const) {
+      const service = (tree.mount as unknown as { get(name: string): unknown }).get(name)
+      if (service !== undefined && typeof (service as { describe?: unknown }).describe === 'function') {
+        services[name] = service
+      }
+    }
+    return services
+  }
+  const mountServer = createMountServer({
+    root,
+    mountId,
+    assetsRoot: assets,
+    clientEntries,
+    dispatcher: createDispatcher(proxyable),
     manifest,
-  )
+  })
+  const server = mountServer.server
   let port: number
   try {
     port = await listen(server, options.host, options.port)
@@ -239,8 +261,7 @@ export async function main(argv: readonly string[], env: NodeJS.ProcessEnv = pro
     const shutdown = () => {
       process.off('SIGINT', shutdown)
       process.off('SIGTERM', shutdown)
-      server.closeAllConnections()
-      server.close(() => resolveShutdown())
+      void mountServer.close().then(resolveShutdown)
     }
     process.on('SIGINT', shutdown)
     process.on('SIGTERM', shutdown)

@@ -7,16 +7,23 @@
     "node": ">=22.12.0"
   },
   "scripts": {
-    "build": "pnpm --filter diorama-kernel run build && pnpm --filter diorama-plugin-slots run build && pnpm --filter diorama-ui run build && pnpm --filter diorama-plugin-renderer-registry run build && pnpm --filter diorama-plugin-plaintext run build && pnpm --filter diorama-plugin-layout run build && pnpm --filter diorama-plugin-file-tree run build && pnpm --filter diorama-plugin-tabs run build && pnpm --filter diorama-cli run build && pnpm --filter diorama-web run build",
+    "build": "pnpm --filter diorama-kernel run build && pnpm --filter diorama-plugin-slots run build && pnpm --filter diorama-ui run build && pnpm --filter diorama-plugin-renderer-registry run build && pnpm --filter diorama-plugin-plaintext run build && pnpm --filter diorama-plugin-markdown run build && pnpm --filter diorama-plugin-code run build && pnpm --filter diorama-plugin-layout run build && pnpm --filter diorama-plugin-file-tree run build && pnpm --filter diorama-plugin-tabs run build && pnpm --filter diorama-cli run build && pnpm --filter diorama-web run build",
     "cli": "node packages/cli/bin/diorama",
     "demo": "node packages/cli/bin/diorama .diorama-verify",
     "test": "pnpm --filter diorama-web run test",
-    "typecheck": "pnpm -r run typecheck"
+    "typecheck": "pnpm -r run typecheck",
+    "test:unit": "node --test --experimental-transform-types \"packages/kernel/test/*.test.ts\" \"packages/plugins/slots/test/*.test.ts\""
   },
   "devDependencies": {
+    "@types/dompurify": "^3.2.0",
     "@types/node": "^26.6.5",
+    "@types/ws": "^8.18.2",
+    "dompurify": "^3.4.17",
+    "highlight.js": "^11.12.0",
+    "marked": "^18.1.1",
     "rolldown": "^1.2.14",
     "tsdown": "^0.23.1",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "ws": "^8.22.0"
   }
 }

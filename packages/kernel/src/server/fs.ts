@@ -1,12 +1,19 @@
 /**
  * `ctx.fs` server half: the only path by which a plugin reaches disk
- * (architecture.md §8, contract.md §3.1). Read-only by construction — there
- * is no write method to call.
+ * (architecture.md §8, contract.md §3.1). Read-only by construction — there is
+ * no write method to call.
+ *
+ * This is a *service plugin* (contract.md §2.5): `apply` runs once on the root
+ * context and registers `FsService` per mount through `ctx.diorama.mounts`, so
+ * an external server half would plug in the same way. `describe()` lists the
+ * methods the RPC channel may proxy (contract.md §4).
  */
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 import { fsError } from '../shared/errors.ts'
-import type { FileInfo, RelPath } from '../shared/types.ts'
+import type { MethodDescriptor } from '../shared/rpc.ts'
+import type { FileInfo, FsWatchEvent, RelPath } from '../shared/types.ts'
+import type { Mounts } from './plugins.ts'
 
 declare module 'cordis' {
   interface Context {
@@ -15,8 +22,11 @@ declare module 'cordis' {
   }
 }
 
-/** Files up to this size are decoded as UTF-8 by `readText`. */
+/** Files up to this size are decoded as UTF-8 by `readText` (contract.md §3.1). */
 export const MAX_TEXT_BYTES = 8 * 1024 * 1024
+
+/** Files up to this size may be fetched as bytes by `readBytes` (contract.md §3.1). */
+export const MAX_BINARY_BYTES = 32 * 1024 * 1024
 
 /**
  * Normalise a plugin-supplied relative path and prove it stays inside the
@@ -49,9 +59,21 @@ function childPath(parent: RelPath, name: string): RelPath {
   return parent === '' ? name : `${parent}/${name}`
 }
 
+/** Build the kernel's `FileInfo` from a stat result. */
+function toFileInfo(path: RelPath, name: string, kind: FileInfo['kind'], size: number, mtime: number): FileInfo {
+  return { path, name, kind, size: kind === 'file' ? size : 0, mtime }
+}
+
+const METHODS: MethodDescriptor[] = [
+  { name: 'list', arity: 1 },
+  { name: 'stat', arity: 1 },
+  { name: 'readText', arity: 1 },
+  { name: 'readBytes', arity: 1 },
+]
+
 /**
  * Read-only file access rooted at one mounted directory.
- * Instances are created per mount in the mount's fork context (contract.md §2.5).
+ * Instances are created per mount (contract.md §2.5).
  */
 export class FsService {
   /** Absolute mount root. Immutable once constructed. */
@@ -61,16 +83,14 @@ export class FsService {
     this.root = resolve(root)
   }
 
+  /** The methods the RPC channel may proxy (contract.md §4). */
+  describe(): MethodDescriptor[] {
+    return METHODS
+  }
+
   /** List one directory, one level deep, unsorted. `path` defaults to the root. */
   async list(path: RelPath = ''): Promise<FileInfo[]> {
     const abs = resolveInside(this.root, path)
-    let info
-    try {
-      info = await stat(abs)
-    } catch (error) {
-      mapNodeError(error)
-    }
-    if (!info.isDirectory()) throw fsError('ENOTDIR')
     let dirents
     try {
       dirents = await readdir(abs, { withFileTypes: true })
@@ -84,13 +104,7 @@ export class FsService {
           const childInfo = await stat(childAbs)
           const kind = childInfo.isDirectory() ? 'dir' : childInfo.isFile() ? 'file' : undefined
           if (kind === undefined) return undefined // sockets, fifos, devices: not browsable
-          return {
-            path: childPath(path, dirent.name),
-            name: dirent.name,
-            kind,
-            size: kind === 'file' ? childInfo.size : 0,
-            mtime: childInfo.mtimeMs,
-          }
+          return toFileInfo(childPath(path, dirent.name), dirent.name, kind, childInfo.size, childInfo.mtimeMs)
         } catch {
           return undefined // vanished between readdir and stat
         }
@@ -99,31 +113,87 @@ export class FsService {
     return entries.filter((entry): entry is FileInfo => entry !== undefined)
   }
 
-  /** Read raw bytes of one file. */
+  /** One path's info; same shape as a `list` element (contract.md §3.1). */
+  async stat(path: RelPath): Promise<FileInfo> {
+    const abs = resolveInside(this.root, path)
+    const info = await this.statsOf(abs)
+    const name = path === '' ? '' : path.slice(path.lastIndexOf('/') + 1)
+    return toFileInfo(path, name, info.isDirectory() ? 'dir' : 'file', info.size, info.mtimeMs)
+  }
+
+  /**
+   * Read raw bytes of one file. Larger than `MAX_BINARY_BYTES` → `ETOOLARGE`
+   * (the size is checked before reading).
+   */
   async readBytes(path: RelPath): Promise<Uint8Array> {
     const abs = resolveInside(this.root, path)
+    const info = await this.statsOf(abs)
+    if (info.isDirectory()) throw fsError('EISDIR')
+    if (info.size > MAX_BINARY_BYTES) {
+      throw fsError('ETOOLARGE', `${info.size} bytes exceeds the ${MAX_BINARY_BYTES} byte limit`)
+    }
     try {
-      const info = await stat(abs)
-      if (info.isDirectory()) throw fsError('EISDIR')
-      if (info.size > MAX_TEXT_BYTES) throw fsError('EIO', `file is larger than ${MAX_TEXT_BYTES} bytes`)
       return await readFile(abs)
     } catch (error) {
-      if (error instanceof Error && 'code' in error && typeof error.code === 'string' && error.code in {
-        EISDIR: 1, ENOENT: 1, ENOTDIR: 1,
-      }) throw error
       mapNodeError(error)
     }
   }
 
   /**
    * Read one file as UTF-8 text. Contents containing a NUL byte are refused as
-   * binary (decided 2026-10-18: show "binary file" instead of mojibake).
+   * binary (decided 2026-10-18: show "binary file" instead of mojibake), and a
+   * file above `MAX_TEXT_BYTES` is `ETOOLARGE`.
    */
   async readText(path: RelPath): Promise<string> {
-    const bytes = await this.readBytes(path)
+    const abs = resolveInside(this.root, path)
+    const info = await this.statsOf(abs)
+    if (info.isDirectory()) throw fsError('EISDIR')
+    if (info.size > MAX_TEXT_BYTES) {
+      throw fsError('ETOOLARGE', `${info.size} bytes exceeds the ${MAX_TEXT_BYTES} byte limit`)
+    }
+    let bytes: Uint8Array
+    try {
+      bytes = await readFile(abs)
+    } catch (error) {
+      mapNodeError(error)
+    }
     if (bytes.includes(0)) throw fsError('EBINARY')
     return new TextDecoder('utf-8', { fatal: false }).decode(bytes)
   }
+
+  /**
+   * Watch one path for changes (contract.md §3.1). The signature is final;
+   * events arrive from M2 (plan.md), so M1 returns the disposer and emits
+   * nothing rather than pretending to watch.
+   */
+  watch(_path: RelPath, _listener: (event: FsWatchEvent) => void): () => void {
+    return () => {}
+  }
+
+  private async statsOf(abs: string) {
+    try {
+      return await stat(abs)
+    } catch (error) {
+      mapNodeError(error)
+    }
+  }
 }
 
-export type { FileInfo } from '../shared/types.ts'
+/** The `fs` server half as a Cordis plugin object. */
+export const fsHalf = {
+  name: 'fs',
+  inject: ['diorama'],
+  /**
+   * Runs once on the root context; every mount gets its own `FsService`
+   * (contract.md §2.5). This is the shape an external server half plugs into.
+   */
+  apply(ctx: { diorama: { mounts: Mounts } }) {
+    // The registry the kernel publishes — never a module-local copy: this half
+    // is bundled into the CLI separately from the kernel's own code, and a
+    // second `createMounts()` would register on a mount nobody fires.
+    ctx.diorama.mounts.onMount((mountCtx, { root }) => {
+      ;(mountCtx as unknown as { provide(name: string, value: unknown): unknown }).provide('fs', new FsService(root))
+      return () => {}
+    })
+  },
+}

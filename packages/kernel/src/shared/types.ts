@@ -18,16 +18,25 @@ export interface FileInfo {
   mtime: number
 }
 
-/** An open tab. M0 keeps a single tab whose id is fixed. */
+/** An open tab. M0/M1 keep a single tab whose id is fixed. */
 export interface TabInfo {
   id: string
   file: FileInfo
 }
 
+/** A kernel-side file change notification (contract.md §3.1; emitted from M2). */
+export interface FsWatchEvent {
+  type: 'change' | 'add' | 'unlink'
+  path: RelPath
+}
+
+/** Bytes `probe` matchers may look at (contract.md §5.1). */
+export const PROBE_HEAD_BYTES = 4096
+
 /**
- * The page module table record (docs/m0/spec.md §10.3): a namespace object per
- * table specifier. The shell fills it; the server's virtual table modules read
- * it. Kept structural so the kernel needs no React dependency.
+ * The page module table record (docs/m0/spec.md §10.3, contract.md §8): a
+ * namespace object per table specifier. The shell fills it; the server's
+ * virtual table modules read it. Kept structural so the kernel needs no React.
  */
 export interface DioramaTableRecord {
   [specifier: string]: Record<string, unknown> | undefined

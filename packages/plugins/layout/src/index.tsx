@@ -13,7 +13,7 @@ import type { Context } from 'cordis'
 import type { MountHandle } from 'diorama-kernel'
 import type { ReactElement } from 'react'
 import { useSyncExternalStore } from 'react'
-import { Slot, useKernel } from 'diorama-ui'
+import { provideEntry, Slot, useKernel } from 'diorama-ui'
 
 export const name = 'layout'
 export const inject = ['slots']
@@ -98,5 +98,5 @@ function LayoutRoot(_props: LayoutRootProps) {
 }
 
 export function apply(ctx: Context) {
-  ctx.slots.register({ id: 'layout:root', name: 'root', order: 0, declare: DECLARE }, LayoutRoot)
+  provideEntry(ctx, { id: 'layout:root', name: 'root', order: 0, declare: DECLARE }, LayoutRoot)
 }

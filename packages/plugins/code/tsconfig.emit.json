@@ -1,0 +1,13 @@
+{
+  // Declaration-only emit (see the kernel's tsconfig.emit.json): tsdown bundles
+  // the runtime JS and drops ambient module augmentations from dts output.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "declarationMap": true,
+    "rootDir": "src",
+    "outDir": "lib/types"
+  }
+}

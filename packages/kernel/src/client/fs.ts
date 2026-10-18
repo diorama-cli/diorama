@@ -1,68 +1,48 @@
 /**
- * Client half of `ctx.fs` (docs/m0/spec.md §4): the browser-side face of the
- * per-mount fs service. It speaks the M0 HTTP transport (`/api/fs/*`); M1
- * replaces the transport behind this same method surface.
+ * Client half of `ctx.fs` (contract.md §3.1, §4): the browser-side face of the
+ * per-mount fs service, obtained through the automatic RPC proxy.
+ *
+ * Shapes are identical to the server service — `list`, `stat`, `readText`,
+ * `readBytes`, `watch` — so a plugin written against the server half keeps
+ * working in the browser. The M0 HTTP transport (`/api/fs/*`) is gone.
  */
-import { fsError, type FsErrorCode } from '../shared/errors.ts'
-import type { FileInfo, RelPath } from '../shared/types.ts'
+import type { FsWatchEvent, FileInfo, RelPath } from '../shared/types.ts'
+import type { RpcClient } from './rpc.ts'
+
+/** The proxyable methods of the server's `FsService`. */
+export const FS_METHODS = ['list', 'stat', 'readText', 'readBytes'] as const
 
 export interface FsClient {
   /** List one directory (one level), `path` defaults to the mount root. */
   list(path?: RelPath): Promise<FileInfo[]>
+  /** One path's info; same shape as a `list` element. */
+  stat(path: RelPath): Promise<FileInfo>
   /** Read a file as UTF-8 text; binary content rejects with `EBINARY`. */
   readText(path: RelPath): Promise<string>
-  /** Read a file's bytes; binary content rejects with `EBINARY`. */
+  /** Read a file's bytes; larger than the kernel limit rejects with `ETOOLARGE`. */
   readBytes(path: RelPath): Promise<Uint8Array>
+  /**
+   * Watch a path (contract.md §3.1). The signature is final; the transport for
+   * events arrives with M2, so this registers nothing and returns the disposer.
+   */
+  watch(path: RelPath, listener: (event: FsWatchEvent) => void): () => void
 }
 
-interface ErrorBody {
-  error?: { code?: string; message?: string }
-}
-
-async function failure(response: Response): Promise<never> {
-  let body: ErrorBody | undefined
-  try {
-    body = (await response.json()) as ErrorBody
-  } catch {
-    body = undefined
-  }
-  const code = body?.error?.code
-  if (code !== undefined && KNOWN_CODES.has(code)) {
-    throw fsError(code as FsErrorCode, body?.error?.message)
-  }
-  throw fsError('EIO', body?.error?.message ?? `HTTP ${response.status} ${response.statusText}`)
-}
-
-const KNOWN_CODES = new Set<string>([
-  'EINVAL', 'EIO', 'ENOENT', 'ENOTDIR', 'EISDIR', 'EOUTSIDE', 'EBINARY',
-])
-
-/** Marker the server sets on refused binary files. */
-export const BINARY_CODE = 'EBINARY' as const
-
-type ContentResponse = { path: string; encoding: 'utf-8'; text: string }
-
-/** Fetch the text contract of one file; returns raw text and bytes alike. */
-async function fetchText(base: string, path: RelPath): Promise<ContentResponse> {
-  const response = await fetch(`${base}/api/fs/read?path=${encodeURIComponent(path)}`)
-  if (!response.ok) await failure(response)
-  return (await response.json()) as ContentResponse
-}
-
-/** Create the fs face bound to one mount's base URL. */
-export function createFsClient(base: string): FsClient {
+/** Build the `mountCtx.fs` face over the RPC channel. */
+export function createFsClient(rpc: RpcClient): FsClient {
+  const remote = rpc.service<Omit<FsClient, 'watch'>>('fs', FS_METHODS)
   return {
-    async list(path = '') {
-      const response = await fetch(`${base}/api/fs/list?path=${encodeURIComponent(path)}`)
-      if (!response.ok) await failure(response)
-      const body = (await response.json()) as { entries: FileInfo[] }
-      return body.entries
-    },
-    async readText(path) {
-      return (await fetchText(base, path)).text
-    },
-    async readBytes(path) {
-      return new TextEncoder().encode((await fetchText(base, path)).text)
+    list: (path = '') => remote.list(path),
+    stat: path => remote.stat(path),
+    readText: path => remote.readText(path),
+    readBytes: path => remote.readBytes(path),
+    // Hooks into the same event channel the server will broadcast on in M2.
+    watch(path, listener) {
+      void path
+      void listener
+      return () => {}
     },
   }
 }
+
+export type { FileInfo, RelPath }

@@ -1,21 +1,22 @@
 /**
  * Single-directory HTTP server: static shell, the plugin boot graph, client
- * halves of the selected plugins, and the M0 fs transport.
+ * halves of the selected plugins, and the RPC upgrade endpoint.
  *
- * Deliberately minimal (plan.md M0): one directory, one port, loopback by
+ * Deliberately minimal (plan.md M1): one directory, one port, loopback by
  * default, no socket, no auth. Every request runs inside an error boundary so a
  * plugin bug becomes a 500 for that request instead of a process crash
- * (architecture.md §12, HTTP layer).
+ * (architecture.md §12, HTTP layer). File access is *not* an HTTP API any more:
+ * the M0 `/api/fs/*` routes are gone in favour of RPC (contract.md §4).
  */
 import { createReadStream } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { stat } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { basename, dirname, extname, join, normalize, resolve, sep } from 'node:path'
-import { FS_HTTP_STATUS, type FsErrorCode } from '../shared/errors.ts'
+import { isErrorCode } from '../shared/errors.ts'
 import { HttpError } from './errors.ts'
-import { FsService } from './fs.ts'
 import type { BootManifest } from './plan.ts'
+import { RpcChannel, type RpcDispatcher } from './rpc.ts'
 
 export interface MountOptions {
   /** Absolute root directory. */
@@ -25,6 +26,12 @@ export interface MountOptions {
   assetsRoot: string
   /** Plugin id → absolute path of the client-half bundle. */
   clientEntries: ReadonlyMap<string, string>
+  /** Where RPC calls land (contract.md §4). */
+  dispatcher: RpcDispatcher
+  /** The boot graph served at `/plugin.json`. */
+  manifest: BootManifest
+  /** Console sink. */
+  log?: (message: string) => void
 }
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -38,8 +45,19 @@ const CONTENT_TYPES: Record<string, string> = {
   '.woff2': 'font/woff2',
 }
 
-function isFsCode(code: unknown): code is FsErrorCode {
-  return typeof code === 'string' && code in FS_HTTP_STATUS
+/** Errors raised by services carry `code`; the HTTP layer answers with them. */
+const ERROR_STATUS: Record<string, number> = {
+  EINVAL: 400,
+  EBADREQUEST: 400,
+  ENOENT: 404,
+  ENOTDIR: 400,
+  EISDIR: 400,
+  EOUTSIDE: 403,
+  EBINARY: 415,
+  ETOOLARGE: 413,
+  EMETHOD: 404,
+  ESERVICE: 503,
+  EIO: 500,
 }
 
 /** Serve one file under `dir`; returns false when nothing matched. */
@@ -89,16 +107,8 @@ function sendError(res: ServerResponse, status: number, code: string, message: s
   sendJson(res, status, { error: { code, message } })
 }
 
-/** Read a required query parameter; a missing one is a malformed request. */
-function queryParam(url: URL, name: string): string {
-  const value = url.searchParams.get(name)
-  if (value === null) throw new HttpError(400, 'EBADREQUEST', `missing query parameter "${name}"`)
-  return value
-}
-
 async function handleRequest(
   options: MountOptions,
-  fs: FsService,
   manifest: BootManifest,
   req: IncomingMessage,
   res: ServerResponse,
@@ -111,24 +121,6 @@ async function handleRequest(
   const pathname = url.pathname
 
   switch (pathname) {
-    case '/api/fs/list':
-      sendJson(res, 200, { entries: await fs.list(queryParam(url, 'path')) })
-      return
-    case '/api/fs/read': {
-      const path = queryParam(url, 'path')
-      try {
-        const text = await fs.readText(path)
-        sendJson(res, 200, { path, encoding: 'utf-8', text })
-      } catch (error) {
-        const code = (error as { code?: unknown }).code
-        if (isFsCode(code)) {
-          sendError(res, FS_HTTP_STATUS[code], code, (error as Error).message)
-          return
-        }
-        throw error
-      }
-      return
-    }
     case '/plugin.json':
       sendJson(res, 200, manifest)
       return
@@ -137,6 +129,11 @@ async function handleRequest(
       // halves reach it through the global (docs/m0/spec.md §10.3).
       res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-store' })
       res.end(PAGE_BRIDGE_SCRIPT)
+      return
+    case '/__diorama__/rpc':
+      // WebSocket upgrades never reach here (the server handles them); a plain
+      // GET means someone tried to use the endpoint as an HTTP API.
+      sendError(res, 426, 'EBADREQUEST', 'the RPC endpoint only speaks WebSocket')
       return
     default:
       break
@@ -186,11 +183,20 @@ async function serveShell(assetsRoot: string, res: ServerResponse): Promise<bool
   return true
 }
 
-/** Create the per-directory HTTP server (not yet listening). */
-export function createMountServer(options: MountOptions, manifest: BootManifest): Server {
-  const fs = new FsService(options.root)
+export interface MountServer {
+  server: Server
+  channel: RpcChannel
+  /** Stop accepting, drop RPC peers, close. */
+  close(): Promise<void>
+}
+
+/** Create the per-directory HTTP server with its RPC channel (not yet listening). */
+export function createMountServer(options: MountOptions): MountServer {
+  const log = options.log ?? (message => console.error(`[mount:${options.mountId}] ${message}`))
+  const channel = new RpcChannel({ dispatcher: options.dispatcher, log })
+  const manifest = options.manifest
   const server = createServer((req, res) => {
-    handleRequest(options, fs, manifest, req, res).catch((error: unknown) => {
+    handleRequest(options, manifest, req, res).catch((error: unknown) => {
       if (res.headersSent) {
         res.destroy()
         return
@@ -200,16 +206,27 @@ export function createMountServer(options: MountOptions, manifest: BootManifest)
         return
       }
       const code = (error as { code?: unknown }).code
-      if (isFsCode(code)) {
-        sendError(res, FS_HTTP_STATUS[code], code, (error as Error).message)
+      if (isErrorCode(code)) {
+        sendError(res, ERROR_STATUS[code] ?? 500, code, (error as Error).message)
         return
       }
-      console.error(`[mount:${options.mountId}] request failed: ${req.method} ${req.url}`, error)
+      log(`request failed: ${req.method} ${req.url} ${error instanceof Error ? error.message : String(error)}`)
       sendError(res, 500, 'EIO', error instanceof Error ? error.message : String(error))
     })
   })
+  server.on('upgrade', (request, socket, head) => {
+    if (!channel.upgrade(request, socket, head)) socket.destroy()
+  })
   server.on('clientError', (_error, socket) => socket.destroy())
-  return server
+  return {
+    server,
+    channel,
+    async close() {
+      channel.close()
+      server.closeAllConnections()
+      await new Promise<void>(done => server.close(() => done()))
+    },
+  }
 }
 
 /** Listen on an explicit port; `EADDRINUSE` is surfaced to the caller. */

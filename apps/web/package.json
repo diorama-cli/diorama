@@ -22,7 +22,9 @@
     "diorama-plugin-tabs": "workspace:*",
     "diorama-ui": "workspace:*",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "react-dom": "^19.3.1",
+    "diorama-plugin-markdown": "workspace:*",
+    "diorama-plugin-code": "workspace:*"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",

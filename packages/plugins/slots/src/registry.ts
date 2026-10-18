@@ -8,6 +8,14 @@
  * the only entry allowed to render them. Registering into a seat nobody
  * declared fails loud — that is what stops a piece from silently drawing into
  * a seat its owner does not draw.
+ *
+ * Conflict rules (contract.md §3.3, v0.2 — three kinds, three answers):
+ * - a duplicate `id` **throws**: it is a programming error;
+ * - a second entry in a `single` seat, a keyed entry without `key`, an
+ *   undeclared seat, or a second declaration of a child seat is refused with a
+ *   warning (first wins);
+ * - several entries in the same `(name, key)` **coexist** as an ordered
+ *   fallback chain; an equal `order` is kept and broken by `id`, with a warning.
  */
 import {
   BUILTIN_SLOTS,
@@ -24,6 +32,14 @@ export type SlotOrder = (a: SlotEntry, b: SlotEntry) => number
 /** Default total order: ascending `order`, ties broken by `id`. */
 export const defaultSlotOrder: SlotOrder = (a, b) => a.order - b.order || a.id.localeCompare(b.id)
 
+/** Fails loud on a duplicate registration id (contract.md §3.3). */
+export class SlotConflictError extends Error {
+  constructor(readonly id: string) {
+    super(`slots.register: id "${id}" is already registered (ids are global; prefix with the plugin id)`)
+    this.name = 'SlotConflictError'
+  }
+}
+
 function seatKey(name: string, key: string | undefined): string {
   return key === undefined ? name : `${name}\u0000${key}`
 }
@@ -34,7 +50,6 @@ function seatKey(name: string, key: string | undefined): string {
  */
 interface StoredEntry extends SlotEntry {
   declarations: Partial<Record<SlotName, SlotSpec>>
-  parentSeat: string | undefined
 }
 
 export interface SlotRegistryOptions {
@@ -42,11 +57,18 @@ export interface SlotRegistryOptions {
   warn?: (message: string) => void
 }
 
+/** A registration waiting for the entry that declares its seat. */
+interface DeferredEntry {
+  registration: SlotRegistration
+  component: SlotComponent
+}
+
 export class SlotRegistry {
   private readonly entries = new Map<string, StoredEntry>()
   private readonly specs = new Map<string, SlotSpec>()
   private readonly declaredBy = new Map<string, string>()
   private readonly listeners = new Set<() => void>()
+  private readonly pending: DeferredEntry[] = []
   private order: SlotOrder = defaultSlotOrder
   private sorted = new Map<string, readonly SlotEntry[]>()
 
@@ -66,31 +88,39 @@ export class SlotRegistry {
    * Register one entry; returns its disposer.
    *
    * Kind is enforced from the declared seat: `single` allows one occupant,
-   * `keyed` requires `key`, `list` never rejects on count. A skipped
-   * registration (conflict or undeclared seat) returns a no-op disposer and is
-   * reported through `warn` — first registration wins, nothing is replaced.
+   * `keyed` requires `key`, `list` never rejects on count. A duplicate `id`
+   * throws ({@link SlotConflictError}); every other refusal returns a no-op
+   * disposer and is reported through `warn` — nothing is replaced silently.
    */
   register<K extends SlotName>(registration: SlotRegistration<K>, component: SlotComponent<K>): () => void {
+    const pending = this.pending.findIndex(item => item.registration.id === registration.id)
+    if (pending !== -1) this.pending.splice(pending, 1)
     const { id, name } = registration
     if (typeof id !== 'string' || id === '') throw new TypeError('slots.register: "id" must be a non-empty string')
-    if (this.entries.has(id)) {
-      this.warn(`duplicate id "${id}" (slot "${name}") refused; the first registration wins`)
-      return () => {}
-    }
+    // Late cancellations (an unmounted entry whose seat was declared in the
+    // meantime) resolve only after the registration has been recorded.
+    this.resolvePending()
+    if (this.entries.has(id)) throw new SlotConflictError(id)
     const spec = this.specs.get(name)
     if (spec === undefined) {
-      this.warn(`"${id}" registered into undeclared slot "${name}"; no owner draws it, so it is not mounted`)
-      return () => {}
+      // Boot order is not registration order: a renderer may register before
+      // the piece that declares the seat it draws into. Hold the entry until
+      // the declaration arrives; once the seat is never declared (no pending
+      // pieces can declare it) it stays unmounted and was never warned about.
+      this.pending.push({ registration: registration as SlotRegistration, component: component as SlotComponent })
+      return () => {
+        const index = this.pending.findIndex(item => item.registration.id === id)
+        if (index === -1) return
+        this.pending.splice(index, 1)
+      }
     }
     const seat = seatKey(name, registration.key)
     const siblings = [...this.entries.values()].filter(entry => seatKey(entry.name, entry.key) === seat)
     if (spec.kind === 'single' && siblings.length > 0) {
-      this.warn(
-        `single slot "${name}" already has an occupant "${siblings[0]?.id}"; "${id}" refused`,
-      )
+      this.warn(`single slot "${name}" already has an occupant "${siblings[0]?.id}"; "${id}" refused`)
       return () => {}
     }
-    if (spec.kind === 'keyed' && registration.key === undefined) {
+    if (spec.kind === 'keyed' && (registration.key === undefined || registration.key === '')) {
       this.warn(`keyed slot "${name}" requires a key; "${id}" refused`)
       return () => {}
     }
@@ -101,14 +131,28 @@ export class SlotRegistry {
         return () => {}
       }
     }
+    if ((registration.matcher as { cost?: unknown } | undefined)?.cost !== undefined) {
+      const cost = (registration.matcher as { cost?: unknown }).cost
+      if (cost !== 'cheap' && cost !== 'expensive') {
+        this.warn(`"${id}" declares probe cost "${String(cost)}"; expected "cheap" or "expensive"`)
+        return () => {}
+      }
+    }
+    const order = registration.order ?? 100
     const entry: StoredEntry = {
       id,
       name,
       key: registration.key,
-      order: registration.order ?? 100,
+      order,
       component: component as SlotComponent,
+      ...(registration.matcher === undefined ? {} : { matcher: registration.matcher }),
       declarations: registration.declare ?? {},
-      parentSeat: undefined,
+    }
+    // Equal order across the entries of one seat, whatever their keys: the
+    // dispatcher sorts them together by `id` (contract.md §3.3).
+    const sameSeat = [...this.entries.values()].filter(entry => entry.name === name)
+    if (sameSeat.some(sibling => sibling.order === order)) {
+      this.warn(`slot "${name}" has several entries with order ${order}; ties break by id`)
     }
     for (const [child, childSpec] of Object.entries(entry.declarations)) {
       if (childSpec === undefined) continue
@@ -116,8 +160,49 @@ export class SlotRegistry {
       this.declaredBy.set(child, id)
     }
     this.entries.set(id, entry)
+    this.resolvePending()
     this.notify()
     return () => this.disposeEntry(id)
+  }
+
+  /**
+   * Retry registrations that were waiting for their seat's declaration. A
+   * `declare` is only retried when its parent entry actually rendered it, so
+   * this happens at most once per newly declared seat and cannot loop.
+   */
+  private resolvePending(): void {
+    let progressed = true
+    while (progressed) {
+      progressed = false
+      for (let index = 0; index < this.pending.length; index++) {
+        const pending = this.pending[index] as DeferredEntry
+        if (this.specs.get(pending.registration.name) === undefined) continue
+        this.pending.splice(index, 1)
+        index--
+        progressed = true
+        try {
+          this.register(pending.registration, pending.component)
+        } catch (error) {
+          this.warn(`deferred entry "${pending.registration.id}" failed to register: ${(error as Error).message}`)
+        }
+      }
+    }
+  }
+
+  /**
+   * Declare seats up front (contract.md §3.3). An already-declared seat is left
+   * alone — `declare` is a statement of intent, not an ownership grab.
+   */
+  declare(seats: Partial<Record<SlotName, SlotSpec>>): void {
+    let changed = false
+    for (const [name, spec] of Object.entries(seats)) {
+      if (spec === undefined || this.specs.has(name)) continue
+      this.specs.set(name, spec)
+      changed = true
+    }
+    if (!changed) return
+    this.resolvePending()
+    this.notify()
   }
 
   /**
@@ -126,6 +211,11 @@ export class SlotRegistry {
    */
   entriesOf<K extends SlotName>(name: K, key?: string): readonly SlotEntry<K>[] {
     return (this.sorted.get(seatKey(name, key)) ?? []) as unknown as readonly SlotEntry<K>[]
+  }
+
+  /** Every registered entry, in registration order (fallback-chain planning). */
+  all(): readonly SlotEntry[] {
+    return [...this.entries.values()].sort(this.order)
   }
 
   /** The declaration of a seat, if any. */
@@ -145,6 +235,16 @@ export class SlotRegistry {
     }
   }
 
+  /** Entries still waiting for their seat's declaration (diagnostics). */
+  waiting(): string[] {
+    return this.pending.map(item => item.registration.id)
+  }
+
+  /** The declared seats and their kinds (diagnostics). */
+  declarations(): Record<string, SlotSpec> {
+    return Object.fromEntries(this.specs)
+  }
+
   /** Registered ids, in registration order (diagnostics). */
   ids(): string[] {
     return [...this.entries.keys()]
@@ -158,6 +258,8 @@ export class SlotRegistry {
     const entry = this.entries.get(id)
     if (entry === undefined) return
     this.entries.delete(id)
+    // Seats this entry declared lose their declaration with it; entries that
+    // were waiting on those seats are now permanently undeclared.
     for (const child of Object.keys(entry.declarations)) {
       if (this.declaredBy.get(child) !== id) continue
       this.declaredBy.delete(child)
@@ -177,6 +279,7 @@ export class SlotRegistry {
         order: entry.order,
         component: entry.component,
         ...(entry.key === undefined ? {} : { key: entry.key }),
+        ...(entry.matcher === undefined ? {} : { matcher: entry.matcher }),
       }
       if (bucket === undefined) next.set(seat, [publicEntry])
       else bucket.push(publicEntry)

@@ -9,12 +9,17 @@
 import type { Context } from 'cordis'
 import type { ReactElement } from 'react'
 import type { TabInfo } from 'diorama-kernel/client'
-import { Slot, useKernel, useStore } from 'diorama-ui'
+import { bindMethods, provideEntry, Slot, useKernel, useStore } from 'diorama-ui'
 import { createTabsService } from 'diorama-kernel/client'
 
 export const name = 'tabs'
 export const inject = ['slots']
 
+/**
+ * The content seat. `single` because it already *is* per tab: the component in
+ * it dispatches on the tab's file (M2 turns tabs into a real list; the seat
+ * stays "the content of the tab being rendered").
+ */
 const DECLARE = {
   'tabs.content': { kind: 'single' },
 } as const
@@ -65,6 +70,8 @@ export function apply(ctx: Context) {
   // A service face (an object), not a Service subclass: the class would be this
   // half's build, and Cordis' own `hasInstance` check compares class identity.
   // The kernel owns the service classes (`tabs` / `tree`) so every build agrees.
-  ctx.provide('tabs', createTabsService())
-  ctx.slots.register({ id: 'tabs:content', name: 'layout.main', order: 100, declare: DECLARE }, TabsView)
+  // Bind: this half runs its own build of the service class, and a consumer in
+  // another build may call the methods detached (docs/m0/spec.md §11.3 rule 3).
+  ctx.provide('tabs', bindMethods(createTabsService()))
+  provideEntry(ctx, { id: 'tabs:content', name: 'layout.main', order: 100, declare: DECLARE }, TabsView)
 }

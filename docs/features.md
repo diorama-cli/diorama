@@ -4,22 +4,22 @@
 > 分三档：**v1 必做**、**定过但不做/deliberately 不做**、**未来**。
 > 与 [architecture.md](architecture.md) 的决定、[contract.md](contract.md) 的契约对照看。
 >
-> **档位标注（2026-10-18 M0 完成时）**：标 ✅ 的已在 M0 落地并通过
-> [M0 实现说明](m0/spec.md) 的 5 条验收；标 M0 的为 M0 范围内的最小实现；
-> 其余仍是 v1 目标。
+> **档位标注（2026-10-18，M1 完成时）**：标 ✅ 的已落地并通过 [M0 实现说明](m0/spec.md)
+> 的 5 条验收与 [M1 实施说明](m1/spec.md) 的验收；标 **M2 起**的推迟明确；
+> 其余仍是 v1 目标。契约见 [contract.md](contract.md) v0.2。
 
 ## 一、CLI
 
 | # | 功能 | 档位 | 说明 |
 |---|---|---|---|
-| C1 | `diorama [dir]` | ✅ M0 | M0：前台单进程直接服务该目录并打印 URL（gateway 化在 M3）|
+| C1 | `diorama [dir]` | ✅ M0→M1 | 前台单进程直接服务该目录并打印 URL（gateway 化在 M3）|
 | C2 | `diorama ls` | v1 | 列出「目录 → URL → 状态」 |
 | C3 | `diorama gateway start / stop / status / restart` | v1 | 你只提了 stop，另外三个是缺了不好用的配套 |
 | C4 | `--port <n>` | ✅ M0 | 显式端口冲突直接报错 |
 | C5 | `--host <ip>` | ✅ M0 | 默认 `127.0.0.1`，可指定网卡 IP |
 | C6 | 随机端口自动重试 | v1 | 上限 20 次 |
 | C7 | realpath 挂载键 + 别名提示 | v1 | 符号链接输入时打印 `mounted <real> (from <input>)` |
-| C8 | 单测/集成测试 | ✅ M0 | `apps/web/tests/`：5 条端到端验收（真实 CLI + Chromium）|
+| C8 | 单测/集成测试 | ✅ M0→M1 | `apps/web/tests/`：11 条端到端（真实 CLI + Chromium）；`pnpm test:unit`：18 条单测 |
 
 ## 二、Gateway
 
@@ -37,19 +37,19 @@
 
 | # | 功能 | 档位 | 说明 |
 |---|---|---|---|
-| K1 | Cordis 插件树（双端） | ✅ M0 | M0 用 `cordis@4.0.0-rc.11` 单包 + 自有静态装配（Loader 在 M1）|
-| K2 | 客户端 Loader + 模块表 | v1 | 自己实现，参照 DSH |
-| K3 | 插件 manifest + contract version 检查 | v1 | 不兼容拒绝加载并解释 |
-| K4 | 插件来源：内置 + `~/.diorama/plugins` | v1 | `PluginSource` 接口预留 npm |
-| K5 | 生命周期：代码全局、数据按目录 | v1 | `ctx.fork()` |
-| K6 | slot 系统 | ✅ M0 | 内置编译期类型、外部运行时 zod |
-| K7 | fail loud + 回退链 | ✅ M0 | 缺 `name` 报错并跳过；无渲染器显示「无可用渲染器」|
-| K8 | `ctx.fs`（只读） | ✅ M0 | M0 实现 `list` / `readText`；`stat` / `readBinary` / `watch` 仍待定 |
+| K1 | Cordis 插件树（双端） | ✅ M0→M1 | `cordis@4.0.0-rc.11`；`fs` 是真正的 server 半边（`mounts.onMount`）|
+| K2 | 客户端 Loader + 模块表 | ✅ M0→M1 | 闭合工厂 + 页面模块表（`react` / `react/jsx-runtime`，contract §8）；外部半边推迟 |
+| K3 | 插件 manifest + contract version 检查 | ✅ M1 | `>=0.2 <0.3` 强制；`requires` 进 boot 图 |
+| K4 | 插件来源：内置 + `~/.diorama/plugins` | **未来（最后一个里程碑）** | `PluginSource` 接口与 `BuiltinSource` 就位；外部目录见 contract §9 |
+| K5 | 生命周期：代码全局、数据按目录 | ✅ M1（单目录形态） | `ctx.diorama.mounts` + `onMount`；`ctx.fork()` 随 M3 |
+| K6 | slot 系统 | ✅ M0→M1 | 冲突三类分开（contract §3.3）、`ctx.slots.declare`、`file.renderer` matcher |
+| K7 | fail loud + 回退链 | ✅ M0→M1 | 加载/契约/slot/渲染/RPC 五层；渲染器抛错→标记失败→下一个→plaintext |
+| K8 | `ctx.fs`（只读） | ✅ M1 | `list` / `stat` / `readText` / `readBytes`；`watch` 签名已定、事件 M2；`ETOOLARGE` 上限 |
 | K9 | `ctx.git`（只读） | v1 | diff / status / log 🔲 签名待定 |
-| K10 | `ctx.slots` | ✅ M0 | |
+| K10 | `ctx.slots` | ✅ M0→M1 | |
 | K11 | `ctx.commands` | v1 | 命令注册 + 快捷键绑定 |
 | K12 | `ctx.diorama.mounts` | v1 | |
-| K13 | RPC（client ↔ server） | v1 | 形态待定：倾向自动代理 |
+| K13 | RPC（client ↔ server） | ✅ M1 | WebSocket 自动代理，双向；`/api/fs/*` 已删除（contract §4）|
 | K14 | `ctx.storage`（`~/.diorama/` 持久化） | 🔲 待定 | 签名未定 |
 | K15 | 插件异步任务托管 API | 🔲 待定 | 见 §12 讨论 |
 | K16 | 热重载（HMR） | **未来** | 内好用，外部插件不必 |
@@ -60,15 +60,16 @@
 
 | # | 插件 | 档位 | 说明 |
 |---|---|---|---|
-| P1 | `layout` | ✅ M0 | M0：左右分栏（`layout.overlay` 留给 palette，M2）|
+| P1 | `layout` | ✅ M0 | 左右分栏（`layout.overlay` 留给 palette，M2）|
 | P2 | `file-tree` | ✅ M0 | 左侧导航；目录点击=导航，文件点击=打开 |
 | P3 | `tabs` | ✅ M0（单 tab 语义）| 多 tab 打开/切换/关闭；**不提供编辑** |
-| P4 | `renderer-registry` | ✅ M0 | M0：list slot 按 order 派发（`ext` matcher 在 M1）|
-| P5 | `markdown` | v1 | `.md` 渲染 |
-| P6 | `code` | v1 | 语法高亮 |
+| P4 | `renderer-registry` | ✅ M0→M1 | matcher 三档（ext → mime → probe）+ 兜底 + 失败回退（contract §5.1）|
+| P5 | `markdown` | ✅ M1 | `.md` → HTML（marked + DOMPurify 消毒）|
+| P6 | `code` | ✅ M1 | highlight.js 按语言注册；`.md` 不在其中（归 markdown）|
 | P7 | `plaintext` | ✅ M0 | 兜底渲染器 |
 | P8 | `palette` | v1 | 命令面板（slot 条目，非内核） |
 | P9 | `theme` / `i18n` | 🔲 待定 | 没讨论过 |
+| P15 | `fs`（server 半边） | ✅ M1 | 内核自带；`--plugins` 不影响服务端 |
 | P10 | `image` 渲染器 | **未来** | 没讨论过 |
 | P11 | `pdf` 渲染器 | **未来** | 没讨论过 |
 | P12 | `git-diff` 渲染器 | **未来** | 需要 `ctx.git`；是名字里的卖点之一 |
@@ -80,14 +81,14 @@
 | # | 功能 | 档位 | 说明 |
 |---|---|---|---|
 | U1 | 左侧树 + 右侧多 tab | ✅ M0（单 tab）| |
-| U2 | 文件变化自动刷新（watch） | v1 | 依赖 K8 的 watch |
-| U3 | 快捷键 | v1 | 全局唯一绑定 + `when` |
-| U4 | command palette | v1 | 展示细节后面再定 |
+| U2 | 文件变化自动刷新（watch） | M2 | `ctx.fs.watch` 签名已定 |
+| U3 | 快捷键 | M2 | 全局唯一绑定 + `when` |
+| U4 | command palette | M2 | 展示细节后面再定 |
 | U5 | 工具栏 | **不做** | 明确移除 |
 | U6 | 渲染模式切换（`md` 源码/预览） | 🔲 待定 | O8 |
 | U7 | 图片缩放 / 适配窗口 | 🔲 待定 | O8 |
 | U8 | diff 并排 / 行内切换 | 🔲 待定 | O8 |
-| U9 | 状态栏 | 🔲 待定 | 是否需要 |
+| U9 | 状态栏 | **v1 不做** | 已从契约 slot 表移除 |
 | U10 | 多 tab 状态持久化（刷新后恢复） | 🔲 待定 | O5 |
 | U11 | URL 路由（可直接分享某个文件） | 🔲 待定 | 没讨论过 |
 | U12 | 深色/浅色主题 | 🔲 待定 | 没讨论过 |

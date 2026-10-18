@@ -23,7 +23,22 @@ export class ManifestError extends Error {
   }
 }
 
-/** A built-in plugin that cannot be honored (e.g. missing bundled client entry). */
+/**
+ * A plugin whose `contract` range does not accept the running kernel
+ * (contract.md §6). Raised while reading the manifest, before any half loads.
+ */
+export class ContractMismatchError extends Error {
+  constructor(
+    readonly id: string,
+    readonly required: string,
+    readonly provided: string,
+  ) {
+    super(`plugin "${id}" is incompatible with this kernel: requires contract ${required}, kernel provides ${provided}`)
+    this.name = 'ContractMismatchError'
+  }
+}
+
+/** A plugin that cannot be honored (e.g. missing bundled client entry). */
 export class PluginLoadError extends Error {
   constructor(
     readonly id: string,
@@ -41,11 +56,15 @@ export interface PluginManifest {
   package: string
   /** Package directory (absolute). */
   dir: string
-  /** Contract range declared by the plugin, e.g. `>=0.1 <0.2`. */
+  /** Contract range declared by the plugin, e.g. `>=0.2 <0.3`. */
   contract: string
   /** Short, globally unique id. */
   id: string
   displayName?: string
   /** Entry file of the client half, absolute. */
   clientEntry?: string
+  /** Entry file of the server half, absolute. */
+  serverEntry?: string
+  /** Infrastructure this plugin needs in the boot graph (contract.md §1). */
+  requires: string[]
 }

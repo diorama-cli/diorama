@@ -24,6 +24,7 @@ import {
   notifyKernel,
   type KernelContextValue,
   type KernelPageApi,
+  type KernelSlotRegistry,
 } from './page.ts'
 
 /** One plugin the shell could not load. */
@@ -127,6 +128,9 @@ export async function bootClient(options: BootOptions): Promise<BootResult> {
   const pageContext = createPageContext(ctx)
   installKernel({
     views: ctx.get('views') as KernelContextValue['views'],
+    // The seat table itself, so components can read any seat (not only the
+    // ones they own) without owning its registration (contract.md §5).
+    registry: ctx.get('slotRegistry') as KernelSlotRegistry | undefined,
     ctx: pageContext,
     mount: handle,
   })
@@ -172,7 +176,11 @@ async function loadManifest(
   mount: MountHandle,
 ): Promise<BootFailure[]> {
   const failures: BootFailure[] = []
-  for (const plugin of options.manifest.plugins) {
+  // Boot graph = the selection plus the infrastructure its entries require
+  // (contract.md §1). `requires` is completed here so a plugin that forgets to
+  // list `slots` still gets it when it is in the manifest.
+  const graph = completeGraph(options.manifest.plugins)
+  for (const plugin of graph) {
     let module: Record<string, unknown>
     try {
       module = await options.resolve(plugin.id)
@@ -188,7 +196,18 @@ async function loadManifest(
       continue
     }
     try {
-      await ctx.plugin(module as PluginModule)
+      const pending = ctx.plugin(module as PluginModule)
+      await pending
+      // Cordis does not throw when an injected service never appears: the fiber
+      // stays PENDING (0/1) and `apply` never runs. Turn that into a loud boot
+      // failure instead of an undefined service later (contract.md §11).
+      const state = (pending as unknown as { state?: number }).state
+      if (typeof state === 'number' && state !== 2) {
+        const message = `did not activate (state ${state}: an injected service is unavailable)`
+        failures.push({ id: plugin.id, message })
+        log(`[diorama] error: plugin "${plugin.id}" ${message}`)
+        continue
+      }
       if (plugin.id === 'slots' && options.onBeforePlugins !== undefined) {
         options.onBeforePlugins(ctx as unknown as Context, mount)
       }
@@ -198,4 +217,27 @@ async function loadManifest(
     }
   }
   return failures
+}
+
+/**
+ * Boot graph = the selection, with required infrastructure moved *in front* of
+ * the plugins that need it (contract.md §1). The selection itself is unchanged:
+ * `--plugins` decides what boots, `requires` only decides the order.
+ */
+function completeGraph(plugins: readonly MountManifest['plugins'][number][]): MountManifest['plugins'] {
+  const available = new Map(plugins.map(plugin => [plugin.id, plugin]))
+  const out: MountManifest['plugins'] = []
+  const emitted = new Set<string>()
+  const emit = (plugin: MountManifest['plugins'][number], stack: readonly string[]): void => {
+    if (emitted.has(plugin.id)) return
+    for (const required of plugin.requires ?? []) {
+      if (stack.includes(required)) continue // a cycle; the required piece is already in flight
+      const provider = available.get(required)
+      if (provider !== undefined) emit(provider, [...stack, plugin.id])
+    }
+    emitted.add(plugin.id)
+    out.push(plugin)
+  }
+  for (const plugin of plugins) emit(plugin, [])
+  return out
 }

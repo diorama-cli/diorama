@@ -2,9 +2,13 @@
 export const KERNEL_NAME = 'diorama'
 
 /**
- * M0 contract version. contract.md §6: during `0.x`, a minor bump is a
- * breaking change, so M0 plugins declare `contract: ">=0.1 <0.2"`.
- * M0 does not enforce the range yet (plan.md: contract version check is M1);
- * the field is required so plugin manifests are already shaped correctly.
+ * Kernel contract version (contract.md §6). During `0.x` a minor bump is a
+ * breaking change: `0.2` replaced the M0 `/api/fs/*` transport with RPC and
+ * changed `file.renderer` to the matcher model, so every plugin declares
+ * `contract: ">=0.2 <0.3"` and the kernel enforces the range while reading
+ * manifests (`server/manifest.ts`).
  */
-export const CONTRACT_VERSION = '0.1'
+export const CONTRACT_VERSION = '0.2'
+
+/** What every plugin built against this kernel declares. */
+export const CONTRACT_RANGE = '>=0.2 <0.3'

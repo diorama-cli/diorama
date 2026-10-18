@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { fixture, startDiorama, type Diorama, type Fixture } from './support.ts'
+import { fixture, listOverRpc, startDiorama, type Diorama, type Fixture } from './support.ts'
 
 let directory: Fixture
 let server: Diorama
@@ -26,15 +26,15 @@ test('4. switching the directory needs no code change', async ({ page }) => {
   try {
     server = await startDiorama(first.root)
     const manifestA = await (await fetch(`${server.url}plugin.json`)).json()
-    const listA = await (await fetch(`${server.url}api/fs/list?path=`)).json()
+    const listA = await listOverRpc(page, server.url, '')
     await server.stop()
     server = await startDiorama(second.root)
     const manifestB = await (await fetch(`${server.url}plugin.json`)).json()
-    const listB = await (await fetch(`${server.url}api/fs/list?path=`)).json()
+    const listB = await listOverRpc(page, server.url, '')
     expect(manifestA.root).toBe(first.realRoot)
     expect(manifestB.root).toBe(second.realRoot)
-    expect(listA.entries.map((entry: { name: string }) => entry.name)).toContain('only-in-a.txt')
-    expect(listB.entries.map((entry: { name: string }) => entry.name)).toContain('only-in-b.txt')
+    expect(listA).toContain('only-in-a.txt')
+    expect(listB).toContain('only-in-b.txt')
     await page.goto(server.url)
     await expect(page.getByText('only-in-b.txt')).toBeVisible()
   } finally {

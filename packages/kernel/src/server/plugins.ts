@@ -1,15 +1,43 @@
 /**
- * Server half of the Cordis plugin tree (architecture.md §11).
+ * Server half of the Cordis plugin tree (architecture.md §11, contract.md §2.5).
  *
- * M0 serves one directory per process, so there is exactly one root context and
+ * M1 serves one directory per process, so there is exactly one root context and
  * one mount context forked from it. Plugin code is global, services are per
- * directory: after every plugin had its chance to `apply` (once, on the root),
- * the kernel forks the mount, seats `ctx.fs` there as a real Cordis service and
- * publishes it via `ctx.provide`, so a plugin that injects `fs` only activates
- * inside a mount (contract.md §2.5).
+ * directory: plugins `apply` once on the root; the kernel then provides
+ * `ctx.diorama` (with `mounts`) and fires `onMount`, so a service plugin such as
+ * `fs` instantiates itself on the mount (contract.md §2.5). Reading `ctx.fs` on
+ * the root fails — that is what stops a plugin from acting on the wrong
+ * directory.
  */
 import { Context } from 'cordis'
+import { CONTRACT_VERSION, KERNEL_NAME } from '../contract.ts'
 import { FsService } from './fs.ts'
+
+/** What the kernel publishes on the root as `ctx.diorama`. */
+export interface DioramaFace {
+  readonly name: string
+  readonly contract: string
+  readonly mounts: Mounts
+}
+
+/** One mounted directory (contract.md §3.5). */
+export interface MountInfo {
+  root: string
+  mountId: string
+}
+
+/** The mount registry a service plugin draws its per-directory instance from. */
+export interface Mounts {
+  onMount(cb: (mountCtx: Context, info: MountInfo) => (() => void) | void): () => void
+  list(): MountInfo[]
+}
+
+declare module 'cordis' {
+  interface Context {
+    /** Kernel face: name, contract version, mount registry (contract.md §3.5). */
+    diorama: DioramaFace
+  }
+}
 
 /** The parts of the Cordis context the tree uses (declared locally on purpose). */
 interface CordisSurface {
@@ -30,6 +58,7 @@ export interface ServerTree {
   /** Mount context holding `ctx.fs`. */
   mount: Context
   fs: FsService
+  mounts: Mounts
   failures: PluginFailure[]
   stop(): Promise<void>
 }
@@ -37,6 +66,71 @@ export interface ServerTree {
 export interface LoadPluginsResult {
   fibers: unknown[]
   failures: PluginFailure[]
+}
+
+/**
+ * Create the mount registry and the `ctx.diorama` face. A callback registered
+ * after its mount exists (plugin order is not the mount's concern) is called
+ * immediately with that mount; the `onMount` disposer runs the callback's own
+ * disposer for every mount it was applied to.
+ */
+export function createMounts(): {
+  face: DioramaFace
+  mount(mountCtx: Context, info: MountInfo): () => void
+} {
+  const mounted = new Map<string, MountInfo>()
+  const contexts = new Map<string, Context>()
+  const callbacks = new Map<(mountCtx: Context, info: MountInfo) => (() => void) | void, Map<string, () => void>>()
+
+  const applyTo = (
+    cb: (mountCtx: Context, info: MountInfo) => (() => void) | void,
+    mountId: string,
+  ): void => {
+    const ctx = contexts.get(mountId)
+    const info = mounted.get(mountId)
+    if (ctx === undefined || info === undefined) return
+    const result = cb(ctx, info)
+    let disposers = callbacks.get(cb)
+    if (disposers === undefined) {
+      disposers = new Map()
+      callbacks.set(cb, disposers)
+    }
+    disposers.set(mountId, typeof result === 'function' ? result : () => {})
+  }
+
+  const face: DioramaFace = {
+    name: KERNEL_NAME,
+    contract: CONTRACT_VERSION,
+    mounts: {
+      onMount(cb) {
+        callbacks.set(cb, new Map())
+        for (const mountId of mounted.keys()) applyTo(cb, mountId)
+        return () => {
+          const disposers = callbacks.get(cb)
+          callbacks.delete(cb)
+          for (const dispose of disposers?.values() ?? []) dispose()
+        }
+      },
+      list: () => [...mounted.values()],
+    },
+  }
+
+  return {
+    face,
+    mount(mountCtx, info) {
+      mounted.set(info.mountId, info)
+      contexts.set(info.mountId, mountCtx)
+      for (const cb of callbacks.keys()) applyTo(cb, info.mountId)
+      return () => {
+        mounted.delete(info.mountId)
+        contexts.delete(info.mountId)
+        for (const disposers of callbacks.values()) {
+          disposers.get(info.mountId)?.()
+          disposers.delete(info.mountId)
+        }
+      }
+    },
+  }
 }
 
 /**
@@ -82,24 +176,34 @@ export async function bootPlugins(options: {
 }): Promise<ServerTree> {
   const log = options.log ?? ((message: string) => console.error(message))
   const root = new Context() as unknown as Context & CordisSurface
+
+  // `ctx.diorama` exists before any plugin applies, so a service plugin can
+  // register on `mounts` during its own `apply` (contract.md §2.5).
+  const mounts = createMounts()
+  root.provide('diorama', mounts.face)
+
   const { failures } = await loadPlugins(root, options.plugins, log)
 
   // Mount scope: a per-directory service instance and the directory's fs.
-  // Provided on the *root* tree in M0, where every plugin's context sees it
-  // through the root's isolate map; M4's gateway moves it onto the mount fork.
-  const fs = new FsService(options.root)
+  // `isolate` gives the mount its own `fs` (and `mountId`) slot; a service
+  // plugin provides into it from inside `onMount`.
   const mount = root.isolate('fs') as unknown as Context & CordisSurface
-  const disposeMountId = mount.provide('mountId', options.mountId)
-  const disposeFs = mount.provide('fs', fs)
+  mount.provide('mountId', options.mountId)
+  const info: MountInfo = { root: options.root, mountId: options.mountId }
+  const unmount = mounts.mount(mount as unknown as Context, info)
+  const fs = (mount as unknown as { get(name: string): unknown }).get('fs')
+  if (!(fs instanceof FsService)) {
+    log(`[diorama] error: no plugin provided "fs" on the mount; plugins that inject fs will not activate`)
+  }
 
   return {
     root,
     mount,
-    fs,
+    fs: fs instanceof FsService ? fs : new FsService(options.root),
+    mounts: mounts.face.mounts,
     failures,
     async stop() {
-      disposeFs()
-      disposeMountId()
+      unmount()
       await root.fiber.dispose()
     },
   }

@@ -11,7 +11,7 @@ import type { Context } from 'cordis'
 import { useEffect, useState } from 'react'
 import type { FileInfo, MountHandle } from 'diorama-kernel/client'
 import { createTreeService } from 'diorama-kernel/client'
-import { useKernel, useStore } from 'diorama-ui'
+import { bindMethods, provideEntry, useKernel, useStore } from 'diorama-ui'
 
 export const name = 'file-tree'
 export const inject = ['slots']
@@ -106,6 +106,7 @@ function FileTreeRoot() {
 
 export function apply(ctx: Context) {
   // See `tabs`: the service face comes from the kernel so every build agrees.
-  ctx.provide('tree', createTreeService())
-  ctx.slots.register({ id: 'file-tree:nav', name: 'sidebar.tree', order: 100 }, FileTreeRoot)
+  // Bind: this half runs its own build of the service class (see `tabs`).
+  ctx.provide('tree', bindMethods(createTreeService()))
+  provideEntry(ctx, { id: 'file-tree:nav', name: 'sidebar.tree', order: 100 }, FileTreeRoot)
 }

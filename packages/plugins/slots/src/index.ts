@@ -40,7 +40,7 @@ function bridgeOnSlotChange(
 }
 import type { SlotRegistry } from './registry.ts'
 import { SlotRegistry as Registry } from './registry.ts'
-import type { SlotComponent, SlotName, SlotRegistration } from './types.ts'
+import type { SlotComponent, SlotName, SlotRegistration, SlotSpec } from './types.ts'
 import { createViews, type ViewsService } from './views.ts'
 
 export const name = 'slots'
@@ -49,6 +49,12 @@ export const name = 'slots'
 /** The `ctx.slots` face plugins see. */
 export interface SlotsService {
   register<K extends SlotName>(registration: SlotRegistration<K>, component: SlotComponent<K>): () => void
+  /**
+   * Declare seats a plugin is about to register into (contract.md §3.3). A
+   * plugin declares before it (or another plugin) registers, so an entry is
+   * never held back waiting for a piece that has not run yet.
+   */
+  declare(seats: Partial<Record<SlotName, SlotSpec>>): void
 }
 
 declare module 'cordis' {
@@ -76,7 +82,13 @@ export function provideSlots(ctx: Context, registry: SlotRegistry): void {
   const views = createViews(registry)
   ctx.provide('views', views)
   ctx.provide('slots', {
-    register: (registration, component) => registry.register(registration, component),
+    register: (registration, component) => {
+      // A stable, bound reference: entries run in their own build of this half,
+      // where `registry.register` (a class method) may arrive detached.
+      const dispose = registry.register(registration, component)
+      return () => dispose()
+    },
+    declare: seats => registry.declare(seats),
   })
   // The seat table is reachable from the renderer, never from a plugin `ctx`:
   // components read it through the kernel context (`KernelContextValue.ctx`),
@@ -97,13 +109,22 @@ export function provideSlots(ctx: Context, registry: SlotRegistry): void {
   if (pageBridgePresent()) bridgeOnSlotChange(ctx, listener => registry.subscribe(listener))
 }
 
-export { defaultSlotOrder, SlotRegistry, type SlotOrder } from './registry.ts'
-export { BUILTIN_SLOTS, type SlotKind, type SlotSpec } from './types.ts'
+export { defaultSlotOrder, SlotConflictError, SlotRegistry, type SlotOrder } from './registry.ts'
+export { BUILTIN_SLOTS, type FileRendererProps, type SlotKind, type SlotSpec } from './types.ts'
 export type {
+  MatchedSlotSpec,
   SlotComponent,
   SlotEntry,
   SlotMap,
   SlotName,
   SlotRegistration,
 } from './types.ts'
+export {
+  chooseRenderer,
+  PROBE_HEAD_BYTES,
+  probeHead,
+  RENDERER_SLOT,
+  type RendererCandidate,
+  type RendererChoice,
+} from './select.ts'
 export { createViews, type FailureInfo, type ViewsService } from './views.ts'

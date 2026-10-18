@@ -1,7 +1,7 @@
 // The client tree's context face (kernel services) is declared once here.
 import type {} from './context.ts'
 
-export type { FileInfo, RelPath, TabInfo } from '../shared/types.ts'
+export type { FsWatchEvent, FileInfo, RelPath, TabInfo } from '../shared/types.ts'
 export { fsError, type FsErrorCode } from '../shared/errors.ts'
 
 export {
@@ -11,7 +11,8 @@ export {
   type MountInfo,
   type MountManifest,
 } from './mount.ts'
-export { createFsClient, type FsClient } from './fs.ts'
+export { createFsClient, FS_METHODS, type FsClient } from './fs.ts'
+export { createRpcClient, rpcUrl, RPC_PATH, type RpcClient } from './rpc.ts'
 export { createTabsService, TabsService, type TabsSnapshot } from './tabs.ts'
 export { createTreeService, TreeService, type TreeSnapshot } from './tree.ts'
 export { bootClient, provideRecord } from './boot.ts'

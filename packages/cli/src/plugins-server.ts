@@ -21,11 +21,16 @@ const halves: Record<BuiltinPluginId, HalfLoader> = {
   // Each package's main entry is the Node-facing ESM build; the browser
   // artifact (`./client`) is a closure factory the page loads separately.
   'slots': () => import('diorama-plugin-slots'),
+  // The kernel's own fs service: the only plugin with a real server half, and
+  // the shape an external server half plugs into (contract.md §2.5, §9).
+  'fs': () => import('diorama-kernel/server').then(kernel => kernel.fsHalf),
   'layout': () => import('diorama-plugin-layout'),
   'file-tree': () => import('diorama-plugin-file-tree'),
   'tabs': () => import('diorama-plugin-tabs'),
   'renderer-registry': () => import('diorama-plugin-renderer-registry'),
   'plaintext': () => import('diorama-plugin-plaintext'),
+  'markdown': () => import('diorama-plugin-markdown'),
+  'code': () => import('diorama-plugin-code'),
 }
 
 /** Resolve the server-half module of one plugin id. */
