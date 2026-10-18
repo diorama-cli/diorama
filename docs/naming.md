@@ -54,6 +54,6 @@
 
 ## GitHub
 
-- 组织：`tianwu`（待建；GitHub 不开放 API 创建组织，走网页流程）
+- 组织：`tianwu-labs`（`tianwu` 被 GitHub 保留：公开页 404，但组织注册器提示 "already taken"；2026-10-18）
 - 仓库：`zimmem/tianwu`（组织建好后转移过去）
 - npm 包名：`tianwu`
