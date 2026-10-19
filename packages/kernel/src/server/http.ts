@@ -14,6 +14,7 @@ import { stat } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { basename, dirname, extname, join, normalize, resolve, sep } from 'node:path'
 import { isErrorCode } from '../shared/errors.ts'
+import { ROUTE_PREFIX } from '../shared/types.ts'
 import { HttpError } from './errors.ts'
 import type { BootManifest } from './plan.ts'
 import { RpcChannel, type RpcDispatcher } from './rpc.ts'
@@ -156,6 +157,14 @@ async function handleRequest(
     if (await serveShell(options.assetsRoot, res)) return
   }
   if (await serveStatic(options.assetsRoot, pathname, res)) return
+  // The page's own routes (contract.md §3.8): `/~/<path>` is never a file and
+  // never an API call — it is the shell that reads the path. `/api/` stays an
+  // API namespace (unknown routes there are 404s, not the page).
+  if (pathname === ROUTE_PREFIX.slice(0, -1) || pathname.startsWith(ROUTE_PREFIX)) {
+    if (await serveShell(options.assetsRoot, res)) return
+    sendError(res, 500, 'EIO', 'the page shell is missing (no index.html in the assets root)')
+    return
+  }
   // Unknown non-API paths fall back to the shell (SPA semantics).
   if (!pathname.startsWith('/api/') && (await serveShell(options.assetsRoot, res))) return
   sendError(res, 404, 'ENOENT', `no route for ${pathname}`)

@@ -19,6 +19,7 @@
 import { Context } from 'cordis'
 import { collectCommandContext, createCommandsService, type CommandContext, type CommandContextSources } from './commands.ts'
 import { createMountHandle, type MountHandle, type MountManifest } from './mount.ts'
+import { browserHistory, createRouterService, type RouterService, type RouterTabs } from './router.ts'
 import {
   ensurePageBridge,
   installKernel,
@@ -140,9 +141,17 @@ export async function bootClient(options: BootOptions): Promise<BootResult> {
     warn: message => log(`[diorama] ${message}`),
   })
   ctx.provide('commands', commands)
+  // `ctx.router` is kernel infrastructure too (contract.md §3.8): the URL and
+  // the active file. It is created before the pieces so a deep link is applied
+  // as soon as `tabs` activates (`attach()` below), not after the last plugin.
+  const router = createKernelRouter(ctx, handle, log)
+  ctx.provide('router', router.service)
   const disposeKeyboard = options.attachKeyboard === false ? () => {} : installKeyboard(commands, focus)
 
   const failures = await loadManifest(ctx, options, log, handle ?? createMountHandle(options.manifest))
+  // `tabs` is in by now (or it is not, and `open` has refused politely): a
+  // deep link that arrived during boot is opened here.
+  router.attach()
   // The context a component sees. Every read resolves through core's `get`, so a
   // service provided after the tree root was created is still found (the root's
   // bare property reads are fixed when the provision happens).
@@ -161,9 +170,71 @@ export async function bootClient(options: BootOptions): Promise<BootResult> {
     failures,
     dispose: async () => {
       disposeKeyboard()
+      router.dispose()
       await ctx.fiber.dispose()
     },
   }
+}
+
+/**
+ * Build the page router over whatever the pieces provide (contract.md §3.8).
+ * The tab service is read lazily: the router exists before `tabs` activates,
+ * and a half that provides it later is still picked up.
+ */
+function createKernelRouter(
+  ctx: KernelContext & CordisSurface,
+  handle: MountHandle,
+  log: (message: string) => void,
+): { service: RouterService; attach(): void; dispose(): void } {
+  // The `tabs` service is provided by another build of the kernel (the tabs
+  // half), and Cordis strips custom fields of objects returned across builds:
+  // call its methods through the service object it exposes, never read fields.
+  const tabs = (): RouterTabs | undefined => {
+    const service = ctx.get('tabs') as
+      | (RouterTabs & { getSnapshot?(): { activeId?: string; tabs: readonly { id: string; path: string }[] } })
+      | undefined
+    if (service === undefined) return undefined
+    /** The active tab, from the service's snapshot (a getter would go stale). */
+    const activeTab = (): { id: string; path: string } | undefined => {
+      const snapshot = service.getSnapshot?.()
+      const id = snapshot?.activeId
+      return id === undefined ? undefined : snapshot?.tabs.find(tab => tab.id === id)
+    }
+    return {
+      get active() {
+        return activeTab()
+      },
+      activeTab,
+      // `open` returns the tab; across builds read the path from a snapshot.
+      open: info => {
+        service.open(info)
+        return activeTab() ?? { id: '', path: info.path }
+      },
+      close: () => service.close(),
+      subscribe: listener => service.subscribe(listener),
+    }
+  }
+  const service = createRouterService({
+    // Without a browser (a unit test, the server tree) the page keeps the path
+    // it was booted with and never writes a URL.
+    history: browserHistory() ?? {
+      read: () => '/',
+      push: () => {},
+      replace: () => {},
+      onPopState: () => () => {},
+    },
+    tabs,
+    fileInfo: path => ({
+      path,
+      name: path.slice(path.lastIndexOf('/') + 1),
+      kind: 'file',
+      size: 0,
+      mtime: 0,
+    }),
+    warn: message => log(message),
+  })
+  void handle
+  return { service, attach: () => service.attach(), dispose: () => service.dispose() }
 }
 
 /** The parts of the Cordis context the loader calls. */
@@ -177,7 +248,7 @@ interface CordisSurface {
 }
 
 /** Services a piece provides after the tree root exists. */
-const LATE_SERVICES = ['views', 'slots', 'slotRegistry', 'tabs', 'tree', 'fs', 'kernel', 'commands'] as const
+const LATE_SERVICES = ['views', 'slots', 'slotRegistry', 'tabs', 'tree', 'fs', 'kernel', 'commands', 'router'] as const
 
 /** A context whose reads always go through core's `get` (see `bootClient`). */
 function createPageContext(ctx: KernelContext & CordisSurface): KernelContext & CordisSurface {
@@ -269,7 +340,7 @@ function createFocusTracker(): { sources: Omit<CommandContextSources, 'mountId'>
 
 /** Which surface an element belongs to, by the slots that carry them. */
 function focusOf(element: Element): CommandContext['focus'] | undefined {
-  if (element.closest('[data-slot="sidebar.tree"]') !== null) return 'tree'
+  if (element.closest('[data-slot="sidebar.views"]') !== null) return 'tree'
   if (element.closest('[data-slot="layout.main"]') !== null) return 'tabs'
   if (element.closest('[contenteditable="true"], textarea, input, .diorama-palette') !== null) return 'editor'
   return undefined
