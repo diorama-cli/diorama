@@ -79,8 +79,25 @@ export function isPageBooted(): boolean {
  * others registered there (e.g. the renderer dispatcher).
  */
 export function useSeat(name: string, key?: string): readonly unknown[] {
-  usePageVersion()
-  return pageBridge().getKernel()?.registry?.entriesOf(name, key) ?? []
+  return useSyncExternalStore(
+    subscribeKernel,
+    () => seatSnapshot(name, key).entries,
+    () => seatSnapshot(name, key).entries,
+  )
+}
+
+/**
+ * Every entry of a **keyed** seat, across all keys, in total order (one list
+ * per key: the registry keeps them apart). Use this to draw a switcher over a
+ * keyed seat's instances; `useSeat(name)` alone reads the keyless bucket, which
+ * a keyed seat never has.
+ */
+export function useKeyedSeat(name: string): readonly unknown[] {
+  return useSyncExternalStore(
+    subscribeKernel,
+    () => keyedSeatSnapshot(name),
+    () => keyedSeatSnapshot(name),
+  )
 }
 
 /** The page kernel, re-reading on every page-state change. */
@@ -152,22 +169,58 @@ interface SeatSnapshot {
   entries: readonly unknown[]
 }
 
+/** Last snapshot per `(kernel, seat)`: one object per change, the same otherwise. */
 const SEAT_CACHE = new WeakMap<object, Map<string, SeatSnapshot>>()
+/** Last snapshot per `(kernel, keyed seat)` for {@link useKeyedSeat}. */
+const KEYED_CACHE = new WeakMap<object, Map<string, SeatSnapshot>>()
+
+/** Every entry of a keyed seat, merged in total order (sorted once per version). */
+function keyedSeatSnapshot(name: string): readonly unknown[] {
+  const bridge = pageBridge()
+  const version = bridge.getVersion()
+  const kernel = bridge.getKernel()
+  if (kernel === undefined) return NO_SEAT.entries
+  let seats = KEYED_CACHE.get(kernel)
+  if (seats === undefined) {
+    seats = new Map()
+    KEYED_CACHE.set(kernel, seats)
+  }
+  const cached = seats.get(name)
+  if (cached !== undefined && cached.version === version) return cached.entries
+  interface Ordered {
+    id: string
+    name: string
+    order: number
+  }
+  const merged = ((kernel.registry?.all() ?? []) as readonly Ordered[])
+    .filter(entry => entry.name === name)
+    .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id))
+  const next: SeatSnapshot = { version, entries: merged }
+  seats.set(name, next)
+  return next.entries
+}
+/** The empty snapshot before a kernel is installed (a stable object). */
+const NO_SEAT: SeatSnapshot = { version: -1, entries: [] }
 
 function seatSnapshot(name: string, key: string | undefined): SeatSnapshot {
   const bridge = pageBridge()
   const version = bridge.getVersion()
-  const views = bridge.getKernel()?.views
-  if (views === undefined) return { version, entries: [] }
-  let seats = SEAT_CACHE.get(views)
+  const kernel = bridge.getKernel()
+  if (kernel === undefined) {
+    // No kernel yet: the page installs one and bumps the version, which
+    // re-renders. Return one shared object — a fresh `entries: []` on every
+    // render is a new snapshot and would re-render forever.
+    return NO_SEAT
+  }
+  let seats = SEAT_CACHE.get(kernel)
   if (seats === undefined) {
     seats = new Map()
-    SEAT_CACHE.set(views, seats)
+    SEAT_CACHE.set(kernel, seats)
   }
   const seat = key === undefined ? name : `${name}\u0000${key}`
   const cached = seats.get(seat)
   if (cached !== undefined && cached.version === version) return cached
-  const next: SeatSnapshot = { version, entries: views.entries(name as never, key) }
+  const next: SeatSnapshot = { version, entries: kernel.views.entries(name as never, key) }
   seats.set(seat, next)
   return next
 }

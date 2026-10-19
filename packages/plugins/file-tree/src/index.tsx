@@ -27,6 +27,10 @@ export const inject = ['slots']
 /** Entries a collapsed-until-asked directory shows at first (M2). */
 export const PAGE_SIZE = 500
 
+/** The switcher icon (contract.md §5.2; `layout` draws it verbatim). */
+export const FILES_ICON =
+  '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M2.5 3.5h4l1.2 1.5h5.8v7.5h-11z"/></svg>'
+
 interface DirState {
   entries?: FileInfo[]
   error?: string
@@ -128,7 +132,7 @@ function TreeRow({ mountCtx, file, depth }: { mountCtx: MountHandle; file: FileI
   )
 }
 
-function FileTreeRoot() {
+function FileTreeRoot({ active = true }: { active?: boolean }) {
   const { ctx, mount: mountCtx } = useKernel()
   const rootEntries = useDirectory(mountCtx, '', true)
   const total = rootEntries.entries?.length ?? 0
@@ -137,8 +141,10 @@ function FileTreeRoot() {
   // the page's kernel context (installed before pieces render), so it carries
   // the live services.
   useEffect(() => ctx.tree.onSelect(file => ctx.tabs.open(file)), [ctx])
+  // The view stays mounted while inactive (contract.md §5.2); `aria-hidden`
+  // keeps a hidden pane out of the accessibility tree and its buttons untabbable.
   return (
-    <nav className="diorama-tree" aria-label="文件树" data-testid="file-tree">
+    <nav className="diorama-tree" aria-label="文件树" data-testid="file-tree" aria-hidden={active ? undefined : true}>
       {rootEntries.error !== undefined && <div className="diorama-tree__error">{rootEntries.error}</div>}
       {rootEntries.entries?.slice(0, cut).map(file => (
         <TreeRow key={file.path} mountCtx={mountCtx} file={file} depth={0} />
@@ -156,7 +162,12 @@ export function apply(ctx: Context) {
   // See `tabs`: the service face comes from the kernel so every build agrees.
   // Bind: this half runs its own build of the service class (see `tabs`).
   ctx.provide('tree', bindMethods(createTreeService()))
-  provideEntry(ctx, { id: 'file-tree:nav', name: 'sidebar.tree', order: 100 }, FileTreeRoot)
+  // The tree is one view of the left column (contract.md §5.2), not the column.
+  provideEntry(
+    ctx,
+    { id: 'file-tree:nav', name: 'sidebar.views', key: 'files', order: 10, title: '文件', icon: FILES_ICON },
+    FileTreeRoot,
+  )
 
   // `tree.focus` (contract.md §3.7): the tree owns the command that moves
   // focus into it, and the tree is where focus lands.

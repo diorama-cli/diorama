@@ -21,17 +21,17 @@ test('5. open, switch and close tabs', async ({ page }) => {
     await tree.locator('[data-path="docs/notes.md"]').click()
     await tree.locator('[data-path="LICENSE"]').click()
     // Wait on the tab itself, not a count: a count can pass on the old DOM.
-    await expect(page.locator('[role="tab"][title="LICENSE"]')).toHaveAttribute('aria-selected', 'true')
-    await expect(page.locator('[role="tab"]')).toHaveCount(3)
+    await expect(page.locator('.diorama-tabs__strip [role="tab"][title="LICENSE"]')).toHaveAttribute('aria-selected', 'true')
+    await expect(page.locator('.diorama-tabs__strip [role="tab"]')).toHaveCount(3)
     await expect(page.getByTestId('tab')).toHaveCount(2)
 
     // Clicking a tab activates it; re-opening a file activates its tab (no dup).
-    await page.locator('[role="tab"][title="README.md"] .diorama-tabs__label').click()
-    await expect(page.locator('[role="tab"][title="README.md"]')).toHaveAttribute('aria-selected', 'true')
+    await page.locator('.diorama-tabs__strip [role="tab"][title="README.md"] .diorama-tabs__label').click()
+    await expect(page.locator('.diorama-tabs__strip [role="tab"][title="README.md"]')).toHaveAttribute('aria-selected', 'true')
     await expect(page.getByTestId('tabs-content').filter({ visible: true }).locator('.diorama-markdown h1')).toHaveText('Readme')
     await tree.locator('[data-path="LICENSE"]').click()
-    await expect(page.locator('[role="tab"][title="LICENSE"]')).toHaveAttribute('aria-selected', 'true')
-    await expect(page.locator('[role="tab"]')).toHaveCount(3)
+    await expect(page.locator('.diorama-tabs__strip [role="tab"][title="LICENSE"]')).toHaveAttribute('aria-selected', 'true')
+    await expect(page.locator('.diorama-tabs__strip [role="tab"]')).toHaveCount(3)
 
     // Only the active tab's content is visible; the others stay mounted.
     await expect(page.getByTestId('tabs-content')).toHaveCount(3)
@@ -42,7 +42,7 @@ test('5. open, switch and close tabs', async ({ page }) => {
     // Closing the active tab activates its right neighbour (LICENSE → none right → README).
     await page.getByTestId('active-tab').getByTestId('tab-close').click()
     await expect(page.getByTestId('active-tab')).toHaveAttribute('title', 'docs/notes.md')
-    await expect(page.locator('[role="tab"]')).toHaveCount(2)
+    await expect(page.locator('.diorama-tabs__strip [role="tab"]')).toHaveCount(2)
   } finally {
     await server.stop()
     directory.dispose()
@@ -63,7 +63,7 @@ test('6. each tab keeps its own scroll position', async ({ page }) => {
     })
     await tree.locator('[data-path="README.md"]').click()
     await expect(page.getByTestId('active-tab')).toHaveAttribute('title', 'README.md')
-    await page.locator('[role="tab"][title="scroller.txt"] .diorama-tabs__label').click()
+    await page.locator('.diorama-tabs__strip [role="tab"][title="scroller.txt"] .diorama-tabs__label').click()
     const scrolled = await page.getByTestId('tabs-content').filter({ visible: true }).evaluate(element => element.scrollTop)
     expect(scrolled).toBeGreaterThan(1000)
   } finally {

@@ -19,9 +19,14 @@ import { createTabsService, type CommandsService, type TabInfo } from 'diorama-k
 export const name = 'tabs'
 export const inject = ['slots']
 
-/** The content seats, one per tab, keyed by tab id (contract.md §5). */
+/**
+ * The content seats, one per tab, keyed by tab id (contract.md §5), plus the
+ * diff seat: a tab whose `view` is `diff` draws its file there instead of in
+ * the content seat, so content renderers never see a diff tab (contract.md §3.4).
+ */
 const DECLARE = {
   'tabs.content': { kind: 'keyed' },
+  'seats.git-diff': { kind: 'single' },
 } as const
 
 /** Props of one `tabs.content` entry. */
@@ -29,9 +34,41 @@ interface ContentProps {
   tab: TabInfo
 }
 
-/** One tab's seat: the first entry of `tabs.content` under this tab's key. */
+/** One tab's seat: the diff seat for `view: 'diff'`, else `tabs.content`. */
 function TabContent({ tab }: ContentProps) {
   const { registry } = useKernel()
+  if (tab.view === 'diff') {
+    // The diff seat is optional: without the piece that fills it, say so
+    // instead of drawing the file as content (a diff tab shows a diff).
+    if (registry?.owned?.('seats.git-diff') !== true) {
+      return (
+        <div className="diorama-renderer__empty" role="status" data-testid="tab-diff-empty">
+          没有 diff 渲染器
+        </div>
+      )
+    }
+    return (
+      <Slot
+        name="seats.git-diff"
+        props={{ tab }}
+        empty={
+          <div className="diorama-renderer__empty" role="status" data-testid="tab-diff-empty">
+            没有 diff 渲染器
+          </div>
+        }
+        exhausted={errors => (
+          <div className="diorama-renderer__error" role="alert">
+            {errors.join('\n')}
+          </div>
+        )}
+        fallback={<div className="diorama-renderer__error">diff 渲染失败</div>}
+        render={entry => {
+          const Diff = entry.component as unknown as (props: { tab: TabInfo }) => ReactElement | null
+          return <Diff tab={tab} />
+        }}
+      />
+    )
+  }
   // Only look a seat up when a piece declared it: the registry refuses (and
   // warns about) lookups of undeclared seats (contract.md §3.3), and a page
   // without the `renderer-registry` piece has no entries under this seat.

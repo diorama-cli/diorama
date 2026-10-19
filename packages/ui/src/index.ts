@@ -9,6 +9,7 @@ export {
   SlotEntryView,
   subscribeKernel,
   useKernel,
+  useKeyedSeat,
   useSeat,
   useStore,
   type KernelContextValue,

@@ -113,11 +113,14 @@ export { defaultSlotOrder, SlotConflictError, SlotRegistry, type SlotOrder } fro
 export { BUILTIN_SLOTS, type FileRendererProps, type SlotKind, type SlotSpec } from './types.ts'
 export type {
   MatchedSlotSpec,
+  SidebarViewMeta,
+  SidebarViewProps,
   SlotComponent,
   SlotEntry,
   SlotMap,
   SlotName,
   SlotRegistration,
+  TabDiffProps,
 } from './types.ts'
 export {
   chooseRenderer,

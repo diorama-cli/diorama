@@ -24,7 +24,7 @@ test('7. shortcuts close, cycle and jump between tabs', async ({ page }) => {
   try {
     await page.goto(server.url)
     await openFiles(page, ['README.md', 'docs', 'docs/notes.md', 'LICENSE'])
-    await expect(page.locator('[role="tab"]')).toHaveCount(3)
+    await expect(page.locator('.diorama-tabs__strip [role="tab"]')).toHaveCount(3)
     expect(await activeTabTitle(page)).toBe('LICENSE')
 
     // mod+alt+arrowleft → previous tab (wrapping is not needed here).
@@ -35,7 +35,7 @@ test('7. shortcuts close, cycle and jump between tabs', async ({ page }) => {
 
     // mod+alt+w closes the active tab; its right neighbour (none) → left one.
     await page.keyboard.press(`${MOD}+Alt+W`)
-    await expect(page.locator('[role="tab"]')).toHaveCount(2)
+    await expect(page.locator('.diorama-tabs__strip [role="tab"]')).toHaveCount(2)
     expect(await activeTabTitle(page)).toBe('docs/notes.md')
 
     // `ctrl+tab` is a browser-reserved key on macOS (the browser takes it
@@ -96,7 +96,7 @@ test('7c. shortcuts do not fire while typing in a field', async ({ page }) => {
       input.focus()
     })
     await page.keyboard.press(`${MOD}+Alt+W`)
-    await expect(page.locator('[role="tab"]')).toHaveCount(2)
+    await expect(page.locator('.diorama-tabs__strip [role="tab"]')).toHaveCount(2)
   } finally {
     await server.stop()
     directory.dispose()

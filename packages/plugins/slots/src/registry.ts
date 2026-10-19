@@ -147,6 +147,10 @@ export class SlotRegistry {
       order,
       component: component as SlotComponent,
       ...(registration.matcher === undefined ? {} : { matcher: registration.matcher }),
+      // View metadata is entry data, not a custom field: `notify` copies these
+      // explicitly (a field it does not know would be dropped on every change).
+      ...(registration.title === undefined ? {} : { title: registration.title }),
+      ...(registration.icon === undefined ? {} : { icon: registration.icon }),
       declarations: registration.declare ?? {},
     }
     // Equal order across the entries of one seat, whatever their keys: the
@@ -299,6 +303,8 @@ export class SlotRegistry {
         component: entry.component,
         ...(entry.key === undefined ? {} : { key: entry.key }),
         ...(entry.matcher === undefined ? {} : { matcher: entry.matcher }),
+        ...(entry.title === undefined ? {} : { title: entry.title }),
+        ...(entry.icon === undefined ? {} : { icon: entry.icon }),
       }
       if (bucket === undefined) next.set(seat, [publicEntry])
       else bucket.push(publicEntry)

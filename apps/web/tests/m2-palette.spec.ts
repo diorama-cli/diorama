@@ -31,7 +31,7 @@ test('8. mod+k opens the palette, filters and runs a command', async ({ page }) 
     await expect(page.locator('[role="option"]')).toHaveCount(1)
     await page.keyboard.press('Enter')
     await expect(page.getByTestId('palette')).toHaveCount(0)
-    await expect(page.locator('[role="tab"]')).toHaveCount(1)
+    await expect(page.locator('.diorama-tabs__strip [role="tab"]')).toHaveCount(1)
 
     // Escape closes without running anything. (Focus may be on a tab label
     // now; the palette's field takes it when it opens.)
@@ -39,7 +39,7 @@ test('8. mod+k opens the palette, filters and runs a command', async ({ page }) 
     await expect(page.getByTestId('palette-input')).toBeFocused()
     await page.keyboard.press('Escape')
     await expect(page.getByTestId('palette')).toHaveCount(0)
-    await expect(page.locator('[role="tab"]')).toHaveCount(1)
+    await expect(page.locator('.diorama-tabs__strip [role="tab"]')).toHaveCount(1)
 
     // An empty result says so instead of showing a blank list.
     await page.keyboard.press(`${MOD}+k`)
@@ -81,12 +81,12 @@ test('9. without the palette plugin the shortcuts still work', async ({ page }) 
     const tree = page.getByTestId('file-tree')
     await tree.locator('[data-path="README.md"]').click()
     await tree.locator('[data-path="LICENSE"]').click()
-    await expect(page.locator('[role="tab"]')).toHaveCount(2)
+    await expect(page.locator('.diorama-tabs__strip [role="tab"]')).toHaveCount(2)
     // mod+k does nothing (nothing binds it), but mod+alt+w still closes.
     await page.keyboard.press(`${MOD}+k`)
     await expect(page.getByTestId('palette')).toHaveCount(0)
     await page.keyboard.press(`${MOD}+Alt+w`)
-    await expect(page.locator('[role="tab"]')).toHaveCount(1)
+    await expect(page.locator('.diorama-tabs__strip [role="tab"]')).toHaveCount(1)
   } finally {
     await server.stop()
     directory.dispose()

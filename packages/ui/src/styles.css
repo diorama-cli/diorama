@@ -85,10 +85,59 @@ code {
 }
 
 .diorama-layout__sidebar {
+  display: grid;
+  /* The view switcher (contract.md §5.2), then the active view. */
+  grid-template-columns: 36px 1fr;
   min-width: 0;
-  overflow: auto;
+  overflow: hidden;
   background: var(--dio-panel);
   border-right: 1px solid var(--dio-border);
+}
+
+.diorama-sidebar__views {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 0;
+  border-right: 1px solid var(--dio-border);
+  background: var(--dio-bg);
+}
+
+.diorama-sidebar__view {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--dio-muted);
+  font: inherit;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.diorama-sidebar__view:hover {
+  background: rgba(0, 0, 0, 0.05);
+  opacity: 1;
+}
+
+.diorama-sidebar__view--active {
+  color: var(--dio-accent);
+  opacity: 1;
+  box-shadow: inset 2px 0 0 var(--dio-accent);
+}
+
+.diorama-sidebar__panes {
+  min-width: 0;
+  overflow: auto;
+}
+
+.diorama-sidebar__pane {
+  min-width: 0;
 }
 
 .diorama-layout__main {
@@ -515,4 +564,163 @@ code {
   padding: 14px;
   color: var(--dio-muted);
   font-size: 13px;
+}
+
+/* Git piece: the changes view and the diff reader (contract.md §3.2, §5.2) */
+.diorama-changes {
+  padding: 6px 0;
+  font-size: 12.5px;
+  user-select: none;
+}
+
+.diorama-changes__group {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 10px 6px;
+  color: var(--dio-muted);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.diorama-changes__reload,
+.diorama-diff__reload {
+  border: 0;
+  background: none;
+  color: var(--dio-accent);
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+
+.diorama-changes__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 2px 10px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.diorama-changes__row:hover {
+  background: rgba(0, 0, 0, 0.045);
+}
+
+.diorama-changes__row--selected {
+  background: rgba(47, 111, 235, 0.09);
+}
+
+.diorama-changes__badge {
+  flex: none;
+  width: 14px;
+  font-family: var(--dio-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.diorama-changes__badge--modified {
+  color: #b07d00;
+}
+
+.diorama-changes__badge--added,
+.diorama-changes__badge--untracked {
+  color: #2e7d32;
+}
+
+.diorama-changes__badge--deleted,
+.diorama-changes__badge--conflicted {
+  color: var(--dio-danger);
+}
+
+.diorama-changes__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.diorama-changes__dir {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--dio-muted);
+  font-size: 11px;
+}
+
+.diorama-changes__empty {
+  padding: 10px;
+  color: var(--dio-muted);
+}
+
+.diorama-diff {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.diorama-diff__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--dio-border);
+  background: var(--dio-panel);
+  font-size: 12px;
+}
+
+.diorama-diff__path {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--dio-mono);
+}
+
+.diorama-diff__notes {
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--dio-border);
+  color: var(--dio-muted);
+  font-size: 12px;
+}
+
+.diorama-diff__text {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 6px 0;
+  overflow: auto;
+  font-family: var(--dio-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  tab-size: 4;
+}
+
+.diorama-diff__line {
+  padding: 0 12px;
+  white-space: pre;
+}
+
+.diorama-diff__line--add {
+  background: #e9f7ec;
+  color: #14532d;
+}
+
+.diorama-diff__line--del {
+  background: #fdecea;
+  color: #7f1d1d;
+}
+
+.diorama-diff__line--hunk {
+  background: #eef3fd;
+  color: #1e3a8a;
+}
+
+.diorama-diff__line--meta {
+  color: var(--dio-muted);
 }

@@ -106,3 +106,24 @@ test('tabs: open on a directory is a no-op (or re-activates)', () => {
   const a = tabs.open(file('a'))
   assert.equal(tabs.open({ path: 'dir', name: 'dir', kind: 'dir', size: 0, mtime: 0 }).id, a.id)
 })
+
+test('tabs: the key is (path, view) — content and diff tabs coexist', () => {
+  const tabs = createTabsService()
+  const content = tabs.open(file('src/app.js'))
+  const diff = tabs.open(file('src/app.js'), { view: 'diff' })
+  assert.notEqual(content.id, diff.id)
+  assert.equal(tabs.count, 2)
+  assert.equal(tabs.active?.id, diff.id)
+  assert.equal(tabs.viewOf(content.id), 'content')
+  assert.equal(tabs.viewOf(diff.id), 'diff')
+  // Re-opening the same (path, view) activates the existing tab.
+  tabs.open(file('src/app.js'), { view: 'diff' })
+  assert.equal(tabs.count, 2)
+  tabs.open(file('src/app.js'))
+  assert.equal(tabs.count, 2)
+  assert.equal(tabs.active?.id, content.id)
+  // `find` is the key lookup both pieces use.
+  assert.equal(tabs.find('src/app.js')?.id, content.id)
+  assert.equal(tabs.find('src/app.js', 'diff')?.id, diff.id)
+  assert.equal(tabs.find('src/other.js'), undefined)
+})
