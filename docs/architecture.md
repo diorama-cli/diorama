@@ -14,7 +14,7 @@
            │    ├─ [mount:abc] ctx.fork()   → HTTP :54321 → 目录 A      │
            │    ├─ [mount:def] ctx.fork()   → HTTP :54322 → 目录 B      │
            │    └─ [mount:ghi] ctx.fork()   → HTTP :54323 → 目录 C      │
-           │  control server: ~/.diorama/gateway.sock                 │
+           │  control server: ~/.diorama/diorama.sock                 │
            └──────────────────────────────────────────────────────────┘
                       ▲ unix socket                    ▲ 每目录一个端口
                  diorama CLI（短命）               浏览器 A / B / C
@@ -136,7 +136,7 @@ v1 **不限制**插件权限（完全信任），但有两条现在就要守住�
 | 维度 | 选择 | 说明 |
 |---|---|---|
 | 寻址 | **每目录独立端口** | 随机分配（`--port` 可指定）；不复用单端口 + 路径前缀 |
-| 控制通道 | **Unix domain socket** `~/.diorama/gateway.sock`（Windows 命名管道） | 仅本机可访问，无认证负担 |
+| 控制通道 | **Unix domain socket** `~/.diorama/diorama.sock`（Windows 命名管道） | 仅本机可访问，无认证负担 |
 | 端口冲突 | 随机端口自动重试（上限 20 次）；**显式 `--port` 冲突直接报错** | 尊重用户显式意图 |
 | 固定入口 | 不做 | 用 `diorama ls` 拿当前 URL |
 | 故障域 | **目录级隔离**：一个挂载崩溃不影响其它 | 见 §11 |
@@ -192,7 +192,7 @@ diorama 是**只读查看器**：只浏览，不修改。这缩小了 API 面，
 
 写盘的唯一去处是**工具自己的状态目录** `~/.diorama/`：
 
-- `gateway.sock`、pid 文件、日志
+- `diorama.sock`、`gateway.pid`、`gateway.log`、全局 `diorama.toml`
 - 插件配置与缓存
 - 用户 UI 偏好（理论上，见 O5）
 

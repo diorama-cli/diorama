@@ -1,11 +1,11 @@
-# 插件契约 v0.3
+# 插件契约 v0.4
 
-> 记录于 2026-10-18；v0.3 记录于 2026-10-19（v0.1 草案已归档为 [contract-v0.1.md](contract-v0.1.md)）。
+> 记录于 2026-10-18；v0.3 记录于 2026-10-19；v0.4 记录于 2026-10-19（v0.1 草案已归档为 [contract-v0.1.md](contract-v0.1.md)）。
 > 契约先行：这份文档是内核与插件之间的唯一约定，改它 = 破环变更。
 >
-> **状态：v0.3 已定稿，M2 按它实现。** v0.1 → v0.2 的差异都是 M1 决策（§12），
-> v0.2 → v0.3 的差异都是 M2 决策（§13）。内核契约版本 `0.3`，所有插件声明
-> `contract: ">=0.3 <0.4"`；内核**已启用**范围检查（§6）。
+> **状态：v0.4 已定稿，M3 按它实现。** v0.1 → v0.2 的差异都是 M1 决策（§12），
+> v0.2 → v0.3 的差异都是 M2 决策（§13），v0.3 → v0.4 的差异都是 M3 决策（§14）。
+> 内核契约版本 `0.4`，所有插件声明 `contract: ">=0.4 <0.5"`；内核**已启用**范围检查（§6）。
 
 ## 0. 术语
 
@@ -73,15 +73,15 @@ export function apply(ctx: Context) {
 
 一个包的两个半边可以各自有不同的 `inject`。半边之间**不共享内存**，只能通过 RPC（§4）通信。
 
-## 2.5 生命周期：全局插件图，按目录服务实例
+## 2.5 生命周期：全局插件图，按目录服务实例 ✅ v0.4 定
 
-多目录共享一个 gateway 进程，插件**只加载一次**，但服务**每个目录一份**（M3 起；M1 仍是单目录前台进程，但形状照此执行）：
+一个常驻 gateway 进程服务多个目录。插件**只加载一次**，但服务**每个目录一份**：每个挂载目录是一个 **fork 出的子 ctx**（`ctx.fork()`；内核实现为 `root.isolate(<mountId>)`）。
 
 ```ts
 export const name = 'fs'
 export const inject: string[] = []
 
-// ① 全局注册面：只执行一次
+// ① 全局注册面：只执行一次（root ctx）
 export function apply(root: Context) {
   root.diorama.mounts.onMount((mountCtx, { root: dir }) => {
     // ② 每个目录实例化一次；mountCtx 是 fork 出的子 ctx
@@ -96,11 +96,29 @@ export function apply(root: Context) {
 | 规则 | 原因 |
 |---|---|
 | 插件 `apply` 只在 root ctx 执行一次 | 插件代码全局一份，bundle 只加载一次 |
-| 服务实例通过 mount ctx 绑定 | 服务实例按目录隔离 |
+| 服务实例通过 mount ctx（fork 出的子 ctx）绑定 | 服务实例按目录隔离 |
 | `ctx.fs` / `ctx.git` 等 scope 服务**只在子 ctx 可访问**，root 访问抛错 | 防止插件拿错目录 |
+| 子 ctx **可读** `ctx.diorama`（只读面），但自己的身份从 **`mountId`** 取，不从 `mounts.list()` 里挑 | 子 ctx 是 root 的后代，读父级服务是 Cordis 原语义；靠 list 认领目录是错误来源 |
+| 重新挂同一个目录 = **新 `mountId`、新子 ctx**（不复用、不复活旧 ctx） | 故障隔离：旧 ctx 可能已 degraded |
 | 组件不得从全局 `ctx` 取数据，用 props 传来的 `tabCtx` / `mountId` | 组件会渲染在某个具体目录的页面里 |
 | 卸载插件 = 拆除所有子 ctx；`diorama rm` 只拆一个子 ctx | 防止孤儿实例 |
 | 日志前缀 `[mount:<id>]` | 混合模型下的可观测性约定 |
+
+**`onMount` 的时机（v0.4 定）：**
+
+- 在 mount **之前**注册的回调：每个现存 mount 依次调用一次；
+- 在 mount **之后**注册的回调（插件 boot 晚于第一次挂载）：立即对每个现存 mount 调用一次；
+- 回调的返回值是该 **mount** 上的 disposer；`onMount` 返回的 disposer 对所有 mount 执行各自的 disposer，此后该回调不再被调用；
+- 回调抛错 = 该插件在该 mount 上失败：记 `[mount:<id>]` 日志并让该 mount 进入 degraded（§11），其余回调照常。
+
+**卸载一个 mount 的顺序（顺序是契约的一部分）：**
+
+1. 该 mount 状态转 `stopped`，控制面 `unmount` 返回；
+2. 关闭该 mount 的 HTTP listener 与全部 RPC 连接（连接关闭 = 取消其全部订阅，§4）；
+3. 执行 `onMount` 回调返回的 disposer（**先于**子 ctx 销毁，插件在子 ctx 还活着时清理）；
+4. `dispose` 子 ctx（fiber 卸载，服务实例失效）。
+
+之后这个 `mountId` 不再出现在 `diorama.mounts.list()`，`onMount` 回调也不再为它调用。
 
 ## 3. 服务清单
 
@@ -165,8 +183,11 @@ interface FsService {
   - **`type` 是提示，不是真相**：一次 rename 可能同时产生 `change` 与 `unlink`（多义）。
     接收方拿 `path` 发一次 `fs.stat` 定夺：存在 → `add`/`change`，`ENOENT` → `unlink`。
   - 订阅时**不**补发初态：调用方先 `list` / `stat` 一次，再 watch。
-  - server 半边：文件级监听用“父目录监听 + 过滤”；client 半边：通过 RPC 订阅（§4），
-    签名与本地一致。
+  - **共享与上限（v0.4 定）**：同一个 mount 内，多个订阅同一目录的 `watch` **共享一个 OS 监听**
+    （一次 `fs.watch`、一套 debounce 窗口、按 `path` 合并后分发给全部订阅者），引用计数归零即关闭。
+    跨 mount **不共享**（目录、忽略规则都不同）。每个 mount 同时监听的目录数上限为
+    **`watch.maxDirectories`（默认 64）**：达到上限后新的 `watch` **不抛错**，返回 no-op disposer
+    并记一条 `warn`（上限说明）——展开文件树不应被一个上限打断页面。上限按 mount 计，不按进程计。
 - **`list` 与忽略规则（v0.3 定，M2）**：`list(path)` **不返回**被 `ignore` 规则隐藏的条目
   （§4.1，`diorama.toml` 的 `[ignore]` 加上内置默认 `'.git'`、`node_modules`；`--all` 解除）。
   这是隐藏规则的**唯一强制点**：文件树、palette 的文件检索、watch 都读 `list`，因此天然一致。
@@ -249,20 +270,38 @@ ctx.slots.register({
     key = tab id）。
   - `open` 从 v0.2 的 `void` 改为返回 `TabInfo`：源码层面兼容（`void` 用法照旧编译）。
 
-### 3.5 `ctx.diorama.mounts`（server）
+### 3.5 `ctx.diorama.mounts`（server）✅ v0.4 定
 
 挂载登记面，所有服务插件靠它拿到自己的目录：
 
 ```ts
+interface MountInfo {
+  /** 绝对路径，realpath 后的目录；挂载时确定、不可变。 */
+  root: string
+  /** 全局唯一、不复用；出现在日志里为 `[mount:<id>]`。 */
+  mountId: string
+  /** 该目录的 HTTP 端口与 URL（页面 origin）。 */
+  port: number
+  url: string
+  /** 挂载在该目录上的有效配置（§4.1）。 */
+  config: EffectiveConfig
+  /** 来源配置文件；`undefined` = 全默认。 */
+  configFile?: string
+}
+
 interface Mounts {
-  onMount(cb: (mountCtx: Context, info: { root: string; mountId: string }) => (() => void) | void): () => void
+  /** 每个 mount 调用一次；返回值是该 mount 上的 disposer（§2.5 时机）。 */
+  onMount(cb: (mountCtx: Context, info: MountInfo) => (() => void) | void): () => void
   list(): MountInfo[]
 }
 ```
 
-- `info.root` 是绝对路径，**挂载时确定、不可变**。
-- 返回的 disposer 在目录卸下时执行。
-- **M1 形态**：内核在 root ctx 上提供 `ctx.diorama.mounts`（含 `mountId`），`fs` 作为内置 server 半边在其中注册 `FsService`；`diorama [dir]` 启动时触发一次 `onMount`。
+- `info` 在 `onMount` 时已完整（含 `port` / `url`）；`info.root` 不可变。
+- 返回的 disposer 在该目录卸下时执行，顺序见 §2.5。
+- `list()` 返回**全部** mount（跨目录可见）；插件若只需自己的目录，用子 ctx 上的 `ctx.mountId`。
+- 服务的**实例化**只发生在 `onMount` 回调里（§2.5）；插件不得自己触发挂载——挂载由控制面
+  （§7）驱动。
+- `ctx.diorama` 挂在 **root ctx**：`{ name, contract, mounts }`。子 ctx 可读它。
 
 ### 3.6 只读原则
 
@@ -404,10 +443,15 @@ interface CommandsService {
 
 **与 M0 的关系**：M0 的 `GET /api/fs/list`、`/api/fs/read` **删除**。`/plugin.json`、`/plugins/<id>.js`、`/__diorama__/*` 仍是 HTTP。
 
-### 4.1 `diorama.toml` ✅ v0.3 定，M2 实现
+### 4.1 `diorama.toml` ✅ v0.3 定，M2 实现 / v0.4 补 gateway 化后的归属
 
-唯一的配置文件。**查找顺序**：`<被服务的目录>/diorama.toml` → `$DIORAMA_HOME/diorama.toml`
-（`DIORAMA_HOME` 默认 `~/.diorama`；两个路径都找不到就用默认值）。只读**第一个找到的文件**，不合并。
+唯一的配置文件（TOML；**不引入第二种格式**）。**查找顺序**：
+
+1. `<被服务的目录>/diorama.toml`（目录自己的配置）
+2. `$DIORAMA_HOME/diorama.toml`（全局默认；`DIORAMA_HOME` 默认 `~/.diorama`）
+3. 都没有 → 默认值
+
+只读**第一个找到的文件**，不合并。`--config <path>` 跳过查找。
 
 ```toml
 # diorama.toml —— 全部字段可选
@@ -418,16 +462,18 @@ ignore = [".git", "node_modules"]   # 隐藏规则（覆盖内置默认）
 
 [watch]
 debounceMs = 300            # 事件窗口合并（§3.1）；0–60000
+maxDirectories = 64         # 每个目录同时监听的目录数上限（§3.1）；1–4096
 ```
 
 | 字段 | 类型 | 默认 | 说明 |
 |---|---|---|---|
 | `host` | string | `"127.0.0.1"` | 等价 `--host` |
-| `port` | integer 0–65535 | `0` | 等价 `--port` |
+| `port` | integer 0–65535 | `0` | 等价 `--port`；显式端口被占 → `EADDRINUSE`，不重试 |
 | `plugins` | string[] | 全部内置 | 等价 `--plugins`；未知 id → fail loud |
 | `ignore` | string[] | `[".git", "node_modules"]` | 隐藏规则；`[]` 或 `--all` 表示不隐藏 |
 | `watch.debounceMs` | integer 0–60000 | `300` | `fs.watch` 的合并窗口 |
 | `watch.enabled` | boolean | `true` | `false` 时 `fs.watch` 立即返回空 disposer（不监听） |
+| `watch.maxDirectories` | integer 1–4096 | `64` | 每个 mount 同时监听的目录上限（§3.1） |
 
 **优先级：CLI > `diorama.toml` > 默认值。**
 
@@ -439,9 +485,17 @@ debounceMs = 300            # 事件窗口合并（§3.1）；0–60000
   强制点是 `fs.list`（§3.1）。
 - **`diorama.toml` 写错 = fail loud**：语法错误或字段类型/范围不对 → 打印文件名与原因，
   CLI 退出码 2，绝不静默忽略。
-- **失败与展示**：CLI/`--dump-plan` 打印生效的配置来源（`config: <path>` 或 `config: none`）。
-- **下发到页面**：`/plugin.json` 增加 `config: EffectiveConfig`，内容是合成后的有效配置
-  （不含 toml 原文）。M2 只有文件树/palette 读 `ignore`——但它们走 `fs.list`，页面不需要再过滤。
+- **`$DIORAMA_HOME` 的两种含义已分开（v0.4）**：`DIORAMA_HOME` 只表示**状态目录**
+  （配置、socket、pid、日志）；web 资源不从这里找（见 §7 的 `assetsRoot` 规则）。
+- **gateway 化后的归属（v0.4）**：除 `host` / `port` / `plugins` / `ignore` / `[watch]` 外，
+  配置是**每个挂载目录各自一份**。**配置合成发生在短命 CLI 侧**（它知道用户敲的目录），
+  合成后的 `EffectiveConfig` 连同来源路径随控制面 `mount` 请求交给 gateway；gateway 不自己读
+  toml。因此 `$DIORAMA_HOME/diorama.toml` 是「每个目录在别处都没配置时」的全局默认。
+- **失败与展示**：CLI/`--dump-plan` 打印生效的配置来源（`config: <path>` 或 `config: none`）；
+  `diorama ls` 的 `CONFIG` 列显示每个 mount 的来源。
+- **下发到页面**：`/plugin.json` 带 `config: EffectiveConfig`、`configFile`、`state`
+  （`'ok' | 'degraded'`）与 `lastError`（degraded 时）。M2 起只有文件树/palette 读 `ignore`，
+  但它们走 `fs.list`——页面不需要再过滤。
 
 ## 5. slot 清单
 
@@ -504,17 +558,164 @@ interface FileRendererProps {
 
 ## 6. contract version 规则 ✅ v0.2 起强制
 
-- 内核版本 `0.x` 期间：**minor 改动即破环**，插件写窄范围（`>=0.3 <0.4`）。
+- 内核版本 `0.x` 期间：**minor 改动即破环**，插件写窄范围（`>=0.4 <0.5`）。
 - **检查时间**：读 manifest 时（加载前）。不满足 → 拒绝加载该插件，并解释原因（终端 + 浏览器控制台）。
-- 内置插件同样检查：M1 遗留的 `>=0.2 <0.3` 会被 v0.3 内核拒绝，所以 M2 把所有内置插件升到
-  `>=0.3 <0.4`。**内核与半边必须一起重新构建**（builtin manifest 与 kernel 的 `CONTRACT_VERSION`
+- 内置插件同样检查：M2 遗留的 `>=0.3 <0.4` 会被 v0.4 内核拒绝，所以 M3 把所有内置插件升到
+  `>=0.4 <0.5`。**内核与半边必须一起重新构建**（builtin manifest 与 kernel 的 `CONTRACT_VERSION`
   来自同一份构建）。
 - M2 起**没有**外部插件（§9），因此"UI 显示「插件 X 因契约不兼容未加载」"的展示面随外部插件一起推迟；
   拒绝本身仍然 fail loud（CLI 退出码非 0 / boot 图里不出现）。
 
-## 7. Gateway 控制面 — M3
+## 7. Gateway 控制面 ✅ v0.4 定
 
-CLI 与 gateway 之间的 socket 协议，M3 实现，见 v0.1 §7。M1 仍是前台单进程。
+CLI（短命进程）与 gateway（常驻进程）之间的唯一通道。**它不属于插件契约**（插件见不到它），
+但与内核同一次构建，故一并写在这里。
+
+**进程模型**（architecture.md §10/§11）：整台机器一个 `diorama gateway`；`diorama <dir>` 是短命
+CLI：连 socket → 不在就后台拉起 gateway → 请求 `mount` → 打印 URL。每个挂载目录一个独立端口。
+
+### 7.1 传输
+
+| 项 | 取值 |
+|---|---|
+| 地址 | Unix domain socket：**`$DIORAMA_HOME/diorama.sock`**（`DIORAMA_HOME` 默认 `~/.diorama`，目录不存在则创建）。Windows 用命名管道（v1 不实现，留分支） |
+| 帧 | **NDJSON**：一行一个 JSON 对象，`\n` 结尾（JSON 内的换行已转义，二者不冲突） |
+| 上限 | 单行 **1 MiB**；超限 → 回 `ETOOLARGE` 并断开该连接 |
+| 并发 | 一条连接可同时有多个请求；响应按 `id` 配对，**可乱序** |
+| 配对 | 客户端为每个请求分配自增 `id`；服务端原样回填 |
+| 认证 | 无（仅本机，architecture.md §10 已拍板） |
+
+### 7.2 帧
+
+```ts
+// client → gateway
+{ type: 'request', id: number, method: string, params: object }
+
+// gateway → client
+{ type: 'result', id: number, result: object }
+{ type: 'error',  id: number, code: string, message: string }
+{ type: 'event',  topic: string, payload: object }      // 只发给订阅了 events 的连接
+```
+
+- 服务端对**未订阅连接**发事件是非法状态（不会发生）；未收到 `events` 的连接不接收事件帧。
+- 解析失败的行 → 回 `{ code: 'EBADREQUEST' }`（`id` 缺失时记日志并忽略该行）。
+- 未知方法与未知方法名区分：`EMETHOD`。
+
+### 7.3 方法
+
+| method | params | result |
+|---|---|---|
+| `ping` | `{}` | `{ pid, version, contract, protocol: 1, startedAt }` |
+| `mount` | `{ root, config, configFile?, port?, host?, plugins?, all?, breakPlugin? }` | `MountStatus` + `{ created: boolean }` |
+| `unmount` | `{ mountId }` 或 `{ root }`（二选一） | `{ mountId, root }` |
+| `list` | `{}` | `{ mounts: MountStatus[] }` |
+| `status` | `{}` | `{ pid, version, contract, startedAt, state: 'ok' 或 'degraded', mounts: MountStatus[] }` |
+| `stop` | `{ force?: boolean }` | `{ stopping: true }`（响应发出后 gateway 卸载全部 mount、关闭 socket 并退出） |
+| `events` | `{ topics?: ('mounted' / 'unmounted' / 'degraded' / 'recovered')[] }` | `{ subscribed: true }`，之后该连接收事件帧 |
+
+```ts
+interface MountStatus {
+  mountId: string
+  root: string                   // realpath 后的绝对路径
+  port: number
+  url: string                    // http://<host>:<port>/（0.0.0.0 时显示 127.0.0.1）
+  state: 'starting' | 'ok' | 'degraded' | 'stopped'
+  since: number                  // 进入当前状态的毫秒时间戳
+  configFile?: string            // 来源 diorama.toml；缺省 = 全默认
+  plugins: string[]              // 客户端插件选择（boot 顺序）
+  hidden: string[]               // 生效的 ignore 规则
+  lastError?: { code?: string; message: string; at: number }   // degraded 时
+}
+```
+
+**`mount` 的语义：**
+
+- **配置在 CLI 侧合成**（§4.1）：`config` 是完整的 `EffectiveConfig`，`configFile` 是来源；
+  `port` / `host` / `plugins` / `all` / `breakPlugin` 是 CLI 的**原始覆盖**，gateway 用它们再合成
+  一次时以 `config` 为准（两者必须一致；不一致是调用方 bug，`EBADREQUEST`）。
+  `breakPlugin` 是验证开关（M0 验收点 5），原样传给服务端插件树。
+- **幂等**：同一 `root`（realpath）已在挂载 → 返回已有 `MountStatus`，`created: false`。
+  幂等判定只看 root，不看配置：再次挂载**不**改已有 mount 的配置与端口。
+- **端口**：`config.port === 0` → 随机端口，被占时自动重试（上限 20 次）；
+  显式 `port !== 0` 被占 → `EADDRINUSE`，不重试（尊重用户显式意图、不占用别人端口）。
+- **`root` 不存在 / 不是目录** → `ENOTDIR`。
+
+**`unmount` 的语义：** 按 §2.5 的四步顺序卸下。`mountId` 不存在（已卸下）→ 幂等成功。
+
+**`events` 的事件：** `mounted`（`MountStatus`）、`unmounted`（`{ mountId, root }`）、
+`degraded` / `recovered`（`MountStatus`）。连接关闭即退订；不需要 `cancel` 帧。
+v1 **没有 CLI 命令消费它**（`diorama ls` 不做 `--watch`）；它存在是为了脚本与以后的 UI。
+
+**错误码：**
+
+| 码 | 含义 |
+|---|---|
+| `EBADREQUEST` | 帧或参数形状不对 |
+| `EMETHOD` | 未知方法 |
+| `ENOMOUNT` | 指定 `mountId` / `root` 不在表里 |
+| `EADDRINUSE` | 显式端口被占 |
+| `ENOTDIR` | root 不存在或不是目录 |
+| `ETOOLARGE` | 单行超过 1 MiB |
+| `EGATEWAYDEAD` | **CLI 侧**：连不上 socket（gateway 没在跑） |
+| `ESTARTING` | socket 存在但 gateway 还没开始服务（短暂，CLI 应重试到超时） |
+
+### 7.4 后台进程
+
+- `diorama gateway start` 拉起**独立进程**（`detached`，父进程退出不影响它），写入
+  `$DIORAMA_HOME/gateway.pid`（内容 `{ pid, socket, startedAt }`），并把 stdout/stderr 追加到
+  `$DIORAMA_HOME/gateway.log`。
+- 启动竞态**不追求并发正确性**（v0.1 的结论保持）：谁先 `bind` socket 成功谁就是 gateway，输者
+  以 `EADDRINUSE` 退出；CLI 连不上时**重试连接**到超时（默认 5s）。
+- **`stop`**：发 `stop` 请求，等进程退出（默认 5s）；超时且有 `force` → `SIGKILL`；
+  无 `force` → 报错退出非 0。**未运行时 `stop` 是成功的 no-op**（退出码 0）。
+- **`restart`**：`stop` 后 `start`，**不保留挂载**（gateway 不持久化，architecture.md §10）。
+- **`status`**：gateway 未运行时打印一行并退出 **1**。
+- 进程崩溃后 pid 文件与 socket 文件可能残留：CLI 连不上就视为未运行，并清理残留 socket 文件。
+
+### 7.5 前台模式
+
+`diorama <dir> --foreground`：CLI 进程**自己**启动一个 gateway（同样建 socket、写 pid 文件），挂载
+该目录，前台等待 `SIGINT`/`SIGTERM`；退出时卸载并删除 socket。它用于调试与测试隔离：
+语义与后台 gateway 完全一致（页面、控制面、`diorama ls` 都可见），只是没有 `detached`。
+**默认（无 `--foreground`）走后台 gateway。**
+
+### 7.6 CLI 行为（退出码与输出）
+
+| 情形 | 退出码 |
+|---|---|
+| 成功 | 0 |
+| 参数/用法错误、`diorama.toml` 写错 | 2 |
+| 目录不存在 / 不是目录 | 2 |
+| 显式端口被占（`EADDRINUSE`） | 1 |
+| 插件加载失败（boot 图有 failure） | 1 |
+| `status` 时 gateway 未运行 | 1 |
+| `stop` 时 gateway 未运行 | 0（幂等） |
+| 连不上 / 启动超时 | 1 |
+
+`diorama [dir]` 打印（保持 M1 起的三行，便于 e2e 抓 URL）：
+
+```text
+diorama serving <realpath>
+  <url>
+  config: <path> | none (defaults)
+  [mount:<id>] plugins: <ids>
+  hidden: <ignore>
+```
+
+重复挂载已存在的目录：额外一行 `already mounted (use "diorama gateway restart" to reload)`。
+
+`diorama ls`（表头固定；URL 一列**必须有**；非 TTY 不加颜色，不截断）：
+
+```text
+MOUNT      PORT   STATUS     DIR                       URL                              CONFIG
+abc12345   54321  ok         /Users/me/proj            http://127.0.0.1:54321/          diorama.toml
+def67890   54322  degraded   /Users/me/notes           http://127.0.0.1:54322/          (defaults)
+```
+
+- 无 mount：打印 `no mounts (run "diorama <dir>")`，**退出码 0**。
+- gateway 未运行：打印 `gateway is not running (run "diorama gateway start")`，**退出码 0**
+  （`ls` 是查询，不是错误）。
+- `--json`：输出 `{ gateway: StatusResult, mounts: MountStatus[] }`（字段与 §7.3 一致）。
 
 ## 8. 客户端模块表 ✅ v0.2 定（M0 §10.3/§10.6 的空洞）
 
@@ -571,7 +772,7 @@ CLI 与 gateway 之间的 socket 协议，M3 实现，见 v0.1 §7。M1 仍是�
 - 只校验 slot 条目 props，**不**校验 `apply(ctx, config)` 的 config；**内置插件**不跑运行时 schema。
 - **M1 无外部插件**，所以校验入口在 `ctx.slots.register` 里就位、M1 无实际调用者。
 
-## 11. 失败处理（fail loud + 单点降级）
+## 11. 失败处理（fail loud + 单点降级）✅ v0.2 定 / v0.4 补 mount 级
 
 | 层 | 失败 | 表现 |
 |---|---|---|
@@ -585,6 +786,30 @@ CLI 与 gateway 之间的 socket 协议，M3 实现，见 v0.1 §7。M1 仍是�
 | 订阅 | 订阅端点失败 / `cancel` 未知 session | 失败帧带 `code`；未知 session 记日志后忽略 |
 | 命令 | 命令 id 重复 / 键字面重复 | `register` / `bind` 抛错（§3.7） |
 | 配置 | `diorama.toml` 语法或字段错误 | CLI 退出码 2，点名文件与原因，不静默忽略（§4.1） |
+| **mount** | `onMount` 回调抛错、该 mount 的 RPC/订阅/HTTP 处理抛错、子 ctx 的 fiber 报错 | 该 mount 进入 **degraded**（不阻断请求，页面显示横幅），其余 mount 不受影响 |
+| **mount** | 无法归因到 mount 的 `uncaughtException` / `unhandledRejection` | 记日志，gateway 级 `state: 'degraded'`；mount 状态不变 |
+| **gateway** | 控制面方法未知 / 帧非法 | `EMETHOD` / `EBADREQUEST`，连接不断 |
+| **gateway** | 进程退出 | 全部 URL 失效（不持久化）；pid 与 socket 残留由下一次 CLI 调用清理 |
+
+### 11.1 degraded（O7 已定）
+
+**状态机**：`starting → ok → degraded → ok（恢复）`；卸下 → `stopped`。
+
+**触发**：上面「mount」行的三种情况。记录 `lastError = { code?, message, at }`，日志
+`[mount:<id>] degraded: <原因>`，并向控制面订阅者发 `degraded` 事件、向该 mount 的页面发
+RPC 广播 `{ topic: 'mount.state', payload: MountStatus }`。
+
+**表达**：
+
+- 页面：页头**错误横幅**（不白屏、不阻断使用），文案含 `lastError.message`；恢复时横幅消失。
+- CLI：`diorama ls` / `diorama gateway status` 的 `STATUS` 列为 `degraded`。
+
+**恢复**：
+
+1. **自动**：gateway 对该 mount 自动**重启一次**（卸下 + 重新挂载，2s 退避）后回到 `ok`；
+   若再次进入 degraded，**不再自动重启**（避免重启风暴），只保持 degraded 并记录。
+2. **手动**：`diorama restart <mountId|dir>`（`diorama gateway restart` 是重启整个 gateway）。
+3. **不阻断**：degraded 的 mount 继续服务请求。
 
 ## 12. v0.1 → v0.2 变更清单（破环，故升 minor）
 
@@ -622,15 +847,34 @@ CLI 与 gateway 之间的 socket 协议，M3 实现，见 v0.1 §7。M1 仍是�
 | `diorama.toml` | 只定了名字 | 字段、查找顺序、CLI 优先级、gitignore 子集、fail loud（§4.1） |
 | contract version | `0.2` / `>=0.2 <0.3` | `0.3` / `>=0.3 <0.4`（全部内置插件） |
 
-## 待定清单（v0.3 后仍 🔲）
+## 14. v0.3 → v0.4 变更清单（破环，故升 minor）
 
-- [ ] `ctx.git` 具体签名（只读：diff / status / log）— M4
-- [ ] `ctx.layout` 的服务面（M2 不提供，overlay 走 slot）
+> 2026-10-19，M3 开工前用户逐条拍板（推荐值全采纳；配置格式用户明确沿用 TOML）。
+
+| 条款 | v0.3 | v0.4 |
+|---|---|---|
+| 进程模型 | 单目录前台进程 | 常驻 gateway + 短命 CLI；每目录一个端口（architecture §10） |
+| §2.5 生命周期 | "M3 起，形状照此执行" | ✅ 定稿：一个 mount = 一个 fork 出的子 ctx；子 ctx 可读 `ctx.diorama`；重挂 = 新 `mountId`；`onMount` 时机；**卸载四步顺序** |
+| §3.1 `watch` | 每个订阅一个 OS 监听 | mount 内按 path **共享** + 引用计数；每 mount `watch.maxDirectories`（默认 64），超限 no-op + warn |
+| §3.5 `MountInfo` | `{ root, mountId, config? }` | `{ root, mountId, port, url, config, configFile? }` |
+| §4.1 `diorama.toml` | 目录 → `$DIORAMA_HOME` | 同上（格式不变）；新增 `watch.maxDirectories`；配置在 **CLI 侧**合成后交给 gateway；`DIORAMA_HOME` 只作状态目录 |
+| §4.1 `/plugin.json` | 带 `config` | 另带 `configFile`、`state`、`lastError` |
+| **§7 控制面** | 🔲（M3，见 v0.1 §7） | ✅ NDJSON over `$DIORAMA_HOME/diorama.sock`；`ping/mount/unmount/list/status/stop/events`；`MountStatus`；错误码；后台进程与 `--foreground`；CLI 退出码与 `ls` 输出 |
+| §11 失败处理 | 单进程各层 | 加 **mount 级**：degraded 状态机、触发、表达、**自动重启一次** + `diorama restart <mount>`、不阻断请求 |
+| `DIORAMA_HOME` | 兼作 web 资源目录 | **只作状态目录**；资源只在包内 `web/` 或 `apps/web/dist`（CLI 侧规则） |
+| contract version | `0.3` / `>=0.3 <0.4` | `0.4` / `>=0.4 <0.5`（全部内置插件） |
+
+## 待定清单（v0.4 后仍 🔲）
+
+- [ ] `ctx.git` 具体签名（只读：diff / status / log）— v1 之外
+- [ ] `ctx.layout` 的服务面（overlay 走 slot）
 - [ ] `ctx.storage` 签名 — 待定
 - [ ] 插件异步任务托管 API — 待定
 - [ ] O8：渲染模式切换 / 图片缩放 / diff 并排的落点（命令化已缓解“开关型”）
 - [ ] 外部插件的发现、bundle 校验、`--plugins-dir` — 最后一个里程碑
-- [ ] gateway 控制面事件订阅 — M3
+- [ ] gateway 控制面事件的 CLI 消费者（`diorama ls --watch`）— 以后再定（协议已定，见 §7.3）
+- [ ] gateway 单点的 supervisor 兜底（崩溃自拉起，O6）— 以后再定
+- [ ] 挂载持久化（gateway 重启后恢复 mount）— **明确不做**（architecture.md §10）
 - [ ] palette 附录文件检索（`Ctrl+P`）与全量列出灰显 — 以后再定
 - [ ] `.gitignore` 是否纳入隐藏规则 — 以后再定
 - [ ] 多 tab 状态持久化（刷新后恢复）— O5

@@ -5,7 +5,7 @@
 > 与 [architecture.md](architecture.md) 的决定、[contract.md](contract.md) 的契约对照看。
 >
 > **档位标注（2026-10-19，M2 完成时）**：标 ✅ 的已落地；**M2** 一栏均已实现并通过
-> [M2 实施说明](m2/spec.md) 的验收。其余仍是 v1 目标。契约见 [contract.md](contract.md) **v0.3**。
+> [M2 实施说明](m2/spec.md) 的验收。其余仍是 v1 目标。契约见 [contract.md](contract.md) **v0.4**。
 
 ## 一、CLI
 
@@ -39,7 +39,7 @@
 |---|---|---|---|
 | K1 | Cordis 插件树（双端） | ✅ M0→M1 | `cordis@4.0.0-rc.11`；`fs` 是真正的 server 半边（`mounts.onMount`）|
 | K2 | 客户端 Loader + 模块表 | ✅ M0→M1 | 闭合工厂 + 页面模块表（`react` / `react/jsx-runtime`，contract §8）；外部半边推迟 |
-| K3 | 插件 manifest + contract version 检查 | ✅ M1 | `>=0.2 <0.3` 强制；`requires` 进 boot 图 |
+| K3 | 插件 manifest + contract version 检查 | ✅ M1 | `>=0.4 <0.5` 强制；`requires` 进 boot 图 |
 | K4 | 插件来源：内置 + `~/.diorama/plugins` | **未来（最后一个里程碑）** | `PluginSource` 接口与 `BuiltinSource` 就位；外部目录见 contract §9 |
 | K5 | 生命周期：代码全局、数据按目录 | ✅ M1（单目录形态） | `ctx.diorama.mounts` + `onMount`；`ctx.fork()` 随 M3 |
 | K6 | slot 系统 | ✅ M0→M1 | 冲突三类分开（contract §3.3）、`ctx.slots.declare`、`file.renderer` matcher |

@@ -3,15 +3,16 @@ export const KERNEL_NAME = 'diorama'
 
 /**
  * Kernel contract version (contract.md §6). During `0.x` a minor bump is a
- * breaking change: `0.3` gave tabs a real multi-tab model (`TabInfo.path`
- * replaces the `FileInfo` snapshot, `tabs.content` is keyed by tab id), added
- * the `ctx.commands` model and the `layout.overlay` seat, made `fs.list`
- * honour the ignore rules, gave RPC events a `session` for subscriptions, and
- * added `diorama.toml` (contract §13). Every plugin declares
- * `contract: ">=0.3 <0.4"`, enforced while reading manifests
- * (`server/manifest.ts`).
+ * breaking change. `0.3` gave tabs a real multi-tab model, `ctx.commands`,
+ * `layout.overlay`, ignore-aware `fs.list`, RPC event `session`s and
+ * `diorama.toml` (contract §13). `0.4` turns one foreground process into a
+ * gateway serving many directories: one root context, per-directory fork
+ * contexts (`ctx.fork()`), an HTTP port per mount, the control plane of
+ * contract §7, `watch` sharing with a per-mount cap, and `mount.state` /
+ * `degraded` (contract §14). Every plugin declares `contract: ">=0.4 <0.5"`,
+ * enforced while reading manifests (`server/manifest.ts`).
  */
-export const CONTRACT_VERSION = '0.3'
+export const CONTRACT_VERSION = '0.4'
 
 /** What every plugin built against this kernel declares. */
-export const CONTRACT_RANGE = '>=0.3 <0.4'
+export const CONTRACT_RANGE = '>=0.4 <0.5'
