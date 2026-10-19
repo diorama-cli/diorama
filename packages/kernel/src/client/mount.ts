@@ -6,6 +6,7 @@
  * nothing here is shared module state (docs/m0/spec.md §10.3).
  */
 import { createFsClient, type FsClient } from './fs.ts'
+import { createGitClient, type GitClient } from './git.ts'
 import { createRpcClient, rpcUrl, type RpcClient } from './rpc.ts'
 
 export interface BootPlugin {
@@ -38,6 +39,12 @@ export interface MountManifest extends MountInfo {
 export interface MountHandle extends MountInfo {
   /** The mount's files, through RPC (contract.md §3.1). */
   fs: FsClient
+  /**
+   * The mount's repository, through RPC (contract.md §3.2). Calls reject with
+   * `ESERVICE` when the directory is not inside a git working tree; ask
+   * `hasGit()` (from `diorama-kernel/client`) before relying on it.
+   */
+  git: GitClient
   /** The RPC channel: escape hatch plus event subscription (contract.md §4). */
   rpc: RpcClient
 }
@@ -51,6 +58,7 @@ export function createMountHandle(manifest: MountManifest): MountHandle {
     root: manifest.root,
     baseUrl,
     fs: createFsClient(rpc),
+    git: createGitClient(rpc),
     rpc,
   }
 }

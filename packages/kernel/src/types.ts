@@ -8,13 +8,26 @@
  * faces (`ctx.tabs`, `ctx.slots`, …) augment `cordis` in the runtime module
  * that provides them; a plugin gets those by importing that module.
  */
-export type { FileInfo, FsWatchEvent, RelPath, TabInfo } from './shared/types.ts'
-export type { ErrorCode, FsErrorCode, RpcErrorCode } from './shared/errors.ts'
+export type {
+  DiffEntry,
+  DiffResult,
+  DiffScope,
+  FileInfo,
+  FsWatchEvent,
+  GitChangeKind,
+  GitLogEntry,
+  GitStatusEntry,
+  RelPath,
+  TabInfo,
+} from './shared/types.ts'
+export type { ErrorCode, FsErrorCode, GitErrorCode, RpcErrorCode } from './shared/errors.ts'
 export type { BootPlugin, MountHandle, MountInfo, MountManifest } from './client/mount.ts'
 export type { FsClient } from './client/fs.ts'
+export type { GitClient } from './client/git.ts'
 export type { RpcClient } from './client/rpc.ts'
 export type { FileMatcher, FileRendererProps } from './shared/matcher.ts'
 export type { DescribedService, MethodDescriptor } from './shared/rpc.ts'
+export { ROUTE_PREFIX } from './shared/types.ts'
 export { mimeOf, extensionOf } from './shared/mime.ts'
 export type { TabsSnapshot } from './client/tabs.ts'
 export type { TreeSnapshot } from './client/tree.ts'

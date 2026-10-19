@@ -1,8 +1,19 @@
 // The client tree's context face (kernel services) is declared once here.
 import type {} from './context.ts'
 
-export type { FsWatchEvent, FileInfo, RelPath, TabInfo } from '../shared/types.ts'
-export { fsError, type FsErrorCode } from '../shared/errors.ts'
+export type {
+  DiffEntry,
+  DiffResult,
+  DiffScope,
+  FileInfo,
+  FsWatchEvent,
+  GitChangeKind,
+  GitLogEntry,
+  GitStatusEntry,
+  RelPath,
+  TabInfo,
+} from '../shared/types.ts'
+export { fsError, gitError, type FsErrorCode, type GitErrorCode } from '../shared/errors.ts'
 
 export {
   createMountHandle,
@@ -12,7 +23,19 @@ export {
   type MountManifest,
 } from './mount.ts'
 export { createFsClient, FS_METHODS, type FsClient } from './fs.ts'
+export { createGitClient, GIT_METHODS, hasGit, type GitClient } from './git.ts'
 export { createRpcClient, rpcUrl, RPC_PATH, type RpcClient } from './rpc.ts'
+export {
+  browserHistory,
+  createRouterService,
+  decodeRoute,
+  encodeRoute,
+  ROUTE_PREFIX,
+  type RouteSnapshot,
+  type RouterHistory,
+  type RouterService,
+  type RouterTabs,
+} from './router.ts'
 export { createTabsService, TabsService, type TabsSnapshot } from './tabs.ts'
 export { createTreeService, TreeService, type TreeSnapshot } from './tree.ts'
 export { bootClient, provideRecord } from './boot.ts'

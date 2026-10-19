@@ -1,15 +1,37 @@
 /** Server-side entry of the kernel (`diorama-kernel/server`). */
-export type { FsWatchEvent, FileInfo, RelPath, TabInfo } from '../shared/types.ts'
+export type {
+  DiffEntry,
+  DiffResult,
+  DiffScope,
+  FileInfo,
+  FsWatchEvent,
+  GitChangeKind,
+  GitLogEntry,
+  GitStatusEntry,
+  RelPath,
+  TabInfo,
+} from '../shared/types.ts'
 export type { ErrorCode, FsErrorCode, RpcErrorCode } from '../shared/errors.ts'
 export type { FileMatcher, FileRendererProps } from '../shared/matcher.ts'
 export type { DescribedService, MethodDescriptor, RpcRequest, RpcResponse } from '../shared/rpc.ts'
 
 export { CONTRACT_RANGE, CONTRACT_VERSION, KERNEL_NAME } from '../contract.ts'
-export { codedError, fsError, isErrorCode, rpcError } from '../shared/errors.ts'
+export { codedError, fsError, gitError, isErrorCode, rpcError } from '../shared/errors.ts'
 export { extensionOf, mimeOf } from '../shared/mime.ts'
 export { explainMismatch, parseRange, satisfies } from '../shared/semver.ts'
 
 export { FsService, fsHalf, MAX_BINARY_BYTES, MAX_TEXT_BYTES, resolveInside, type FsServiceOptions } from './fs.ts'
+export {
+  DEFAULT_LOG_LIMIT,
+  detectRepository,
+  findRepoRoot,
+  GitService,
+  gitHalf,
+  MAX_DIFF_BYTES,
+  MAX_DIFF_LINES,
+  MAX_LOG_LIMIT,
+  parsePorcelainZ,
+} from './git.ts'
 export {
   ContractMismatchError,
   HttpError,
@@ -21,14 +43,17 @@ export { readManifest, type ReadManifestOptions } from './manifest.ts'
 export {
   BUILTIN_PLUGIN_IDS,
   BuiltinSource,
+  KERNEL_SERVICE_IDS,
   PLUGIN_PREFIX,
   builtinPackageJson,
   builtinSource,
   isBuiltinPluginId,
+  isKernelServiceId,
   kernelPackageDir,
   planPlugins,
   type BootManifest,
   type BuiltinPluginId,
+  type KernelServiceId,
   type PluginPlan,
   type PluginSource,
 } from './plan.ts'

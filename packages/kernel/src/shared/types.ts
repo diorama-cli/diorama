@@ -26,6 +26,12 @@ export interface FileInfo {
 export interface TabInfo {
   id: string
   path: RelPath
+  /**
+   * What the tab shows (contract.md §3.4): `content` (the default, absent) is
+   * the file itself; `diff` is its change in the working tree. Still no file
+   * data: the reader is the content seat or the renderer the view routes to.
+   */
+  view?: 'content' | 'diff'
 }
 
 /** A kernel-side file change notification (contract.md §3.1; emitted from M2). */
@@ -33,6 +39,13 @@ export interface FsWatchEvent {
   type: 'change' | 'add' | 'unlink'
   path: RelPath
 }
+
+/**
+ * The URL prefix of the page's own routes (contract.md §3.8): a `path` URL is
+ * `<origin>/~/<RelPath>`. No file name can contain `~`, and every server route
+ * (`/plugin.json`, `/assets/`, `/plugins/`, `/__diorama__/`) lives outside it.
+ */
+export const ROUTE_PREFIX = '/~/'
 
 /** Bytes `probe` matchers may look at (contract.md §5.1). */
 export const PROBE_HEAD_BYTES = 4096
@@ -49,4 +62,62 @@ export interface DioramaTableRecord {
 declare global {
   // eslint-disable-next-line no-var
   var __diorama_table__: DioramaTableRecord | undefined
+}
+
+/**
+ * The read-only git view (contract.md §3.2). Paths are relative to the mount
+ * root, like every other path in the kernel (`RelPath`); the service converts
+ * to repository paths itself.
+ */
+export type GitChangeKind = 'added' | 'modified' | 'deleted' | 'renamed' | 'untracked' | 'conflicted'
+
+/** One changed path of the working tree. */
+export interface GitStatusEntry {
+  file: RelPath
+  kind: GitChangeKind
+  /** Porcelain status (`M `, `??`, …), verbatim; callers must not parse it. */
+  status: string
+  /** `renamed` only: the path before the rename. */
+  oldPath?: RelPath
+}
+
+/** What a `diff()` call compares (contract.md §3.2). */
+export interface DiffScope {
+  /** Only this file. Absent = every change under `scope`. */
+  path?: RelPath
+  /** Only this directory subtree ('' = the mount root). */
+  scope?: RelPath
+  /** v0.5 accepts only `'HEAD'` (working tree vs HEAD); the default. */
+  base?: 'HEAD'
+}
+
+/** One file's diff. */
+export interface DiffEntry {
+  file: RelPath
+  kind: GitChangeKind
+  status: string
+  /** Unified diff text (`--no-color`); binary files have `binary: true` instead. */
+  text?: string
+  binary?: true
+  oldPath?: RelPath
+  /** The file's diff exceeded the limit: `text` is a prefix. */
+  truncated?: true
+}
+
+/** The result of one `diff()` call. */
+export interface DiffResult {
+  /** Changes in order; one unreadable file does not fail the list. */
+  entries: (DiffEntry | { file: RelPath; error: { code: string; message: string } })[]
+  /** The whole call exceeded the limit (4 MiB / 2000 lines): a prefix was returned. */
+  truncated: boolean
+}
+
+/** One commit as `log()` reports it. */
+export interface GitLogEntry {
+  sha: string
+  shortSha: string
+  subject: string
+  author: string
+  /** ms since epoch. */
+  at: number
 }

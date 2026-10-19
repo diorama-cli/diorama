@@ -16,7 +16,13 @@ export type FsErrorCode =
 /** Codes the RPC channel itself raises (contract.md §4). */
 export type RpcErrorCode = 'ESERVICE' | 'EMETHOD' | 'EBADREQUEST' | 'EDISCONNECTED'
 
-export type ErrorCode = FsErrorCode | RpcErrorCode
+/**
+ * Codes `ctx.git` adds to the fs table (contract.md §3.2): the working tree
+ * root is gone (`ENOTREPO`) or the `git` process failed (`EIO`).
+ */
+export type GitErrorCode = 'ENOTREPO'
+
+export type ErrorCode = FsErrorCode | RpcErrorCode | GitErrorCode
 
 const MESSAGES: Record<ErrorCode, string> = {
   EINVAL: 'invalid path',
@@ -27,6 +33,7 @@ const MESSAGES: Record<ErrorCode, string> = {
   EOUTSIDE: 'path escapes the mount root',
   EBINARY: 'binary file',
   ETOOLARGE: 'file is larger than the kernel limit',
+  ENOTREPO: 'not inside a git working tree',
   ESERVICE: 'no such service (is the page connected?)',
   EMETHOD: 'no such method on the service',
   EBADREQUEST: 'malformed RPC request',
@@ -50,6 +57,11 @@ export function codedError<C extends ErrorCode>(code: C, message = MESSAGES[code
 
 /** Create an `ctx.fs` error (`EINVAL`, `EBINARY`, …). */
 export function fsError(code: FsErrorCode, message = MESSAGES[code], cause?: unknown): Error & { code: FsErrorCode } {
+  return codedError(code, message, cause)
+}
+
+/** Create a `ctx.git` error (contract.md §3.2). */
+export function gitError(code: FsErrorCode | GitErrorCode, message?: string, cause?: unknown): Error & { code: string } {
   return codedError(code, message, cause)
 }
 

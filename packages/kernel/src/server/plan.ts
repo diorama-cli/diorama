@@ -20,10 +20,18 @@ import { readManifest } from './manifest.ts'
 /** Name the built-in package specifiers resolve to (`diorama-plugin-<id>`). */
 export const PLUGIN_PREFIX = 'diorama-plugin-'
 
-/** Every built-in plugin, in boot order. */
+/**
+ * Kernel services that have a server half but no client piece: they are loaded
+ * with every mount's tree and never appear in the page's boot graph
+ * (contract.md §3.1, §3.2).
+ */
+export const KERNEL_SERVICE_IDS = ['fs', 'git'] as const
+
+export type KernelServiceId = (typeof KERNEL_SERVICE_IDS)[number]
+
+/** Every built-in plugin, in boot order (client pieces; `fs`/`git` are implied). */
 export const BUILTIN_PLUGIN_IDS = [
   'slots',
-  'fs',
   'layout',
   'file-tree',
   'tabs',
@@ -32,6 +40,7 @@ export const BUILTIN_PLUGIN_IDS = [
   'markdown',
   'code',
   'palette',
+  'git-changes',
 ] as const
 
 export type BuiltinPluginId = (typeof BUILTIN_PLUGIN_IDS)[number]
@@ -61,6 +70,11 @@ export function builtinPackageJson(id: string): string {
 
 export function isBuiltinPluginId(id: string): id is BuiltinPluginId {
   return (BUILTIN_PLUGIN_IDS as readonly string[]).includes(id)
+}
+
+/** Whether an id names one of the kernel's own server halves (`fs`, `git`). */
+export function isKernelServiceId(id: string): id is KernelServiceId {
+  return (KERNEL_SERVICE_IDS as readonly string[]).includes(id)
 }
 
 /**
@@ -98,12 +112,14 @@ export class BuiltinSource implements PluginSource {
   manifest(id: string): PluginManifest {
     // `fs` ships with the kernel itself: no plugin package, no client half; it
     // exists to provide the server service the other plugins inject.
-    if (id === 'fs') {
+    if (isKernelServiceId(id)) {
+      // Kernel services ship with the kernel itself (no plugin package, no
+      // client half): `fs` reads files, `git` reads the repository.
       return {
         package: 'diorama-kernel',
         dir: kernelPackageDir(),
         contract: CONTRACT_RANGE,
-        id: 'fs',
+        id,
         requires: [],
       }
     }
