@@ -4,17 +4,28 @@
  * Provides `ctx.tree` and is the only client piece that lists directories: it
  * calls `mountCtx.fs.list` lazily as directories are expanded and hands the
  * chosen file to `ctx.tabs` through `ctx.tree`. Removing this piece removes
- * the column entirely; the layout must not depend on it (M0 acceptance
- * point 3).
+ * the column entirely; the layout must not depend on it (M0 acceptance point
+ * 3).
+ *
+ * Hiding is **not** done here: `fs.list` already omits every entry the
+ * `ignore` rules hide (contract.md §3.1, §4.1), so the tree, any future file
+ * search and the server agree by construction.
+ *
+ * Large directories: a directory with many entries lists its first
+ * `PAGE_SIZE` and offers 「加载更多」. This is not the `ignore` rule (those
+ * entries are gone); it only keeps rendering bounded.
  */
 import type { Context } from 'cordis'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { FileInfo, MountHandle } from 'diorama-kernel/client'
 import { createTreeService } from 'diorama-kernel/client'
 import { bindMethods, provideEntry, useKernel, useStore } from 'diorama-ui'
 
 export const name = 'file-tree'
 export const inject = ['slots']
+
+/** Entries a collapsed-until-asked directory shows at first (M2). */
+export const PAGE_SIZE = 500
 
 interface DirState {
   entries?: FileInfo[]
@@ -27,8 +38,14 @@ function compareEntries(a: FileInfo, b: FileInfo): number {
   return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) || a.name.localeCompare(b.name)
 }
 
-function useDirectory(mount: MountHandle, path: string, open: boolean): DirState {
+/**
+ * One directory's entries, fetched when it is first drawn. `limit` starts at
+ * `PAGE_SIZE` and only grows; the full (already filtered) list is kept so
+ * 「加载更多」 does not re-list.
+ */
+function useDirectory(mount: MountHandle, path: string, open: boolean): DirState & { visible: number; more(batch?: number): void } {
   const [state, setState] = useState<DirState>({})
+  const [visible, setVisible] = useState(PAGE_SIZE)
   useEffect(() => {
     if (!open) return
     let cancelled = false
@@ -44,7 +61,8 @@ function useDirectory(mount: MountHandle, path: string, open: boolean): DirState
       cancelled = true
     }
   }, [mount, path, open])
-  return state
+  const more = useCallback((batch = PAGE_SIZE) => setVisible(current => current + batch), [])
+  return { ...state, visible, more }
 }
 
 function TreeRow({ mountCtx, file, depth }: { mountCtx: MountHandle; file: FileInfo; depth: number }) {
@@ -55,6 +73,8 @@ function TreeRow({ mountCtx, file, depth }: { mountCtx: MountHandle; file: FileI
   const expanded = isDir && snapshot.expanded.includes(file.path)
   const selected = !isDir && snapshot.selected === file.path
   const dirState = useDirectory(mountCtx, file.path, expanded)
+  const total = dirState.entries?.length ?? 0
+  const cut = Math.min(dirState.visible, total)
 
   return (
     <>
@@ -80,9 +100,21 @@ function TreeRow({ mountCtx, file, depth }: { mountCtx: MountHandle; file: FileI
         </div>
       )}
       {expanded &&
-        dirState.entries?.map(child => (
+        dirState.entries?.slice(0, cut).map(child => (
           <TreeRow key={child.path} mountCtx={mountCtx} file={child} depth={depth + 1} />
         ))}
+      {expanded && cut < total && (
+        <button
+          type="button"
+          className="diorama-tree__more"
+          style={{ paddingLeft: 8 + (depth + 1) * 14 }}
+          data-path={file.path}
+          data-testid="tree-more"
+          onClick={() => dirState.more()}
+        >
+          加载更多（已显示 {cut} / 共 {total} 条）
+        </button>
+      )}
     </>
   )
 }
@@ -90,6 +122,8 @@ function TreeRow({ mountCtx, file, depth }: { mountCtx: MountHandle; file: FileI
 function FileTreeRoot() {
   const { ctx, mount: mountCtx } = useKernel()
   const rootEntries = useDirectory(mountCtx, '', true)
+  const total = rootEntries.entries?.length ?? 0
+  const cut = Math.min(rootEntries.visible, total)
   // Selecting a file opens it: the tab service is the only opener. `ctx` here is
   // the page's kernel context (installed before pieces render), so it carries
   // the live services.
@@ -97,9 +131,14 @@ function FileTreeRoot() {
   return (
     <nav className="diorama-tree" aria-label="文件树" data-testid="file-tree">
       {rootEntries.error !== undefined && <div className="diorama-tree__error">{rootEntries.error}</div>}
-      {rootEntries.entries?.map(file => (
+      {rootEntries.entries?.slice(0, cut).map(file => (
         <TreeRow key={file.path} mountCtx={mountCtx} file={file} depth={0} />
       ))}
+      {cut < total && (
+        <button type="button" className="diorama-tree__more" data-testid="tree-more" onClick={() => rootEntries.more()}>
+          加载更多（已显示 {cut} / 共 {total} 条）
+        </button>
+      )}
     </nav>
   )
 }

@@ -152,6 +152,25 @@ code {
   font-size: 12px;
 }
 
+/* Large directories: the rest of a directory, on request (M2). */
+.diorama-tree__more {
+  display: block;
+  width: 100%;
+  padding: 3px 8px;
+  border: 0;
+  background: none;
+  color: var(--dio-muted);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.diorama-tree__more:hover {
+  background: rgba(0, 0, 0, 0.045);
+  color: inherit;
+}
+
 /* Tabs piece (M0: a single tab, no close affordance) */
 .diorama-tabs {
   display: flex;
