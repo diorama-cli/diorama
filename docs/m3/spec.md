@@ -89,6 +89,7 @@ pnpm --filter diorama-web exec playwright test
 | S1 控制面库 | ✅ | `feat(m3-s1)` |
 | S2 gateway 骨架 | ✅ | `feat(m3-s2)` |
 | S3 `ctx.fork()` 生命周期 | ✅ | `feat(m3-s3)` |
+| S3b watch 共享 + 上限 | ✅ | `feat(m3-s3b)` |
 
 ### 6.2 踩到的坑（S3，M3 后续步骤请先读）
 
@@ -111,6 +112,10 @@ pnpm --filter diorama-web exec playwright test
 6. **CLI 的 tsdown 入口是 `src/main.ts`**，不是 `src/run.ts`——改错入口时子命令不会进包。
 7. **`DIORAMA_HOME` 不再兼作 web 资源目录**（契约 §4.1 v0.4）：资源来自包的 `web/` 或
    `apps/web/dist`，否则 gateway 起出来的页面 404。
+8. **watch 只在 mount 内共享。** 共享表的 key 是 `resolveInside` 之后的绝对目录；跨 mount
+   不共享（计划风险清单里“M3 时验证”的那条，已用单测与 e2e `2f` 固定）。上层订阅（树、每个
+   tab 的父目录）在服务端合并成一次 `fs.watch` 与一套 debounce，监听者各自收到同一个事件。
+   上限 `watch.maxDirectories`（默认 64）超限时返回 no-op disposer 并只 warn 一次，不抛错。
 
 ### 6.3 与契约的对应（当前）
 

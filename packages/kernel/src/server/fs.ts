@@ -81,6 +81,21 @@ export interface FsServiceOptions {
   debounceMs?: number
   /** `false`: `watch` is a no-op (diorama.toml `watch.enabled`). */
   enabled?: boolean
+  /** Watched-directory cap for this mount (diorama.toml `watch.maxDirectories`). */
+  maxDirectories?: number
+  /** Console sink for watch warnings (the mount logger adds `[mount:<id>]`). */
+  warn?: (message: string) => void
+}
+
+/** Default cap on simultaneously watched directories per mount (contract.md §3.1). */
+export const DEFAULT_MAX_WATCH_DIRECTORIES = 64
+
+/** One shared directory watcher and its subscribers. */
+interface LiveWatcher {
+  watcher: FSWatcher
+  listeners: Set<(event: FsWatchEvent) => void>
+  close(): void
+  abs: string
 }
 
 /** The contract's default watch window. */
@@ -101,12 +116,30 @@ export class FsService {
   readonly debounceMs: number
   /** `false` makes `watch` return a no-op disposer (diorama.toml `watch.enabled`). */
   readonly watchEnabled: boolean
+  /** Simultaneously watched directories on this mount (contract.md §3.1). */
+  readonly maxDirectories: number
+
+  /** Shared watchers by absolute directory path (one per watched directory, contract.md §3.1). */
+  private readonly watchers = new Map<string, LiveWatcher>()
+  /** The cap warning is emitted once per service, not once per rejected watch. */
+  private warnedLimit = false
+
+  /** Console sink; the mount's logger passes the `[mount:<id>]` prefix. */
+  private readonly warn: (message: string) => void
 
   constructor(root: string, options: FsServiceOptions = {}) {
     this.root = resolve(root)
     this.ignore = createIgnore(options.ignore ?? DEFAULT_IGNORE)
     this.debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS
     this.watchEnabled = options.enabled ?? true
+    this.maxDirectories = options.maxDirectories ?? DEFAULT_MAX_WATCH_DIRECTORIES
+    this.warn = options.warn ?? (message => console.error(message))
+  }
+
+  /** Close every shared watcher (the mount is going away). */
+  close(): void {
+    for (const entry of this.watchers.values()) entry.close()
+    this.watchers.clear()
   }
 
   /** The methods the RPC channel may proxy (contract.md §4). */
@@ -193,20 +226,49 @@ export class FsService {
 
   /**
    * Watch one **directory** (contract.md §3.1): its own entries, one level.
-   * Events are merged per `(path, type)` in a window of `debounceMs` (the fs
-   * service's option), so an editor's save burst is one `change`. `type` is a
-   * hint — a rename can make it ambiguous; readers re-`stat` to decide.
    *
-   * Returns the disposer; nothing is watched after it runs.
+   * **Shared per mount** (v0.4): every subscription to the same directory uses
+   * one OS watcher and one debounce window; the merged events are delivered to
+   * every listener. Reference count zero closes the watcher. At most
+   * `maxDirectories` directories are watched at once; past the limit `watch`
+   * returns a no-op disposer and logs a warning (never throws: expanding the
+   * tree must not break the page).
    */
   watch(path: RelPath, listener: (event: FsWatchEvent) => void): () => void {
     // Validate before touching the OS: a bad path must fail like `list` does.
     const abs = resolveInside(this.root, path)
     if (this.watchEnabled === false) return () => {}
+    const key = abs
+    let entry = this.watchers.get(key)
+    if (entry === undefined) {
+      if (this.watchers.size >= this.maxDirectories) {
+        if (!this.warnedLimit) {
+          this.warnedLimit = true
+          this.warn(`[diorama] fs.watch: ${this.maxDirectories} directories already watched on this mount; further watches are ignored (diorama.toml [watch] maxDirectories)`)
+        }
+        return () => {}
+      }
+      entry = this.openWatcher(abs, path)
+      this.watchers.set(key, entry)
+    }
+    const listeners = entry.listeners
+    listeners.add(listener)
+    return () => {
+      if (!listeners.delete(listener)) return
+      if (listeners.size === 0) {
+        this.watchers.delete(key)
+        entry.close()
+      }
+    }
+  }
+
+  /** Open the shared watcher+debounce pair for one directory (one per `abs`). */
+  private openWatcher(abs: string, path: RelPath): LiveWatcher {
     // One pending event per path: a burst of writes (which may alternate
     // `change` and the rename that follows a save) must collapse to one.
     const pending = new Map<string, FsWatchEvent>()
     const timers = new Map<string, ReturnType<typeof setTimeout>>()
+    const listeners = new Set<(event: FsWatchEvent) => void>()
     let closed = false
     let watcher: FSWatcher
     try {
@@ -217,25 +279,27 @@ export class FsService {
     /** One pending event per path, flushed `debounceMs` after the last one. */
     const enqueue = (event: FsWatchEvent): void => {
       if (closed) return
-      const key = event.path
-      pending.set(key, event)
-      const timer = timers.get(key)
+      const pendingKey = event.path
+      pending.set(pendingKey, event)
+      const timer = timers.get(pendingKey)
       if (timer !== undefined) clearTimeout(timer)
-      const handle = setTimeout(() => flush(key), this.debounceMs)
+      const handle = setTimeout(() => flush(pendingKey), this.debounceMs)
       handle.unref?.()
-      timers.set(key, handle)
+      timers.set(pendingKey, handle)
     }
-    const flush = (key: string): void => {
-      timers.delete(key)
-      const event = pending.get(key)
+    const flush = (pendingKey: string): void => {
+      timers.delete(pendingKey)
+      const event = pending.get(pendingKey)
       if (event === undefined) return
-      pending.delete(key)
+      pending.delete(pendingKey)
       if (closed) return
-      try {
-        listener(event)
-      } catch (error) {
-        // A listener must not be able to stop the watcher.
-        console.error(`[diorama] fs.watch listener failed for ${event.path}:`, error)
+      for (const listener of [...listeners]) {
+        try {
+          listener(event)
+        } catch (error) {
+          // A listener must not be able to stop the watcher or its siblings.
+          this.warn(`[diorama] fs.watch listener failed for ${event.path}: ${(error as Error)?.message ?? String(error)}`)
+        }
       }
     }
     watcher.on('change', (kind, name) => {
@@ -249,10 +313,9 @@ export class FsService {
       void this.refine(child, next).then(event => event !== undefined && enqueue(event))
     })
     watcher.on('error', error => {
-      console.error(`[diorama] fs.watch failed for ${path || '/'}:`, error)
+      this.warn(`[diorama] fs.watch failed for ${path || '/'}: ${(error as Error)?.message ?? String(error)}`)
       close()
     })
-    void flush
     const close = (): void => {
       if (closed) return
       closed = true
@@ -261,7 +324,12 @@ export class FsService {
       pending.clear()
       watcher.close()
     }
-    return close
+    return { watcher, listeners, close, abs }
+  }
+
+  /** Watched directories on this mount (diagnostics/tests, contract.md §3.1). */
+  get watchedDirectories(): number {
+    return this.watchers.size
   }
 
   /** A raw watcher kind, before the existence check narrows it. */
@@ -310,15 +378,16 @@ export const fsHalf = {
     // is bundled into the CLI separately from the kernel's own code, and a
     // second `createMounts()` would register on a mount nobody fires.
     ctx.diorama.mounts.onMount((mountCtx, info) => {
-      ;(mountCtx as unknown as { provide(name: string, value: unknown): unknown }).provide(
-        'fs',
-        new FsService(info.root, {
-          ignore: info.config?.ignore,
-          debounceMs: info.config?.watch.debounceMs,
-          enabled: info.config?.watch.enabled,
-        }),
-      )
-      return () => {}
+      const fs = new FsService(info.root, {
+        ignore: info.config?.ignore,
+        debounceMs: info.config?.watch.debounceMs,
+        enabled: info.config?.watch.enabled,
+        maxDirectories: info.config?.watch.maxDirectories,
+        warn: message => console.error(`[mount:${info.mountId}] ${message}`),
+      })
+      ;(mountCtx as unknown as { provide(name: string, value: unknown): unknown }).provide('fs', fs)
+      // The mount's disposer closes every shared watcher (contract.md §2.5/§3.1).
+      return () => fs.close()
     })
   },
 }

@@ -14,7 +14,7 @@ test('config: defaults match contract §4.1', () => {
   assert.equal(defaults.host, '127.0.0.1')
   assert.equal(defaults.port, 0)
   assert.deepEqual(defaults.ignore, ['.git', 'node_modules'])
-  assert.deepEqual(defaults.watch, { debounceMs: 300, enabled: true })
+  assert.deepEqual(defaults.watch, { debounceMs: 300, enabled: true, maxDirectories: 64 })
   // Every built-in client plugin, in boot order (contract.md §1: the selection
   // is the boot order).
   assert.deepEqual(defaults.plugins, [
@@ -41,7 +41,8 @@ test('config: precedence is CLI > file > default', () => {
     port: 4000,
     plugins: ['slots', 'layout'],
     ignore: ['dist'],
-    watch: { debounceMs: 50, enabled: true },
+    // maxDirectories has no file entry above: the default survives the merge.
+    watch: { debounceMs: 50, enabled: true, maxDirectories: 64 },
   })
   // CLI wins field by field; `--all` empties the ignore list.
   const merged = mergeConfig(file, { port: 0, host: '127.0.0.1', all: true })
@@ -49,6 +50,18 @@ test('config: precedence is CLI > file > default', () => {
   assert.equal(merged.host, '127.0.0.1')
   assert.deepEqual(merged.ignore, [])
   assert.deepEqual(merged.plugins, ['slots', 'layout'])
+})
+
+test('config: watch.maxDirectories is a 1–4096 integer, merged like every other field', () => {
+  const file = parseConfigFile(['[watch]', 'maxDirectories = 8'].join('\n'), 'w.toml')
+  assert.equal(mergeConfig(file).watch.maxDirectories, 8)
+  for (const bad of ['0', '4097', '1.5', '"64"']) {
+    assert.throws(
+      () => parseConfigFile(['[watch]', `maxDirectories = ${bad}`].join('\n'), 'w.toml'),
+      /w\.toml: "watch\.maxDirectories" must be an integer 1–4096/,
+      bad,
+    )
+  }
 })
 
 test('config: a syntax error and unknown keys fail loud, naming the file', () => {

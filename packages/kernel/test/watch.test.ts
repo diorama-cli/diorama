@@ -125,3 +125,101 @@ test('watch: disabled and invalid paths', async t => {
   })
   fs.watch('', () => {})() // and a valid root is fine
 })
+
+test('watch: subscriptions to one directory share one OS watcher and one window', async t => {
+  const root = fixture()
+  const fs = new FsService(root, { debounceMs: 100 })
+  t.after(() => fs.close())
+  const first: FsWatchEvent[] = []
+  const second: FsWatchEvent[] = []
+  const stopFirst = fs.watch('', event => first.push(event))
+  const stopSecond = fs.watch('', event => second.push(event))
+  assert.equal(fs.watchedDirectories, 1, 'two subscriptions, one watched directory')
+
+  writeFileSync(join(root, 'a.txt'), 'two\n')
+  await until(() => first.length > 0 && second.length > 0)
+  // Both listeners saw the same (merged) event.
+  assert.deepEqual(first, second)
+  assert.equal(first.length, 1)
+
+  // Releasing the first subscription keeps the watcher for the second.
+  stopFirst()
+  assert.equal(fs.watchedDirectories, 1)
+  writeFileSync(join(root, 'a.txt'), 'three\n')
+  await until(() => second.length > 1)
+  assert.equal(first.length, 1, 'a disposed listener hears nothing more')
+  stopSecond()
+  assert.equal(fs.watchedDirectories, 0, 'the last subscriber closes the watcher')
+})
+
+test('watch: different directories on one mount get their own watcher', async t => {
+  const root = fixture()
+  const fs = new FsService(root, { debounceMs: 100 })
+  t.after(() => fs.close())
+  const atRoot: FsWatchEvent[] = []
+  const atSub: FsWatchEvent[] = []
+  const stopA = fs.watch('', event => atRoot.push(event))
+  const stopB = fs.watch('sub', event => atSub.push(event))
+  assert.equal(fs.watchedDirectories, 2)
+  // A file created inside `sub/` belongs to the watcher of `sub` (the root
+  // watcher only reports its own direct entries, contract.md §3.1).
+  // Let the fixture's own write settle first: macOS may report `a.txt` late.
+  await new Promise(resolve => setTimeout(resolve, 200))
+  atRoot.length = 0
+  writeFileSync(join(root, 'sub', 'b.txt'), 'x\n')
+  await until(() => atSub.length > 0)
+  assert.deepEqual(atSub.map(event => event.path), ['sub/b.txt'])
+  assert.equal(atRoot.some(event => event.path.startsWith('sub/')), false, 'the root watcher does not report a grandchild')
+
+  // A direct child of the root is reported by the root watcher.
+  writeFileSync(join(root, 'top.txt'), 'x\n')
+  await until(() => atRoot.some(event => event.path === 'top.txt'))
+  stopA()
+  stopB()
+  assert.equal(fs.watchedDirectories, 0)
+})
+
+test('watch: past maxDirectories a subscription is a no-op with one warning', async t => {
+  const root = fixture()
+  for (const name of ['d1', 'd2', 'd3']) mkdirSync(join(root, name))
+  const warnings: string[] = []
+  const fs = new FsService(root, { debounceMs: 50, maxDirectories: 2, warn: message => warnings.push(message) })
+  t.after(() => fs.close())
+  const stops = ['', 'd1', 'd2'].map(path => fs.watch(path, () => {}))
+  assert.equal(fs.watchedDirectories, 2, 'the third directory is not watched')
+  assert.equal(warnings.length, 1)
+  assert.match(warnings[0] as string, /2 directories already watched/)
+
+  // A no-op disposer is safe to call.
+  stops[2]?.()
+  stops[2]?.()
+
+  // Freeing a watcher lets a later subscription take the slot.
+  stops[0]?.()
+  assert.equal(fs.watchedDirectories, 1)
+  const stop = fs.watch('d3', () => {})
+  assert.equal(fs.watchedDirectories, 2)
+  stop()
+  stops[1]?.()
+})
+
+test('watch: two mounts never share a watcher (plan.md risk: multi-directory watch)', async t => {
+  const first = fixture()
+  const second = fixture()
+  t.after(() => rmSync(first, { recursive: true, force: true }))
+  t.after(() => rmSync(second, { recursive: true, force: true }))
+  const a = new FsService(first, { debounceMs: 50 })
+  const b = new FsService(second, { debounceMs: 50 })
+  t.after(() => a.close())
+  t.after(() => b.close())
+  const seenA: FsWatchEvent[] = []
+  const seenB: FsWatchEvent[] = []
+  a.watch('', event => seenA.push(event))
+  b.watch('', event => seenB.push(event))
+  assert.equal(a.watchedDirectories, 1)
+  assert.equal(b.watchedDirectories, 1)
+  writeFileSync(join(first, 'a.txt'), 'only a\n')
+  await until(() => seenA.length > 0)
+  assert.deepEqual(seenB, [], 'a change in mount A is invisible to mount B')
+  assert.equal(seenA[0]?.path, 'a.txt')
+})

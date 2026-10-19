@@ -187,3 +187,37 @@ test('2e. unmounting one directory leaves the other serving (fork contexts are i
     second.dispose()
   }
 })
+
+test('2f. two pages on one mount share the server’s directory watcher', async ({ browser }) => {
+  const directory = fixture({ 'shared.txt': 'first\n' })
+  try {
+    const mount = await gateway!.mount(directory.root)
+    const one = await browser.newPage()
+    const two = await browser.newPage()
+    try {
+      await one.goto(mount.url)
+      await two.goto(mount.url)
+      await waitForPage(one)
+      await waitForPage(two)
+      // Both pages subscribe to the root directory (the tree does this on
+      // open); the server must watch it once, and a change must reach both.
+      writeFileSync(join(directory.root, 'shared.txt'), 'second\n')
+      const read = async (page: typeof one): Promise<string> =>
+        page.evaluate(async () => {
+          const fs = (globalThis as unknown as { __diorama_page__: { getKernel(): { mount: { fs: { readText(p: string): Promise<string> } } } } }).__diorama_page__.getKernel().mount.fs
+          return fs.readText('shared.txt')
+        })
+      await expect.poll(() => read(one), { timeout: 10_000 }).toContain('second')
+      await expect.poll(() => read(two), { timeout: 10_000 }).toContain('second')
+      // A second edit still reaches both (the shared watcher survived the first).
+      writeFileSync(join(directory.root, 'shared.txt'), 'third\n')
+      await expect.poll(() => read(one), { timeout: 10_000 }).toContain('third')
+      await expect.poll(() => read(two), { timeout: 10_000 }).toContain('third')
+    } finally {
+      await one.close()
+      await two.close()
+    }
+  } finally {
+    directory.dispose()
+  }
+})

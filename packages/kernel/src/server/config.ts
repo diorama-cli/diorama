@@ -30,6 +30,8 @@ export interface EffectiveConfig {
     debounceMs: number
     /** `false` makes `fs.watch` return a no-op disposer. */
     enabled: boolean
+    /** Watched-directory cap per mount (contract.md §3.1). */
+    maxDirectories: number
   }
 }
 
@@ -39,7 +41,7 @@ export interface FileConfig {
   port?: number
   plugins?: string[]
   ignore?: string[]
-  watch?: { debounceMs?: number; enabled?: boolean }
+  watch?: { debounceMs?: number; enabled?: boolean; maxDirectories?: number }
 }
 
 /** Where the configuration came from. */
@@ -82,7 +84,7 @@ export function defaultConfig(): EffectiveConfig {
     port: 0,
     plugins: [...BUILTIN_PLUGIN_IDS],
     ignore: [...DEFAULT_IGNORE],
-    watch: { debounceMs: 300, enabled: true },
+    watch: { debounceMs: 300, enabled: true, maxDirectories: 64 },
   }
 }
 
@@ -93,7 +95,7 @@ export function dioramaHome(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 const ROOT_KEYS = new Set(['host', 'port', 'plugins', 'ignore', 'watch'])
-const WATCH_KEYS = new Set(['debounceMs', 'enabled'])
+const WATCH_KEYS = new Set(['debounceMs', 'enabled', 'maxDirectories'])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -141,6 +143,13 @@ export function validateFileConfig(raw: unknown, where: string): FileConfig {
     if (raw.watch.enabled !== undefined) {
       if (typeof raw.watch.enabled !== 'boolean') throw new ConfigError(`${where}: "watch.enabled" must be a boolean`)
       watch.enabled = raw.watch.enabled
+    }
+    if (raw.watch.maxDirectories !== undefined) {
+      const value = raw.watch.maxDirectories
+      if (!Number.isInteger(value) || (value as number) < 1 || (value as number) > 4096) {
+        throw new ConfigError(`${where}: "watch.maxDirectories" must be an integer 1–4096`)
+      }
+      watch.maxDirectories = value as number
     }
     out.watch = watch
   }
@@ -198,6 +207,7 @@ export function mergeConfig(file: FileConfig, cli: ResolveOptions['cli'] = {}): 
     watch: {
       debounceMs: file.watch?.debounceMs ?? base.watch.debounceMs,
       enabled: file.watch?.enabled ?? base.watch.enabled,
+      maxDirectories: file.watch?.maxDirectories ?? base.watch.maxDirectories,
     },
   }
 }
