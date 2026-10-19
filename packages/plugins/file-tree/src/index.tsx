@@ -49,16 +49,25 @@ function useDirectory(mount: MountHandle, path: string, open: boolean): DirState
   useEffect(() => {
     if (!open) return
     let cancelled = false
-    mount.fs.list(path).then(
-      entries => {
-        if (!cancelled) setState({ entries: [...entries].sort(compareEntries) })
-      },
-      (error: unknown) => {
-        if (!cancelled) setState({ error: error instanceof Error ? error.message : String(error) })
-      },
-    )
+    let reload = (): void => {}
+    const load = (): void => {
+      mount.fs.list(path).then(
+        entries => {
+          if (!cancelled) setState({ entries: [...entries].sort(compareEntries) })
+        },
+        (error: unknown) => {
+          if (!cancelled) setState({ error: error instanceof Error ? error.message : String(error) })
+        },
+      )
+    }
+    load()
+    // A change in this directory re-lists it: create / delete / rename all
+    // change the entry set, and `change` may be the first event of a file that
+    // was just created (the kind is only a hint, contract.md §3.1, U2).
+    reload = mount.fs.watch(path, () => load())
     return () => {
       cancelled = true
+      reload()
     }
   }, [mount, path, open])
   const more = useCallback((batch = PAGE_SIZE) => setVisible(current => current + batch), [])

@@ -22,10 +22,17 @@ import {
 export interface RpcClient {
   /** Call `<service>.<method>` with positional arguments. */
   call(method: string, ...args: unknown[]): Promise<unknown>
+  /** End a subscription endpoint's session (contract.md §4); idempotent. */
+  cancel(session: string): void
   /** Build an auto-proxy that mirrors the named server service's methods. */
   service<T extends object>(name: string, methods: readonly string[]): T
-  /** Subscribe to server → client events (M2's watch); returns the unsubscriber. */
+  /** Subscribe to broadcast server → client events; returns the unsubscriber. */
   on(topic: string, listener: (payload: unknown) => void): () => void
+  /**
+   * Subscribe to one subscription endpoint's events (contract.md §4): frames
+   * carry the `session` the endpoint call returned.
+   */
+  onSession(session: string, listener: (payload: unknown) => void): () => void
   /** Resolves once the socket is open (or rejects with `EDISCONNECTED`). */
   ready(): Promise<void>
 }
@@ -98,9 +105,22 @@ export function createRpcClient(options: RpcClientOptions): RpcClient {
     })
   }
 
+  const subscribe = (topic: string, listener: (payload: unknown) => void): (() => void) => {
+    const set = listeners.get(topic) ?? new Set()
+    set.add(listener)
+    listeners.set(topic, set)
+    return () => {
+      set.delete(listener)
+      if (set.size === 0) listeners.delete(topic)
+    }
+  }
+
   const handle = (message: RpcResponse): void => {
     if (message.type === 'event') {
-      for (const listener of listeners.get(message.topic) ?? []) listener(decodeValue(message.payload))
+      // Session-scoped frames go to the session's listeners; broadcast frames
+      // (no `session`) keep the M1 topic semantics.
+      const topic = message.session ?? message.topic
+      for (const listener of listeners.get(topic) ?? []) listener(decodeValue(message.payload))
       return
     }
     const request = pending.get(message.id)
@@ -128,8 +148,16 @@ export function createRpcClient(options: RpcClientOptions): RpcClient {
     })
   }
 
+  /** Fire-and-forget control frame (session cancellation). */
+  const cancel = (session: string): void => {
+    const current = socket
+    if (current === undefined || current.readyState !== WebSocket.OPEN) return
+    current.send(JSON.stringify({ type: 'cancel', session }))
+  }
+
   return {
     call,
+    cancel,
     service<T extends object>(name: string, methods: readonly string[]): T {
       const proxy: Record<string, (...params: unknown[]) => Promise<unknown>> = {}
       for (const method of methods) proxy[method] = (...params) => call(`${name}.${method}`, ...params)
@@ -144,6 +172,7 @@ export function createRpcClient(options: RpcClientOptions): RpcClient {
         if (set.size === 0) listeners.delete(topic)
       }
     },
+    onSession: (session, listener) => subscribe(session, listener),
     ready: () => open,
   }
 }

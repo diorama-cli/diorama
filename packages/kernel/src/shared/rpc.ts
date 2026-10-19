@@ -10,12 +10,13 @@
 /** Client → server. */
 export type RpcRequest =
   | { type: 'call'; id: number; method: string; args: unknown[] }
+  | { type: 'cancel'; session: string }
 
 /** Server → client. */
 export type RpcResponse =
   | { type: 'result'; id: number; value: unknown }
   | { type: 'error'; id: number; code: string; message: string }
-  | { type: 'event'; topic: string; payload: unknown }
+  | { type: 'event'; topic: string; payload: unknown; session?: string }
 
 /** What a proxying service reports so the channel can whitelist its methods. */
 export interface MethodDescriptor {
@@ -28,6 +29,18 @@ export interface MethodDescriptor {
 /** Every server service that may be proxied implements this (contract.md §4). */
 export interface DescribedService {
   describe(): MethodDescriptor[]
+}
+
+/**
+ * Subscription endpoints (contract.md §4): a call to one of these registers a
+ * push instead of returning a value. They are routed by convention name and do
+ * not appear in `describe()` (which lists plain methods only).
+ */
+export const SUBSCRIPTION_METHOD = 'watch'
+
+/** What a subscription endpoint returns: the session that tags its events. */
+export interface SubscriptionStarted {
+  session: string
 }
 
 /** The marker key of an encoded `Uint8Array`. */

@@ -20,12 +20,14 @@ import {
   createDispatcher,
   createMountServer,
   dioramaHome,
+  rpcError,
   listen,
   planPlugins,
   resolveConfig,
   type BootManifest,
   type ConfigOrigin,
   type EffectiveConfig,
+  type RpcDispatcher,
 } from 'diorama-kernel/server'
 import { loadServerHalf } from './plugins-server.ts'
 
@@ -191,6 +193,30 @@ export async function selectPlugins(ids: readonly string[], breakPlugin?: string
   })
 }
 
+/**
+ * Teach the dispatcher about subscription endpoints (contract.md §4): a call to
+ * `<service>.watch` registers a push and returns the disposer that ends it.
+ */
+export function withSubscriptions(dispatcher: RpcDispatcher, services: () => Record<string, unknown>): RpcDispatcher {
+  return {
+    ...dispatcher,
+    async subscribe(method, args, push) {
+      const [service, name] = method.split('.')
+      if (service === undefined || name === undefined) throw new Error(`subscribe: bad method "${method}"`)
+      const target = services()[service]
+      const callable = (target as Record<string, unknown> | undefined)?.[name]
+      if (target === undefined || typeof callable !== 'function') {
+        throw rpcError('EMETHOD', `${method} is not a subscription`)
+      }
+      const dispose = (callable as (...params: unknown[]) => unknown).apply(target, [args[0] ?? '', push])
+      if (typeof dispose !== 'function') {
+        throw rpcError('EMETHOD', `${method} did not return a disposer`)
+      }
+      return dispose as () => void
+    },
+  }
+}
+
 /** Characters allowed in a mount id (it appears in logs as `[mount:<id>]`). */
 export function newMountId(): string {
   return randomBytes(4).toString('hex')
@@ -301,7 +327,7 @@ export async function main(argv: readonly string[], env: NodeJS.ProcessEnv = pro
     mountId,
     assetsRoot: assets,
     clientEntries,
-    dispatcher: createDispatcher(proxyable),
+    dispatcher: withSubscriptions(createDispatcher(proxyable), proxyable),
     manifest,
   })
   const server = mountServer.server

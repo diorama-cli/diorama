@@ -8,6 +8,7 @@
  * an external server half would plug in the same way. `describe()` lists the
  * methods the RPC channel may proxy (contract.md §4).
  */
+import { watch as watchPath, type FSWatcher } from 'node:fs'
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 import { fsError } from '../shared/errors.ts'
@@ -76,7 +77,14 @@ const METHODS: MethodDescriptor[] = [
 export interface FsServiceOptions {
   /** Ignore patterns hidden from `list`; defaults to `.git` + `node_modules`. */
   ignore?: readonly string[]
+  /** Watch debounce window in ms (contract.md §3.1: 300). */
+  debounceMs?: number
+  /** `false`: `watch` is a no-op (diorama.toml `watch.enabled`). */
+  enabled?: boolean
 }
+
+/** The contract's default watch window. */
+export const DEFAULT_DEBOUNCE_MS = 300
 
 /**
  * Read-only file access rooted at one mounted directory.
@@ -89,9 +97,16 @@ export class FsService {
   /** Hidden-name rules: the single enforcement point of `ignore` (contract.md §3.1). */
   readonly ignore: IgnoreRules
 
+  /** Debounce window for `watch` (contract.md §3.1). */
+  readonly debounceMs: number
+  /** `false` makes `watch` return a no-op disposer (diorama.toml `watch.enabled`). */
+  readonly watchEnabled: boolean
+
   constructor(root: string, options: FsServiceOptions = {}) {
     this.root = resolve(root)
     this.ignore = createIgnore(options.ignore ?? DEFAULT_IGNORE)
+    this.debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS
+    this.watchEnabled = options.enabled ?? true
   }
 
   /** The methods the RPC channel may proxy (contract.md §4). */
@@ -177,12 +192,100 @@ export class FsService {
   }
 
   /**
-   * Watch one path for changes (contract.md §3.1). The signature is final;
-   * events arrive from M2 (plan.md), so M1 returns the disposer and emits
-   * nothing rather than pretending to watch.
+   * Watch one **directory** (contract.md §3.1): its own entries, one level.
+   * Events are merged per `(path, type)` in a window of `debounceMs` (the fs
+   * service's option), so an editor's save burst is one `change`. `type` is a
+   * hint — a rename can make it ambiguous; readers re-`stat` to decide.
+   *
+   * Returns the disposer; nothing is watched after it runs.
    */
-  watch(_path: RelPath, _listener: (event: FsWatchEvent) => void): () => void {
-    return () => {}
+  watch(path: RelPath, listener: (event: FsWatchEvent) => void): () => void {
+    // Validate before touching the OS: a bad path must fail like `list` does.
+    const abs = resolveInside(this.root, path)
+    if (this.watchEnabled === false) return () => {}
+    // One pending event per path: a burst of writes (which may alternate
+    // `change` and the rename that follows a save) must collapse to one.
+    const pending = new Map<string, FsWatchEvent>()
+    const timers = new Map<string, ReturnType<typeof setTimeout>>()
+    let closed = false
+    let watcher: FSWatcher
+    try {
+      watcher = watchPath(abs, { persistent: false })
+    } catch (error) {
+      mapNodeError(error)
+    }
+    /** One pending event per path, flushed `debounceMs` after the last one. */
+    const enqueue = (event: FsWatchEvent): void => {
+      if (closed) return
+      const key = event.path
+      pending.set(key, event)
+      const timer = timers.get(key)
+      if (timer !== undefined) clearTimeout(timer)
+      const handle = setTimeout(() => flush(key), this.debounceMs)
+      handle.unref?.()
+      timers.set(key, handle)
+    }
+    const flush = (key: string): void => {
+      timers.delete(key)
+      const event = pending.get(key)
+      if (event === undefined) return
+      pending.delete(key)
+      if (closed) return
+      try {
+        listener(event)
+      } catch (error) {
+        // A listener must not be able to stop the watcher.
+        console.error(`[diorama] fs.watch listener failed for ${event.path}:`, error)
+      }
+    }
+    watcher.on('change', (kind, name) => {
+      if (name === null || name === undefined) return
+      const base = abs.split(/[\\/]/).pop() ?? ''
+      // Some platforms report the watched directory itself; it is not an entry.
+      if (String(name) === base) return
+      const child = path === '' ? String(name) : `${path}/${String(name)}`
+      if (this.ignore.matches(child, '')) return
+      const next: FsWatchEvent = { type: this.classify(kind), path: child }
+      void this.refine(child, next).then(event => event !== undefined && enqueue(event))
+    })
+    watcher.on('error', error => {
+      console.error(`[diorama] fs.watch failed for ${path || '/'}:`, error)
+      close()
+    })
+    void flush
+    const close = (): void => {
+      if (closed) return
+      closed = true
+      for (const timer of timers.values()) clearTimeout(timer)
+      timers.clear()
+      pending.clear()
+      watcher.close()
+    }
+    return close
+  }
+
+  /** A raw watcher kind, before the existence check narrows it. */
+  private classify(kind: string): FsWatchEvent['type'] {
+    if (kind === 'change') return 'change'
+    // `rename` covers create, delete *and* spurious reports of existing
+    // entries (macOS reports the parent on some writes). `refine` decides.
+    return 'add'
+  }
+
+  /**
+   * Narrow a watcher hint to the contract's kind (contract.md §3.1): a
+   * `rename` on a path that exists is an `add`/`change`, one that does not is
+   * an `unlink`. A `change` on a path that is gone is an `unlink` too.
+   */
+  private async refine(path: RelPath, event: FsWatchEvent): Promise<FsWatchEvent | undefined> {
+    try {
+      const info = await stat(resolveInside(this.root, path))
+      if (info.isDirectory()) return undefined
+      return event.type === 'add' ? { type: 'change', path } : event
+    } catch (error) {
+      if ((error as { code?: string }).code === 'ENOENT') return { type: 'unlink', path }
+      return undefined
+    }
   }
 
   private async statsOf(abs: string) {
@@ -209,7 +312,11 @@ export const fsHalf = {
     ctx.diorama.mounts.onMount((mountCtx, info) => {
       ;(mountCtx as unknown as { provide(name: string, value: unknown): unknown }).provide(
         'fs',
-        new FsService(info.root, { ignore: info.config?.ignore }),
+        new FsService(info.root, {
+          ignore: info.config?.ignore,
+          debounceMs: info.config?.watch.debounceMs,
+          enabled: info.config?.watch.enabled,
+        }),
       )
       return () => {}
     })

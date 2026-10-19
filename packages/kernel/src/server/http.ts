@@ -223,7 +223,10 @@ export function createMountServer(options: MountOptions): MountServer {
     channel,
     async close() {
       channel.close()
+      // Drop every remaining socket hard (keep-alive HTTP and any upgrade the
+      // channel did not own), so `close()` resolves instead of waiting them out.
       server.closeAllConnections()
+      server.closeIdleConnections()
       await new Promise<void>(done => server.close(() => done()))
     },
   }

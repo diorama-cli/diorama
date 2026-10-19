@@ -480,6 +480,51 @@ export function apply(ctx: Context) {
   // owns "re-read this file" — the O8 switch that a toolbar would otherwise hold.
   // Commands are a kernel service (contract.md §3.7) listed in this piece's
   // `inject`, so the fiber waits for it before `apply` runs.
+  // Live content (contract.md §3.1, U2): watch each open tab's *parent* dir and
+  // re-stat that tab when its file changes. Automatic refresh is a setting the
+  // `view.toggleAutoRefresh` command flips; `fs.watch` is cancelled with the tab.
+  const mount = (ctx as unknown as { mount: MountHandle }).mount
+  const cache = cacheFor(mount)
+  const watchers = new Map<string, () => void>()
+  const watchTab = (tabId: string, path: string): void => {
+    watchers.get(tabId)?.()
+    const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : ''
+    watchers.set(
+      tabId,
+      mount.fs.watch(parent, event => {
+        if (!contentSettings.autoRefreshing) return
+        if (event.path !== path) return
+        cache.changed(path)
+      }),
+    )
+  }
+  const syncedTabs = new Map<string, string>()
+  const syncWatches = (): void => {
+    const open = new Map(tabs.getSnapshot().tabs.map(tab => [tab.id, tab.path]))
+    for (const [tabId, dispose] of watchers) {
+      if (open.has(tabId)) continue
+      dispose()
+      watchers.delete(tabId)
+      syncedTabs.delete(tabId)
+    }
+    for (const [tabId, path] of open) {
+      if (syncedTabs.get(tabId) === path) continue
+      syncedTabs.set(tabId, path)
+      watchTab(tabId, path)
+    }
+  }
+  ctx.effect(() => {
+    syncWatches()
+    return tabs.subscribe(syncWatches)
+  }, 'renderer-registry: watch open tabs')
+  ctx.effect(
+    () => () => {
+      for (const dispose of watchers.values()) dispose()
+      watchers.clear()
+    },
+    'renderer-registry: stop watching',
+  )
+
   const commands = (ctx as unknown as { commands: CommandsService }).commands
   commands.contribute({
     activeTab: () => {
