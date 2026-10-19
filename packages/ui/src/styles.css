@@ -171,7 +171,7 @@ code {
   color: inherit;
 }
 
-/* Tabs piece (M0: a single tab, no close affordance) */
+/* Tabs piece: a strip of tabs, one content seat per tab */
 .diorama-tabs {
   display: flex;
   flex-direction: column;
@@ -185,23 +185,69 @@ code {
   height: 32px;
   border-bottom: 1px solid var(--dio-border);
   background: var(--dio-panel);
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .diorama-tabs__tab {
   display: flex;
   align-items: center;
+  flex: none;
   max-width: 320px;
-  padding: 0 14px;
   border-right: 1px solid var(--dio-border);
-  background: var(--dio-bg);
+  background: var(--dio-panel);
+  color: var(--dio-muted);
   font-size: 12px;
+  white-space: nowrap;
+}
+
+.diorama-tabs__tab--active {
+  background: var(--dio-bg);
+  color: inherit;
+  box-shadow: inset 0 -2px 0 rgba(47, 111, 235, 0.75);
+}
+
+.diorama-tabs__label {
+  min-width: 0;
+  padding: 0 6px 0 14px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+.diorama-tabs__close {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin-right: 4px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--dio-muted);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.diorama-tabs__close:hover {
+  background: rgba(0, 0, 0, 0.08);
+  color: inherit;
+}
+
+.diorama-tabs__panes {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
 .diorama-tabs__content {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   overflow: auto;
 }

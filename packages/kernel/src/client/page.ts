@@ -26,6 +26,8 @@ export interface KernelSlotRegistry {
   entriesOf(name: string, key?: string): readonly unknown[]
   /** Every entry of every seat, in total order (dispatcher seats). */
   all(): readonly unknown[]
+  /** Whether the piece that declares a seat is in this page (contract.md §3.3). */
+  owned(name: string): boolean
 }
 
 /** What components need from the page: services plus the mount handle. */

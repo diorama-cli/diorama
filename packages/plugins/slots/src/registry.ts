@@ -224,6 +224,18 @@ export class SlotRegistry {
     return [...this.entries.values()].sort(this.order)
   }
 
+  /**
+   * Whether some registered entry declares `name` — i.e. the piece that owns
+   * the seat is in this page. Dispatchers ask this before looking a seat up: a
+   * lookup of an undeclared seat is refused (and warned about, contract.md §3.3).
+   */
+  owned(name: SlotName): boolean {
+    for (const entry of this.entries.values()) {
+      if (Object.hasOwn(entry.declarations, name)) return true
+    }
+    return false
+  }
+
   /** The declaration of a seat, if any. */
   specOf(name: SlotName): SlotSpec | undefined {
     return this.specs.get(name)

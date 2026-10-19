@@ -18,10 +18,14 @@ export interface FileInfo {
   mtime: number
 }
 
-/** An open tab. M0/M1 keep a single tab whose id is fixed. */
+/**
+ * An open tab (contract.md §3.4). It carries the path only: the content seat
+ * stats and reads the file itself, so a changed file is re-read without the
+ * tab service depending on `fs`.
+ */
 export interface TabInfo {
   id: string
-  file: FileInfo
+  path: RelPath
 }
 
 /** A kernel-side file change notification (contract.md §3.1; emitted from M2). */

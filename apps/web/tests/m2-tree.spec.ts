@@ -26,7 +26,7 @@ test('4. a large directory lists one page and grows on request', async ({ page }
     await expect(tree.getByTestId('tree-more')).toHaveCount(0)
     // The last page's entries are real files: clicking one opens a tab.
     await tree.locator('[data-path="bulk/file-599.txt"]').click()
-    await expect(page.getByTestId('active-tab')).toHaveText('file-599.txt')
+    await expect(page.getByTestId('active-tab').locator('.diorama-tabs__label')).toHaveText('file-599.txt')
   } finally {
     await server.stop()
     directory.dispose()

@@ -24,7 +24,7 @@ test('2. markdown renders .md as HTML', async ({ page }) => {
   const article = page.locator('.diorama-markdown')
   await expect(article.locator('h1')).toHaveCount(1)
   await expect(article.locator('ul li')).toHaveCount(2)
-  await expect(page.locator('[data-testid="renderer"]')).toHaveAttribute('data-renderer', 'markdown:renderer')
+  await expect(page.getByTestId('tabs-content').filter({ visible: true }).locator('[data-testid="renderer"]')).toHaveAttribute('data-renderer', 'markdown:renderer')
 
   // The M0 HTTP transport is gone (contract.md §4): only RPC reaches files.
   const response = await page.request.get(`${server.url}api/fs/list?path=`)
@@ -41,7 +41,7 @@ test('3. removing markdown falls back to plaintext', async ({ page }) => {
   await page.goto(server.url)
   await page.locator('[data-path="README.md"]').click()
   await page.getByTestId('plaintext').waitFor()
-  await expect(page.locator('[data-testid="renderer"]')).toHaveAttribute('data-renderer', 'plaintext:fallback')
+  await expect(page.getByTestId('tabs-content').filter({ visible: true }).locator('[data-testid="renderer"]')).toHaveAttribute('data-renderer', 'plaintext:fallback')
   await expect(page.getByTestId('markdown')).toHaveCount(0)
 })
 
@@ -58,7 +58,7 @@ test('4. code highlights source and plaintext takes the rest', async ({ page }) 
 
   await page.locator('[data-path="LICENSE"]').click()
   await page.getByTestId('plaintext').waitFor()
-  await expect(page.locator('[data-testid="renderer"]')).toHaveAttribute('data-renderer', 'plaintext:fallback')
+  await expect(page.getByTestId('tabs-content').filter({ visible: true }).locator('[data-testid="renderer"]')).toHaveAttribute('data-renderer', 'plaintext:fallback')
 })
 
 /** 5. A binary file says so instead of showing mojibake. */
@@ -153,11 +153,11 @@ test('9. clicking through files does not freeze the page', async ({ page }) => {
   ]
   for (const file of files) {
     const started = Date.now()
-    await page.locator(`[data-path="${file}"]`).click({ timeout: 5_000 })
-    await expect(page.getByTestId('active-tab')).toHaveText(file.slice(file.lastIndexOf('/') + 1))
+    await page.getByTestId('file-tree').locator(`[data-path="${file}"]`).click({ timeout: 5_000 })
+    await expect(page.getByTestId('active-tab').locator('.diorama-tabs__label')).toHaveText(file.slice(file.lastIndexOf('/') + 1))
     expect(Date.now() - started, `${file} took too long to open`).toBeLessThan(4_000)
   }
   // Still responsive: the page answers and a further file opens.
-  await page.locator('[data-path="src/app.js"]').click({ timeout: 5_000 })
-  await expect(page.getByTestId('active-tab')).toHaveText('app.js')
+  await page.getByTestId('file-tree').locator('[data-path="src/app.js"]').click({ timeout: 5_000 })
+  await expect(page.getByTestId('active-tab').locator('.diorama-tabs__label')).toHaveText('app.js')
 })

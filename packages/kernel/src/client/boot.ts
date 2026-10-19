@@ -198,6 +198,12 @@ async function loadManifest(
     try {
       const pending = ctx.plugin(module as PluginModule)
       await pending
+
+      // Deferred effects (`ctx.provide(...)` runs inside one) fire only once the
+      // fiber is active, and firing them re-runs PENDING fibers whose `inject`
+      // matches — possibly one booted earlier in the graph. Drain the queue so
+      // the next plugin applies only after this one is fully in effect.
+      await settle()
       // Cordis does not throw when an injected service never appears: the fiber
       // stays PENDING (0/1) and `apply` never runs. Turn that into a loud boot
       // failure instead of an undefined service later (contract.md §11).
@@ -217,6 +223,15 @@ async function loadManifest(
     }
   }
   return failures
+}
+
+/**
+ * Let the microtask queue run until it is empty (see the note at the call
+ * site). Effects that only chain promises settle here.
+ */
+async function settle(limit = 1000): Promise<void> {
+  let rounds = 0
+  while (rounds++ < limit) await Promise.resolve()
 }
 
 /**

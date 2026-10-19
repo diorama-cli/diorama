@@ -32,7 +32,8 @@
       "entry": "./lib/client.cjs"
     },
     "requires": [
-      "slots"
+      "slots",
+      "tabs"
     ]
   },
   "scripts": {

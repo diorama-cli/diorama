@@ -27,7 +27,10 @@ export interface KernelContextValue {
   registry?: {
     readonly version: number
     entriesOf(name: string, key?: string): readonly unknown[]
+    /** Every entry of every seat, in total order (dispatcher seats). */
     all(): readonly unknown[]
+    /** Whether the piece that declares `name` is in this page (contract.md §3.3). */
+    owned?(name: string): boolean
   }
   /** Read-only slot observation (entries, failures). */
   views: {

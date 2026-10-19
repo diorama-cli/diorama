@@ -1,35 +1,77 @@
 /**
- * tabs — the content area (M0: single-tab semantics).
+ * tabs — the tab strip and the per-tab content seats (contract.md §3.4, §5).
  *
- * Provides `ctx.tabs` (open and switch, never edit — contract.md §3.4) and
- * registers into `layout.main`, declaring the `tabs.content` seat it renders.
- * It does not read files: whatever occupies `tabs.content` draws the active
+ * Provides `ctx.tabs` (open, switch, close — never edit) and registers into
+ * `layout.main`, declaring the `tabs.content` seat it renders. Since v0.3 that
+ * seat is **keyed by tab id** and gets **one seat per open tab**: hidden tabs
+ * stay mounted (hidden with `display: none`, not unmounted), so every tab's
+ * scroll position and renderer state are its own.
+ *
+ * It does not read files: whatever occupies `tabs.content` draws the tab's
  * file.
  */
 import type { Context } from 'cordis'
 import type { ReactElement } from 'react'
 import type { TabInfo } from 'diorama-kernel/client'
+import type {} from 'diorama-plugin-slots'
 import { bindMethods, provideEntry, Slot, useKernel, useStore } from 'diorama-ui'
 import { createTabsService } from 'diorama-kernel/client'
 
 export const name = 'tabs'
 export const inject = ['slots']
 
-/**
- * The content seat. `single` because it already *is* per tab: the component in
- * it dispatches on the tab's file (M2 turns tabs into a real list; the seat
- * stays "the content of the tab being rendered").
- */
+/** The content seats, one per tab, keyed by tab id (contract.md §5). */
 const DECLARE = {
-  'tabs.content': { kind: 'single' },
+  'tabs.content': { kind: 'keyed' },
 } as const
+
+/** Props of one `tabs.content` entry. */
+interface ContentProps {
+  tab: TabInfo
+}
+
+/** One tab's seat: the first entry of `tabs.content` under this tab's key. */
+function TabContent({ tab }: ContentProps) {
+  const { registry } = useKernel()
+  // Only look a seat up when a piece declared it: the registry refuses (and
+  // warns about) lookups of undeclared seats (contract.md §3.3), and a page
+  // without the `renderer-registry` piece has no entries under this seat.
+  if (registry?.owned?.('tabs.content') !== true) {
+    return (
+      <div className="diorama-renderer__empty" role="status" data-testid="tab-content-empty">
+        没有内容插件
+      </div>
+    )
+  }
+  return (
+    <Slot
+      name="tabs.content"
+      slotKey={tab.id}
+      props={{ tab }}
+      empty={
+        <div className="diorama-renderer__empty" role="status" data-testid="tab-content-empty">
+          没有内容插件
+        </div>
+      }
+      exhausted={errors => (
+        <div className="diorama-renderer__error" role="alert">
+          {errors.join('\n')}
+        </div>
+      )}
+      fallback={<div className="diorama-renderer__error">内容渲染失败</div>}
+      render={entry => {
+        const Content = entry.component as unknown as (contentProps: ContentProps) => ReactElement | null
+        return <Content tab={tab} />
+      }}
+    />
+  )
+}
 
 function TabsView() {
   const { ctx } = useKernel()
   const tabs = ctx.tabs
   const snapshot = useStore(tabs)
-  const active = snapshot.tabs.find(tab => tab.id === snapshot.activeId)
-  if (active === undefined) {
+  if (snapshot.tabs.length === 0) {
     return (
       <section className="diorama-tabs" data-testid="tabs">
         <div className="diorama-tabs__empty" data-testid="tabs-empty">
@@ -41,26 +83,58 @@ function TabsView() {
   return (
     <section className="diorama-tabs" data-testid="tabs">
       <div className="diorama-tabs__strip" role="tablist">
-        <div
-          className="diorama-tabs__tab"
-          role="tab"
-          aria-selected="true"
-          title={active.file.path}
-          data-testid="active-tab"
-        >
-          {active.file.name}
-        </div>
+        {snapshot.tabs.map(tab => {
+          const active = tab.id === snapshot.activeId
+          const name = tab.path.slice(tab.path.lastIndexOf('/') + 1)
+          return (
+            <div
+              key={tab.id}
+              className={`diorama-tabs__tab${active ? ' diorama-tabs__tab--active' : ''}`}
+              role="tab"
+              aria-selected={active}
+              title={tab.path}
+              data-tab-id={tab.id}
+              data-testid={active ? 'active-tab' : 'tab'}
+            >
+              <button
+                type="button"
+                className="diorama-tabs__label"
+                tabIndex={-1}
+                onClick={() => tabs.activate(tab.id)}
+              >
+                {name}
+              </button>
+              <button
+                type="button"
+                className="diorama-tabs__close"
+                aria-label={`关闭 ${name}`}
+                tabIndex={-1}
+                data-testid="tab-close"
+                onClick={event => {
+                  event.stopPropagation()
+                  tabs.close(tab.id)
+                }}
+              >
+                ×
+              </button>
+            </div>
+          )
+        })}
       </div>
-      <div className="diorama-tabs__content" data-testid="tabs-content">
-        <Slot
-          name="tabs.content"
-          props={{ tab: active }}
-          exhausted={errors => <div className="diorama-renderer__error">{errors.join('\n')}</div>}
-          render={entry => {
-            const Content = entry.component as unknown as (contentProps: { tab: TabInfo }) => ReactElement | null
-            return <Content tab={active} />
-          }}
-        />
+      <div className="diorama-tabs__panes">
+        {snapshot.tabs.map(tab => (
+          <div
+            key={tab.id}
+            className="diorama-tabs__content"
+            data-testid="tabs-content"
+            data-tab-id={tab.id}
+            // Hidden tabs stay mounted: each keeps its own scroll and renderer
+            // state (contract.md §5).
+            style={tab.id === snapshot.activeId ? undefined : { display: 'none' }}
+          >
+            <TabContent tab={tab} />
+          </div>
+        ))}
       </div>
     </section>
   )

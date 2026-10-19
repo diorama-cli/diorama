@@ -43,8 +43,10 @@ export class TreeService {
   /** Select a file: updates the snapshot and notifies subscribers. */
   select(file: FileInfo): void {
     if (file.kind !== 'file') return
-    if (this.store.selected === file.path) return
-    this.publish({ ...this.store, selected: file.path })
+    // Always hand the click to the opener, even when the node is already the
+    // selection: with tabs, clicking a file that is open in a *background* tab
+    // must activate that tab, and the tree has no say in which tab is active.
+    if (this.store.selected !== file.path) this.publish({ ...this.store, selected: file.path })
     for (const listener of [...this.selectListeners]) listener(file)
   }
 

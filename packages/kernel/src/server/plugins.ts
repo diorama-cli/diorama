@@ -10,6 +10,7 @@
  * directory.
  */
 import { Context } from 'cordis'
+import TimerService from '@cordisjs/plugin-timer'
 import { CONTRACT_VERSION, KERNEL_NAME } from '../contract.ts'
 import type { EffectiveConfig } from './config.ts'
 import { FsService } from './fs.ts'
@@ -69,6 +70,13 @@ export interface ServerTree {
 export interface LoadPluginsResult {
   fibers: unknown[]
   failures: PluginFailure[]
+}
+
+/** A loaded fiber, as the loader inspects it (Cordis' own object). */
+interface LoadedFiber {
+  state?: number
+  error?: unknown
+  await?(): Promise<unknown>
 }
 
 /**
@@ -139,6 +147,15 @@ export function createMounts(): {
 /**
  * Load plugins in order. A plugin that fails the minimal plugin shape is
  * reported and skipped; the rest still load (M0 acceptance point 5).
+ *
+ * A plugin's `apply` also leaves deferred effects behind (`ctx.provide(...)`
+ * runs inside an effect). Cordis fires those only *after* the fiber becomes
+ * active, and firing them calls `reflect.notify`, which re-runs every PENDING
+ * fiber whose `inject` mentions the name — inside that fiber. A later plugin
+ * that is early in the boot graph would then `apply` before an earlier one,
+ * and seat declarations could overtake the entries that need them (M2 S3 found
+ * this with `renderer-registry` injecting `tabs`). `settle` drains the effect
+ * queue after every plugin, so boot order is exactly the graph order.
  */
 export async function loadPlugins(
   ctx: Context & CordisSurface,
@@ -159,7 +176,18 @@ export async function loadPlugins(
       const fiber = await ctx.plugin(plugin as object)
       // A plugin whose `apply` returned synchronously is not finished yet: the
       // body runs as Cordis' fiber effect. Finish loading it before the next.
-      await (fiber as unknown as { await?(): Promise<unknown> }).await?.()
+      await (fiber as unknown as LoadedFiber).await?.()
+      await settle()
+      // Cordis does not throw when an injected service never appears: the fiber
+      // stays PENDING and `apply` never runs. Turn that into a loud boot
+      // failure instead of an undefined service later (contract.md §11).
+      const state = (fiber as unknown as LoadedFiber).state
+      if (typeof state === 'number' && state !== 2) {
+        const reason = (fiber as unknown as LoadedFiber).error
+        const message = `did not activate (state ${state}${reason === undefined ? ': an injected service is unavailable' : `: ${(reason as Error).message}`})`
+        failures.push({ id: describePlugin(plugin), message })
+        log(`[diorama] error: plugin ${describePlugin(plugin)} ${message}`)
+      }
       fibers.push(fiber)
     } catch (error) {
       const id = describePlugin(plugin)
@@ -168,6 +196,17 @@ export async function loadPlugins(
     }
   }
   return { fibers, failures }
+}
+
+/**
+ * Let the microtask queue run until it is empty. Effects that only chain
+ * promises (no timers) settle here; anything slower is a bug in the loader's
+ * assumptions, so the bound is generous but finite (and still counts as done —
+ * `await` above already resolved).
+ */
+async function settle(limit = 1000): Promise<void> {
+  let rounds = 0
+  while (rounds++ < limit) await Promise.resolve()
 }
 
 /** Boot the server plugin tree for one served directory. */
@@ -181,6 +220,10 @@ export async function bootPlugins(options: {
 }): Promise<ServerTree> {
   const log = options.log ?? ((message: string) => console.error(message))
   const root = new Context() as unknown as Context & CordisSurface
+  // Timers as services (`ctx.timer.debounce` and friends). Installed first so a
+  // plugin may `inject: ['timer']`; every timer an effect creates is disposed
+  // with it (fs watch windows included).
+  await loadPlugins(root, [TimerService], log)
 
   // `ctx.diorama` exists before any plugin applies, so a service plugin can
   // register on `mounts` during its own `apply` (contract.md §2.5).

@@ -166,6 +166,9 @@ importers:
 
   .:
     dependencies:
+      '@cordisjs/plugin-timer':
+        specifier: ^1.1.4
+        version: 1.1.4(cordis@4.0.0-rc.11)
       smol-toml:
         specifier: ^1.9.1
         version: 1.9.1
@@ -679,6 +682,11 @@ importers:
         version: 5.9.3
 
 packages:
+
+  '@cordisjs/plugin-timer@1.1.4':
+    resolution: {integrity: sha512-hxm4MmT0hrNzue05EE30We2WYVTTR6g2Nj5kYDu4EWzM9B7JgrUQg8qfUvG03rzB+59uJJywm8u/9OeJXhYIcg==}
+    peerDependencies:
+      cordis: ^4.0.0-rc.11
 
   '@oxc-project/types@0.154.0':
     resolution: {integrity: sha512-KYOUGQFlLWR+s4QMV2Q9ko38TZm7EdO87Qm7rvZLqk/webse/cDjtyxKhg/47l0byCbs/k46LT8qc4PKjAikzA==}
@@ -1267,6 +1275,11 @@ packages:
     engines: {node: '>=14.18.0'}
 
 snapshots:
+
+  '@cordisjs/plugin-timer@1.1.4(cordis@4.0.0-rc.11)':
+    dependencies:
+      cordis: 4.0.0-rc.11
+      cosmokit: 1.8.1
 
   '@oxc-project/types@0.154.0': {}
 
