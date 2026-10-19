@@ -1,11 +1,12 @@
 {
   "name": "diorama-cli",
-  "version": "0.0.1-m0",
+  "version": "0.0.1-m3-beta",
   "private": true,
   "description": "diorama CLI: serve one directory in the foreground",
   "type": "module",
   "bin": {
-    "diorama": "./bin/diorama"
+    "diorama": "./bin/diorama",
+    "diorama-beta": "./bin/diorama-beta"
   },
   "files": [
     "bin",

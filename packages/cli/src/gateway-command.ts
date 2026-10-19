@@ -3,27 +3,44 @@
  *
  * `run` is the foreground daemon: `start` spawns it detached, `--foreground`
  * runs it in this process, and the tests spawn it directly. The other verbs
- * are short-lived clients of the control socket.
+ * are short-lived clients of the control socket (`diorama[-beta].sock`).
  */
-import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { dioramaHome } from 'diorama-kernel/server'
 import { serveGateway, type StoppableGateway } from './gateway.ts'
 import { assetsRoot } from './run.ts'
 
+/**
+ * This build's identity (contract.md §7.1, §7.4). A **beta** build is a linked
+ * checkout: its state directory, socket, pid file and log are all suffixed, so
+ * it never talks to — or fights over — an installed `diorama`'s gateway.
+ * `dist` (the released build) keeps the plain names and binds `diorama.sock`.
+ */
+export type BuildChannel = 'dist' | 'beta'
+
+/** The channel this process is: `beta` when linked, `dist` otherwise. */
+export function buildChannel(env: NodeJS.ProcessEnv = process.env): BuildChannel {
+  return env.DIORAMA_CHANNEL === 'beta' ? 'beta' : 'dist'
+}
+
+/** `beta` → `-beta`, `dist` → `` (the suffix every state path uses). */
+export function channelSuffix(channel: BuildChannel = buildChannel()): string {
+  return channel === 'beta' ? '-beta' : ''
+}
+
 /** `$DIORAMA_HOME/diorama.sock` (contract.md §7.1). */
 export function socketPath(env: NodeJS.ProcessEnv = process.env): string {
-  return join(dioramaHome(env), 'diorama.sock')
+  return join(dioramaHome(env), `diorama${channelSuffix(buildChannel(env))}.sock`)
 }
 
 /** `$DIORAMA_HOME/gateway.pid` (contract.md §7.4). */
 export function pidPath(env: NodeJS.ProcessEnv = process.env): string {
-  return join(dioramaHome(env), 'gateway.pid')
+  return join(dioramaHome(env), `gateway${channelSuffix(buildChannel(env))}.pid`)
 }
 
 /** `$DIORAMA_HOME/gateway.log`: the detached daemon's console (contract.md §7.4). */
 export function logPath(env: NodeJS.ProcessEnv = process.env): string {
-  return join(dioramaHome(env), 'gateway.log')
+  return join(dioramaHome(env), `gateway${channelSuffix(buildChannel(env))}.log`)
 }
 
 export interface RunOptions {
@@ -45,17 +62,4 @@ export async function runGateway(options: RunOptions = {}): Promise<StoppableGat
     assets: assetsRoot(env),
     log,
   })
-}
-
-/** The pid file's content, when a gateway left one behind (contract.md §7.4). */
-export function readPid(env: NodeJS.ProcessEnv = process.env): { pid: number; socket: string; startedAt: number } | undefined {
-  const path = pidPath(env)
-  if (!existsSync(path)) return undefined
-  try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as { pid?: unknown; socket?: unknown; startedAt?: unknown }
-    if (typeof parsed.pid !== 'number') return undefined
-    return { pid: parsed.pid, socket: String(parsed.socket ?? ''), startedAt: Number(parsed.startedAt ?? 0) }
-  } catch {
-    return undefined
-  }
 }

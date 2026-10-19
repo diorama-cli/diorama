@@ -1,11 +1,10 @@
 /**
  * The CLI's side of the control plane (contract.md §7.4–§7.6): start, stop,
  * status, restart, and the `ls` table. Every verb is a short-lived process
- * that talks to the gateway over `$DIORAMA_HOME/diorama.sock` and exits.
+ * that talks to the gateway over `$DIORAMA_HOME/diorama[-beta].sock` and exits.
  */
 import { spawn } from 'node:child_process'
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync } from 'node:fs'
-import { dirname, join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import {
@@ -31,6 +30,13 @@ export interface CliIo {
   /** stderr sink. */
   err(message: string): void
   env: NodeJS.ProcessEnv
+  /** The command name to print (`diorama` or `diorama-beta`). */
+  name?: string
+}
+
+/** The name to print in messages: the invoked binary name when known. */
+export function cliName(io: { name?: string }): string {
+  return io.name ?? 'diorama'
 }
 
 export function defaultIo(): CliIo {
@@ -210,9 +216,9 @@ export function readPidFile(env: NodeJS.ProcessEnv): { pid: number; socket: stri
   }
 }
 
-/** The log file the detached gateway writes to. */
+/** The log file the detached gateway writes to (per channel, like the socket). */
 export function gatewayLogPath(env: NodeJS.ProcessEnv): string {
-  return join(dirname(socketPath(env)), 'gateway.log')
+  return logPath(env)
 }
 
 // --- `diorama ls` (contract.md §7.6) ---------------------------------------
@@ -253,7 +259,7 @@ export async function listMounts(io: CliIo = defaultIo(), options: { json?: bool
   const status = await gatewayStatus(io)
   if (status === undefined) {
     if (options.json) io.out(JSON.stringify({ running: false, mounts: [] }, null, 2))
-    else io.out('gateway is not running (run "diorama gateway start")')
+    else io.out(`gateway is not running (run "${cliName(io)} gateway start")`)
     // `ls` is a query, not an error (contract.md §7.6).
     return 0
   }
@@ -262,7 +268,7 @@ export async function listMounts(io: CliIo = defaultIo(), options: { json?: bool
     return 0
   }
   if (status.mounts.length === 0) {
-    io.out('no mounts (run "diorama <dir>")')
+    io.out(`no mounts (run "${cliName(io)} <dir>")`)
     return 0
   }
   io.out(formatMounts(status.mounts))

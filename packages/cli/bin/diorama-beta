@@ -1,0 +1,15 @@
+#!/usr/bin/env node
+// The **beta** entry (a linked checkout): same code, its own state.
+//
+// `diorama-beta` marks the process as the beta channel, so its gateway uses
+// `$DIORAMA_HOME/diorama-beta.sock`, `gateway-beta.pid` and `gateway-beta.log`
+// (contract.md §7.1/§7.4). The released `diorama` keeps the plain names; the
+// two gateways can therefore run side by side without taking each other's
+// socket, and `diorama-beta ls` never shows an installed build's mounts.
+process.env.DIORAMA_CHANNEL = 'beta'
+process.env.DIORAMA_VERSION = '0.0.1-m3-beta'
+
+const { main } = await import('../lib/main.js')
+
+const code = await main(process.argv.slice(2))
+if (code !== undefined) process.exitCode = code

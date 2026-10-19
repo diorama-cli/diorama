@@ -579,6 +579,7 @@ CLI：连 socket → 不在就后台拉起 gateway → 请求 `mount` → 打印
 | 项 | 取值 |
 |---|---|
 | 地址 | Unix domain socket：**`$DIORAMA_HOME/diorama.sock`**（`DIORAMA_HOME` 默认 `~/.diorama`，目录不存在则创建）。Windows 用命名管道（v1 不实现，留分支） |
+| 通道（v0.4） | **beta 构建**（`diorama-beta`，即 link 进来的 checkout）用 `diorama-beta.sock`，发布版用 `diorama.sock`；pid 与日志同理（`gateway[-beta].pid/.log`）。两条通道的 gateway 可同时运行且互不可见 |
 | 帧 | **NDJSON**：一行一个 JSON 对象，`\n` 结尾（JSON 内的换行已转义，二者不冲突） |
 | 上限 | 单行 **1 MiB**；超限 → 回 `ETOOLARGE` 并断开该连接 |
 | 并发 | 一条连接可同时有多个请求；响应按 `id` 配对，**可乱序** |

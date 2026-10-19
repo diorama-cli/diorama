@@ -16,6 +16,7 @@ import {
 } from 'diorama-kernel/server'
 import {
   controlCall,
+  cliName,
   defaultIo,
   gatewayLogPath,
   listMounts,
@@ -25,18 +26,20 @@ import {
   type CliIo,
 } from './control-client.ts'
 import { runGateway, socketPath } from './gateway-command.ts'
-import { main as serveMain, parseArgs, USAGE } from './run.ts'
+import { main as serveMain, parseArgs, USAGE, usage } from './run.ts'
 
-export { USAGE, parseArgs }
+export { USAGE, parseArgs, usage }
 
-export const CONTROL_USAGE = `Usage:
-  diorama [dir] [options]        mount a directory (starts the gateway if needed)
-  diorama ls [--json]            list mounts: directory, URL, status
-  diorama restart <mount|dir>    unmount and mount again
-  diorama gateway start|stop|status|restart
-  diorama gateway run            run the gateway in the foreground
+/** The control-plane usage block, named after the invoked command. */
+export function controlUsage(name = 'diorama'): string {
+  return `Usage:
+  ${name} [dir] [options]        mount a directory (starts the gateway if needed)
+  ${name} ls [--json]            list mounts: directory, URL, status
+  ${name} restart <mount|dir>    unmount and mount again
+  ${name} gateway start|stop|status|restart
+  ${name} gateway run            run the gateway in the foreground
 
-Options for "diorama [dir]":
+Options for "${name} [dir]":
   --foreground                   run the gateway in this process (no daemon)
   --port / --host / --plugins / --config / --all / --break-plugin
   --dump-plan / --dump-config    print the resolved plan/configuration and exit
@@ -44,15 +47,18 @@ Options for "diorama [dir]":
 Environment:
   DIORAMA_HOME                   state directory (default ~/.diorama)
 `
+}
 
 export async function main(argv: readonly string[], env: NodeJS.ProcessEnv = process.env): Promise<number> {
-  const io: CliIo = { ...defaultIo(), env }
+  // The beta entry sets DIORAMA_CHANNEL=beta; its messages must name it too.
+  const name = env.DIORAMA_CHANNEL === 'beta' ? 'diorama-beta' : 'diorama'
+  const io: CliIo = { ...defaultIo(), env, name }
   const [command, ...rest] = argv
 
   if (command === 'ls') {
     const unknown = rest.find(arg => arg !== '--json')
     if (unknown !== undefined) {
-      io.err(`diorama: unknown option "${unknown}" for ls\n\n${CONTROL_USAGE}`)
+      io.err(`${cliName(io)}: unknown option "${unknown}" for ls\n\n${controlUsage(cliName(io))}`)
       return 2
     }
     return listMounts(io, { json: rest.includes('--json') })
@@ -62,7 +68,7 @@ export async function main(argv: readonly string[], env: NodeJS.ProcessEnv = pro
   if (command === 'gateway') return gatewayCommand(io, rest)
 
   if (command === '--help' || command === '-h') {
-    io.out(USAGE)
+    io.out(usage(cliName(io)))
     return 0
   }
 
@@ -79,7 +85,7 @@ async function gatewayCommand(io: CliIo, argv: readonly string[]): Promise<numbe
   const force = rest.includes('--force')
   const unknown = rest.find(arg => arg !== '--force')
   if (unknown !== undefined) {
-    io.err(`diorama: unknown option "${unknown}" for gateway\n\n${CONTROL_USAGE}`)
+    io.err(`${cliName(io)}: unknown option "${unknown}" for gateway\n\n${controlUsage(cliName(io))}`)
     return 2
   }
   try {
@@ -117,11 +123,11 @@ async function gatewayCommand(io: CliIo, argv: readonly string[]): Promise<numbe
       }
       case 'restart': {
         await restartGateway(io)
-        io.out('gateway restarted (mounts are not preserved; run "diorama <dir>" again)')
+        io.out(`gateway restarted (mounts are not preserved; run "${cliName(io)} <dir>" again)`)
         return 0
       }
       default:
-        io.err(CONTROL_USAGE)
+        io.err(controlUsage(cliName(io)))
         return 2
     }
   } catch (failure) {
@@ -133,7 +139,7 @@ async function gatewayCommand(io: CliIo, argv: readonly string[]): Promise<numbe
 export async function restartMount(io: CliIo, argv: readonly string[]): Promise<number> {
   const target = argv.find(arg => !arg.startsWith('--'))
   if (target === undefined) {
-    io.err(`diorama: restart needs a mount id or a directory\n\n${CONTROL_USAGE}`)
+    io.err(`${cliName(io)}: restart needs a mount id or a directory\n\n${controlUsage(cliName(io))}`)
     return 2
   }
   const root = resolve(target)
@@ -164,11 +170,11 @@ export async function restartMount(io: CliIo, argv: readonly string[]): Promise<
 async function mountCommand(io: CliIo, argv: readonly string[]): Promise<number> {
   const { options, error } = parseArgs(argv)
   if (error === 'help') {
-    io.out(USAGE)
+    io.out(usage(cliName(io)))
     return 0
   }
   if (error !== undefined) {
-    io.err(`diorama: ${error}\n\n${USAGE}`)
+    io.err(`${cliName(io)}: ${error}\n\n${usage(cliName(io))}`)
     return 2
   }
   // `--dump-config` / `--dump-plan` describe configuration and boot graph
@@ -179,7 +185,7 @@ async function mountCommand(io: CliIo, argv: readonly string[]): Promise<number>
   try {
     root = await realDirectory(options.dir)
   } catch {
-    io.err(`diorama: cannot serve "${options.dir}": not a readable directory`)
+    io.err(`${cliName(io)}: cannot serve "${options.dir}": not a readable directory`)
     return 2
   }
   let config: EffectiveConfig
@@ -200,7 +206,7 @@ async function mountCommand(io: CliIo, argv: readonly string[]): Promise<number>
     configFile = resolved.origin.path
   } catch (failure) {
     if (!(failure instanceof ConfigError)) throw failure
-    io.err(`diorama: ${failure.message}`)
+    io.err(`${cliName(io)}: ${failure.message}`)
     return 2
   }
 
@@ -214,9 +220,9 @@ async function mountCommand(io: CliIo, argv: readonly string[]): Promise<number>
       ...(options.breakPlugin === undefined ? {} : { breakPlugin: options.breakPlugin }),
     })) as MountStatus & { created: boolean; pluginFailures?: string }
     printMount(io, mounted)
-    if (mounted.created === false) io.out('already mounted (run "diorama restart <dir>" to reload)')
+    if (mounted.created === false) io.out(`already mounted (run "${cliName(io)} restart <dir>" to reload)`)
     if (mounted.pluginFailures !== undefined) {
-      io.err(`diorama: ${mounted.pluginFailures}`)
+      io.err(`${cliName(io)}: ${mounted.pluginFailures}`)
       return 1
     }
     return 0
@@ -229,18 +235,18 @@ async function mountCommand(io: CliIo, argv: readonly string[]): Promise<number>
 async function foreground(io: CliIo, argv: readonly string[]): Promise<number> {
   const { options, error } = parseArgs(argv)
   if (error === 'help') {
-    io.out(USAGE)
+    io.out(usage(cliName(io)))
     return 0
   }
   if (error !== undefined) {
-    io.err(`diorama: ${error}\n\n${USAGE}`)
+    io.err(`${cliName(io)}: ${error}\n\n${usage(cliName(io))}`)
     return 2
   }
   let root: string
   try {
     root = await realDirectory(options.dir)
   } catch {
-    io.err(`diorama: cannot serve "${options.dir}": not a readable directory`)
+    io.err(`${cliName(io)}: cannot serve "${options.dir}": not a readable directory`)
     return 2
   }
   let config: EffectiveConfig
@@ -261,7 +267,7 @@ async function foreground(io: CliIo, argv: readonly string[]): Promise<number> {
     configFile = resolved.origin.path
   } catch (failure) {
     if (!(failure instanceof ConfigError)) throw failure
-    io.err(`diorama: ${failure.message}`)
+    io.err(`${cliName(io)}: ${failure.message}`)
     return 2
   }
   let gateway: Awaited<ReturnType<typeof runGateway>>
@@ -280,7 +286,7 @@ async function foreground(io: CliIo, argv: readonly string[]): Promise<number> {
       ...(options.breakPlugin === undefined ? {} : { breakPlugin: options.breakPlugin }),
     })) as MountStatus & { created: boolean; pluginFailures?: string }
     printMount(io, mounted)
-    if (mounted.pluginFailures !== undefined) io.err(`diorama: ${mounted.pluginFailures}`)
+    if (mounted.pluginFailures !== undefined) io.err(`${cliName(io)}: ${mounted.pluginFailures}`)
   } catch (failure) {
     await gateway.close()
     return reportFailure(io, failure)
@@ -321,16 +327,16 @@ function reportFailure(io: CliIo, failure: unknown): number {
     case 'EADDRINUSE':
     case 'ENOMOUNT':
     case 'ESTARTING':
-      io.err(`diorama: ${clean}`)
+      io.err(`${cliName(io)}: ${clean}`)
       return 1
     case 'ENOTDIR':
-      io.err(`diorama: ${clean}`)
+      io.err(`${cliName(io)}: ${clean}`)
       return 2
     case 'EGATEWAYDEAD':
-      io.err('diorama: the gateway is not running (run "diorama gateway start")')
+      io.err(`${cliName(io)}: the gateway is not running (run "${cliName(io)} gateway start")`)
       return 1
     default:
-      io.err(`diorama: ${message}`)
+      io.err(`${cliName(io)}: ${message}`)
       return 1
   }
 }

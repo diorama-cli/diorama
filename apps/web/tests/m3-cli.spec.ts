@@ -13,7 +13,7 @@ import { fixture, repoRoot } from './support.ts'
  */
 
 const run = promisify(execFile)
-const cli = join(repoRoot, 'packages/cli/bin/diorama')
+const cli = join(repoRoot, 'packages/cli/bin/diorama-beta')
 
 /** Run one CLI command against a temp state directory. */
 async function diorama(home: string, args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {

@@ -57,7 +57,7 @@ export interface ParsedArgs {
   error?: string
 }
 
-const USAGE = `Usage: diorama [dir] [options]
+const USAGE_TEMPLATE = `Usage: {name} [dir] [options]
 
 Serve one directory as a read-only diorama in the browser (foreground).
 
@@ -382,4 +382,10 @@ export async function main(argv: readonly string[], env: NodeJS.ProcessEnv = pro
   return tree.failures.length > 0 ? 1 : 0
 }
 
-export { USAGE }
+/** The serve-path usage block, named after the invoked command (beta = diorama-beta). */
+export function usage(name = 'diorama'): string {
+  return USAGE_TEMPLATE.replaceAll('{name}', name)
+}
+
+/** The default spelling (`diorama`), for callers that do not care. */
+export const USAGE = usage()

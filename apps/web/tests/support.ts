@@ -11,7 +11,8 @@ import { join, resolve } from 'node:path'
 
 /** Repository root (apps/web/tests → ../..). */
 export const repoRoot = resolve(import.meta.dirname, '../../..')
-const cli = join(repoRoot, 'packages/cli/bin/diorama')
+/** The beta entry (a linked checkout): its gateway uses `diorama-beta.sock`. */
+const cli = join(repoRoot, 'packages/cli/bin/diorama-beta')
 
 export interface Fixture {
   root: string
@@ -147,7 +148,7 @@ export async function startDiorama(dir: string, args: string[] = []): Promise<Di
     stop: async () => {
       // The gateway the CLI started is detached; stop it through its socket
       // and wait until its port stops answering before removing the home.
-      await controlRequest(join(home, 'diorama.sock'), 'stop').catch(() => {})
+      await controlRequest(join(home, 'diorama-beta.sock'), 'stop').catch(() => {})
       await expectPortClosed(serverUrl)
       rmSync(home, { recursive: true, force: true })
     },
@@ -171,7 +172,7 @@ export async function expectPortClosed(url: string, timeoutMs = 10_000): Promise
 
 /** A resident gateway on a throwaway `DIORAMA_HOME` (contract.md §7). */
 export interface GatewayFixture {
-  /** The state directory (`diorama.sock`, `gateway.pid`, `gateway.log`). */
+  /** The state directory (`diorama-beta.sock`, `gateway-beta.pid`, …). */
   home: string
   socket: string
   output(): string
@@ -236,7 +237,7 @@ export async function startGateway(options: { env?: Record<string, string> } = {
   let output = ''
   child.stdout?.on('data', (chunk: Buffer) => (output += chunk.toString()))
   child.stderr?.on('data', (chunk: Buffer) => (output += chunk.toString()))
-  const socket = join(home, 'diorama.sock')
+  const socket = join(home, 'diorama-beta.sock')
   await new Promise<void>((ready, fail) => {
     const timer = setTimeout(() => fail(new Error(`gateway did not start in time:\n${output}`)), 15_000)
     child.on('exit', code => {

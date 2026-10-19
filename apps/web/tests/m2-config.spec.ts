@@ -11,7 +11,7 @@ import { fixture, listOverRpc, repoRoot, startDiorama } from './support.ts'
  * `fs.list` — which is where the file tree reads directories.
  */
 const run = promisify(execFile)
-const cli = join(repoRoot, 'packages/cli/bin/diorama')
+const cli = join(repoRoot, 'packages/cli/bin/diorama-beta')
 
 async function dumpConfig(dir: string, args: string[]): Promise<{ stdout: string; code: number }> {
   try {

@@ -5,7 +5,7 @@
  * The kernel owns the mount table (`Gateway` in `diorama-kernel/server`:
  * realpath, port binding, HTTP listener, RPC channel). This module owns what
  * only the CLI build can do: assemble server halves, boot a tree per mount, and
- * serve the control plane on `$DIORAMA_HOME/diorama.sock`.
+ * serve the control plane on `$DIORAMA_HOME/diorama[-beta].sock`.
  */
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
@@ -37,7 +37,7 @@ import { assetsRoot, selectPlugins, withSubscriptions } from './run.ts'
 
 /** What `diorama gateway run` was told (the CLI parsed it; the gateway obeys it). */
 export interface GatewayServeOptions {
-  /** Unix socket path (`$DIORAMA_HOME/diorama.sock`). */
+  /** Unix socket path (`$DIORAMA_HOME/diorama[-beta].sock`). */
   socket: string
   /** Where the built shell lives; defaults to `assetsRoot()`. */
   assets?: string

@@ -106,5 +106,6 @@ docs/                     契约、架构、能力、排期、逐档 spec
 - 一个能力一块提交，提交信息写清"做了什么 + 为什么"。
 - 每块完成前跑 §3 四件套；**M0/M1 的验收用例必须保持绿**（它们是多 tab / 命令 / watch 改动的回归）。
 - 契约或座位类型变了：同步 `contract.md`（含 §13）与 `docs/features.md` 的档位。
-- 演示脚本：`node packages/cli/bin/diorama <dir>`（短命 CLI：确保 gateway → 挂载 → 打印 URL；输出里的 `config:` 与 `hidden:` 两行能直接看出 `diorama.toml` 是否生效）。其它：`diorama ls`、`diorama gateway start|stop|status|restart`、`diorama restart <dir>`。
+- 演示脚本：`node packages/cli/bin/diorama-beta <dir>`（或 `./link.sh` 后直接用 `diorama-beta`）。短命 CLI：确保 gateway → 挂载 → 打印 URL；输出里的 `config:` 与 `hidden:` 两行能直接看出 `diorama.toml` 是否生效。其它：`diorama-beta ls`、`diorama-beta gateway start|stop|status|restart`、`diorama-beta restart <dir>`。
+- **两个入口、两条通道**：`bin/diorama`（发布名）与 `bin/diorama-beta`（`DIORAMA_CHANNEL=beta`，link 进来的 checkout 用）。beta 的 socket/pid/日志都带 `-beta`，所以与已安装的 `diorama` 可以并存；`link.sh` 只创建 `diorama-beta`。e2e 一律走 `diorama-beta`。
 - **测试隔离**：e2e 每个用例用自己的 `DIORAMA_HOME`（临时目录）与自己的 gateway；不要把测试指向真实的 `~/.diorama`。

@@ -28,10 +28,27 @@
 | Slogan | A live diorama of your files. / 把你的目录，摆成一个场景。 |
 
 ```bash
-pnpm install && pnpm build
-node packages/cli/bin/diorama .   # 目录 → 浏览器里的场景（打开打印出的 URL）
-node packages/cli/bin/diorama . --port 8080 --host 127.0.0.1
+# 发布版：从 registry 安装，命令名是 diorama
+npm install -g diorama
+
+# 开发版（本仓库）：link 进来后命令名是 diorama-beta，永不覆盖已安装的 diorama
+pnpm install && ./link.sh
+diorama-beta .                              # 目录 → 浏览器里的场景（打开打印出的 URL）
+diorama-beta . --port 8080 --host 127.0.0.1
+diorama-beta ls                             # 目录 → URL → 状态
+diorama-beta gateway start|stop|status|restart
 ```
+
+`link.sh` 用 `npm link` 把本仓库 `packages/cli` 接到 npm 全局 bin（nvm 装 node 时可写）；它
+**只**创建 `diorama-beta`，并移除同一 checkout 产生的 `diorama` 软链——`diorama` 这个名字留给
+registry 安装。
+
+两个版本默认**互不干扰**：beta 的 gateway 用 `$DIORAMA_HOME/diorama-beta.sock`、
+`gateway-beta.pid`、`gateway-beta.log`；发布版用 `diorama.sock`、`gateway.pid`、`gateway.log`。
+`diorama-beta ls` 看不到发布版的挂载，反之亦然（契约 §7.1/§7.4）。
+
+也可以不 link：`node packages/cli/bin/diorama-beta <dir>`，或 `source ./link.sh` 只给当前
+shell 加 PATH。
 
 ## 文档
 
