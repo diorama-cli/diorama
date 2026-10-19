@@ -17,7 +17,7 @@ import { bindMethods, provideEntry, Slot, useKernel, useStore } from 'diorama-ui
 import { createTabsService, type CommandsService, type TabInfo } from 'diorama-kernel/client'
 
 export const name = 'tabs'
-export const inject = ['slots', 'commands']
+export const inject = ['slots']
 
 /** The content seats, one per tab, keyed by tab id (contract.md §5). */
 const DECLARE = {
@@ -151,9 +151,11 @@ export function apply(ctx: Context) {
 
   // Commands own the tab keyboard (contract.md §3.7): the palette lists the
   // same registry, so they are registered here, not at the key listener.
-  // Commands are a kernel service (contract.md §3.7) listed in this piece's
-  // `inject`, so the fiber waits for it before `apply` runs.
-  const commands = (ctx as unknown as { commands: CommandsService }).commands
+  // `commands` is kernel *client* infrastructure (contract.md §3.7). The same
+  // module is also loaded as this piece's server half, where it does not exist,
+  // so it is read opportunistically and the server half stops here.
+  const commands = clientCommands(ctx)
+  if (commands === undefined) return
   commands.contribute({ activeTab: () => (tabs.active === undefined ? undefined : toContextTab(tabs.active)) })
   const many = (): boolean => tabs.count > 1
   const step = (delta: 1 | -1, wrap: boolean): void => {
@@ -187,4 +189,17 @@ export function apply(ctx: Context) {
 /** `CommandContext.activeTab` carries the path, the id, and nothing else. */
 function toContextTab(tab: TabInfo): { id: string; path: string } {
   return { id: tab.id, path: tab.path }
+}
+
+/**
+ * `ctx.commands` when this context is a page (client kernel), else `undefined`.
+ * One module serves both halves, and Cordis throws on reading a service that is
+ * neither provided nor injected — so the server half asks instead of assuming.
+ */
+function clientCommands(ctx: Context): CommandsService | undefined {
+  try {
+    return (ctx as unknown as { commands?: CommandsService }).commands
+  } catch {
+    return undefined
+  }
 }

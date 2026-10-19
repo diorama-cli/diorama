@@ -57,15 +57,18 @@
 | 失败处理 | 加载失败 fail loud、渲染器回退链、slot 条目错误边界 |
 | 插件 | 新增 `markdown`、`code`（高亮） |
 
-## M2：日常可用
+## M2：日常可用 ✅ 已完成（2026-10-19）
+
+> 实施记录见 [m2/spec.md](m2/spec.md)。契约升到 **v0.3**（contract §13）。五块全按推荐值落地，
+> 顺序为 toml → 文件树 → 多 tab → 命令 → palette → watch。
 
 | 部分 | 做 |
 |---|---|
-| 多 tab | 打开/切换/关闭，`tabs.content` keyed slot |
-| 命令 | `ctx.commands`、快捷键、palette 插件 |
-| 实时 | `ctx.fs.watch` 驱动文件变化刷新 |
-| 文件树 | 隐藏规则（`.git`、`node_modules` 等）、大目录懒加载 |
-| 配置 | `diorama.toml` 定下 `host` / `port` / `plugins` / `ignore` |
+| 多 tab | 打开/切换/关闭，`tabs.content` **keyed（key = tab id）**，请求过的文件各占一个 tab |
+| 命令 | `ctx.commands`（内核内置）、快捷键（单一 keydown 分发）、`palette` 插件（`layout.overlay`） |
+| 实时 | `ctx.fs.watch`（目录、300ms 合并）经 RPC 订阅端点驱动内容与树 |
+| 文件树 | 隐藏规则（`ignore`，默认 `.git`、`node_modules`；`.gitignore` 不读）、大目录分页 |
+| 配置 | `diorama.toml` 定下 `host` / `port` / `plugins` / `ignore` / `[watch]`，CLI > toml > 默认 |
 
 ## M3：gateway 化
 
@@ -89,7 +92,7 @@
 | 项 | 放在哪 |
 |---|---|
 | 测试策略 | 每档都要有：M0 至少 3 个端到端用例（上面验收点 2–4） |
-| 契约变更流程 | M1 起，每次改 `ctx.*` 或 slot 签名都要升 contract version |
+| 契约变更流程 | M1 起，每次改 `ctx.*` 或 slot 签名都要升 contract version（M2 升 0.3） |
 | 文档 | 每档结束时更新 features.md 的档位 |
 
 ## 风险清单

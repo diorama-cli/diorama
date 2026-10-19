@@ -22,7 +22,7 @@ import { createTreeService, type CommandsService } from 'diorama-kernel/client'
 import { bindMethods, provideEntry, useKernel, useStore } from 'diorama-ui'
 
 export const name = 'file-tree'
-export const inject = ['slots', 'commands']
+export const inject = ['slots']
 
 /** Entries a collapsed-until-asked directory shows at first (M2). */
 export const PAGE_SIZE = 500
@@ -160,9 +160,11 @@ export function apply(ctx: Context) {
 
   // `tree.focus` (contract.md §3.7): the tree owns the command that moves
   // focus into it, and the tree is where focus lands.
-  // Commands are a kernel service (contract.md §3.7) listed in this piece's
-  // `inject`, so the fiber waits for it before `apply` runs.
-  const commands = (ctx as unknown as { commands: CommandsService }).commands
+  // `commands` is kernel *client* infrastructure (contract.md §3.7). The same
+  // module is also loaded as this piece's server half, where it does not exist,
+  // so it is read opportunistically and the server half stops here.
+  const commands = clientCommands(ctx)
+  if (commands === undefined) return
   commands.register({
     id: 'tree.focus',
     title: '聚焦文件树',
@@ -174,4 +176,17 @@ export function apply(ctx: Context) {
     },
   })
   commands.bind({ keys: 'mod+alt+f', command: 'tree.focus' })
+}
+
+/**
+ * `ctx.commands` when this context is a page (client kernel), else `undefined`.
+ * One module serves both halves, and Cordis throws on reading a service that is
+ * neither provided nor injected — so the server half asks instead of assuming.
+ */
+function clientCommands(ctx: Context): CommandsService | undefined {
+  try {
+    return (ctx as unknown as { commands?: CommandsService }).commands
+  } catch {
+    return undefined
+  }
 }

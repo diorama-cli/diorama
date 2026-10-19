@@ -87,6 +87,83 @@
   `resolveConfig()` 里一次完成；M0 的端口/主机相关 e2e 必须保持绿。
 - **contract 0.3 需要全量重建**：kernel 与所有内置半边一起 build，否则 manifest 被拒。
 
-## 6. 实现记录
+## 6. 实现记录（2026-10-19，M2 落地后）
 
-（S7 收尾时填写：三件套结果、与契约的对应表、踩到的坑。）
+### 6.1 验收结果
+
+```
+pnpm test:unit                                   # 58 passed
+pnpm -r --no-sort run typecheck                  # clean（见 §6.3 第 1 条）
+pnpm --filter diorama-web exec playwright test   # 33 passed（--repeat-each=2：66/66，无 flaky）
+```
+
+| 用例文件 | 覆盖 |
+|---|---|
+| `m0-acceptance`（5） | 原 5 条验收全绿（多 tab 后只改了断言的作用域） |
+| `m1-acceptance`（7） | matcher、回退链、RPC、不再卡死（断言随多 tab DOM 调整） |
+| `m2-config`（4） | toml 查找/校验/CLI 覆盖、写错 fail loud、ignore 在树与 `fs.list`、`--all` |
+| `m2-tree`（2） | 大目录分页 + 加载更多、隐藏目录不可展开 |
+| `m2-tabs`（3） | 打开/切换/关闭与回退、每 tab 独立滚动、删除文件报 ENOENT |
+| `m2-commands`（4） | `mod+alt+w/←/→`、`mod+alt+f`、输入框内不触发、注册表内容 |
+| `m2-palette`（3） | `mod+k`、过滤/回车/ Esc、只列可执行、去掉 palette 后快捷键仍可用 |
+| `m2-watch`（3） | 改盘上文件 → 内容刷新、新建/删除 → 树与报错、自动刷新开关 |
+| `m2-server-halves`（2） | 服务端树里每个内置插件都能干净启动（一个模块两个半边） |
+
+### 6.2 实测踩到的坑（M3 起请先读这一节）
+
+1. **Cordis 会剥掉插件返回对象上的自定义字段。** 一个半边的 `apply` 里建出来的对象，
+   经 `ctx.<service>` 的方法返回后，**多出来的字段**（包括数组、以及 `Object.keys` 都看不到的
+   内部槽）在插件侧读出来是 `null`。所以 slot 条目上不能挂 `declarations` / `seats` 这类派生
+   数据；要问「这个座位有没有主人」就调 registry 自己的谓词（`registry.owned(name)`）。
+2. **boot 顺序 ≠ 图顺序。** Cordis 里一个 PENDING 的 fiber 会在它依赖的服务被 provide 时
+   **就地**重跑 `apply`，于是它在图里的位置被跳过。`loadPlugins` / `bootClient` 在每个插件之后
+   把 effect 队列排干（`settle()`），并且 `requires` 只决定图顺序、`inject` 决定激活顺序。
+   凡是「注册进别人的座位」的插件都要把对方写进 `inject`（`renderer-registry` → `tabs`）。
+3. **一个内置模块同时是 server 半边与 client 半边，`inject` 是共用的。** `ctx.commands` /
+   `ctx.mount` 只存在于页面（client 内核）；把它们写进 `inject` 会让服务端的该插件永远
+   PENDING（CLI 启动时 `did not activate`）。正确的读法是**可选读取**：`inject` 只列两边都有
+   的服务，client-only 服务用 `clientCommands(ctx)` 这类小助手 try/catch 地读（Cordis 对
+   「未 provide、未 inject」的属性读**抛错**，不是返回 undefined）。`m2-server-halves` 用例
+   守这条。
+4. **座位只能声明一次，且「声明」与「注册」是两件事。** 先 `ctx.slots.declare(seat)`，条目上
+   就不要再写同一个 `declare`（会以「已被自己声明」被拒）。keyed 座位上的条目**必须带 key**：
+   所以 `renderer-registry` 是**每个 tab 注册一条**（`renderer-registry:tab:<id>`），不是一条
+   通配条目。
+5. **`useSyncExternalStore` 的快照必须是稳定引用。** 内联的 `() => read()` 每次渲染都是新函数，
+   React 会反复退订/重订、永远看不到更新（表现为永远「正在读取…」）。文件缓存因此暴露
+   `getVersion()` + `subscribe` 两个**绑定的**稳定函数，状态另读。
+6. **`fs.watch` 的 `rename` 不可信。** macOS 会为已存在的条目报 `rename`，一次保存也可能同时
+   产生 `change` 与 `rename`。所以服务端会 `stat` 一次把事情定性为 add / change / unlink，并按
+   **path**（不是 path+type）做窗口合并。
+7. **关闭服务器时 WebSocket 必须 `terminate()`。** `ws.close()` 是握手；HTTP `server.close()`
+   会等所有 socket 走完，于是 CLI 不退出（e2e 的 `stop()` 卡满 30s）。`RpcChannel.close()` 现在
+   先结束会话再 `terminate()`。
+8. **包声明（`lib/types`）是构建产物。** 改了 `packages/kernel/src/...` 的导出而没重建 kernel，
+   下游包的 typecheck 会看到旧声明；「Cordis 找不到字段」这类怪现象先怀疑声明陈旧。
+9. **e2e 的键盘 `mod` 跟随浏览器平台。** 本机 Chromium 报 macOS，所以测试里 `mod` = `Meta`；
+   `ctrl+tab` 在 macOS 上被浏览器吃掉（契约 §3.7 的保留键），e2e 改从注册表驱动两条边缘命令。
+
+### 6.3 与契约的对应
+
+| 契约 | 实现位置 |
+|---|---|
+| §3.1 `watch`（目录、300ms、type 提示） | `kernel/src/server/fs.ts`、`kernel/src/client/fs.ts` |
+| §3.1 `list` 忽略规则 | `kernel/src/shared/ignore.ts`、`server/fs.ts` |
+| §3.4 `ctx.tabs` | `kernel/src/client/tabs.ts`、`plugins/tabs` |
+| §3.7 `ctx.commands` | `kernel/src/client/commands.ts`、`kernel/src/client/boot.ts`（按键分发、focus 采集） |
+| §4 订阅端点 / session | `kernel/src/shared/rpc.ts`、`server/rpc.ts`、`client/rpc.ts`、`cli/src/run.ts`（`withSubscriptions`） |
+| §4.1 `diorama.toml` | `kernel/src/server/config.ts`、`cli/src/run.ts` |
+| §5 `tabs.content` keyed / `layout.overlay` | `plugins/tabs`、`plugins/renderer-registry`、`plugins/layout`、`plugins/slots/src/types.ts` |
+| §3.7 palette | `plugins/palette` |
+| §6 contract 0.3 | `kernel/src/contract.ts`、全部内置插件 manifest |
+
+**命令清单（M2）**：`tabs.close`(mod+alt+w) · `tabs.next`/`tabs.prev`(mod+alt+→/←) ·
+`tabs.nextEdge`/`tabs.prevEdge`(ctrl+tab / ctrl+shift+tab) · `tree.focus`(mod+alt+f) ·
+`view.refresh`(mod+alt+r) · `view.toggleAutoRefresh`(无键) · `palette.toggle`(mod+k)。
+
+### 6.4 遗留（M3 前可选）
+
+- `pnpm typecheck` 的 pnpm 任务图在 `plaintext ↔ renderer-registry` 之间有环（devDependency），
+  `pnpm -r run typecheck` 会直接报 `ERR_PNPM_TASK_CYCLE`；用 `pnpm -r --no-sort run typecheck`。
+  这是 M1 起就有的问题，不在 M2 范围。
+- `jsdom`/单测没有覆盖 UI 组件；命令、tabs、watch、config、ignore 是纯逻辑层单测。

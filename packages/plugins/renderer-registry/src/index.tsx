@@ -31,7 +31,7 @@ export const name = 'renderer-registry'
 // `tabs.content` itself), and its seat declaration must exist before this
 // piece's dispatch entry registers — otherwise both sit in the registry's
 // pending queue and are retried out of order (docs/m0/spec.md §11.3 rule 3).
-export const inject = ['slots', 'tabs', 'commands']
+export const inject = ['slots', 'tabs']
 
 /** The seat this piece owns and renders (contract.md §5). */
 const DECLARE = {
@@ -483,7 +483,13 @@ export function apply(ctx: Context) {
   // Live content (contract.md §3.1, U2): watch each open tab's *parent* dir and
   // re-stat that tab when its file changes. Automatic refresh is a setting the
   // `view.toggleAutoRefresh` command flips; `fs.watch` is cancelled with the tab.
-  const mount = (ctx as unknown as { mount: MountHandle }).mount
+  // The mount handle is page-only too (`ctx.mount` on the client kernel).
+  let mount: MountHandle
+  try {
+    mount = (ctx as unknown as { mount: MountHandle }).mount
+  } catch {
+    return
+  }
   const cache = cacheFor(mount)
   const watchers = new Map<string, () => void>()
   const watchTab = (tabId: string, path: string): void => {
@@ -525,7 +531,10 @@ export function apply(ctx: Context) {
     'renderer-registry: stop watching',
   )
 
-  const commands = (ctx as unknown as { commands: CommandsService }).commands
+  // Client-only kernel infrastructure (contract.md §3.7): absent in the server
+  // tree, where this piece contributes nothing beyond its seat declaration.
+  const commands = clientCommands(ctx)
+  if (commands === undefined) return
   commands.contribute({
     activeTab: () => {
       const active = tabs.active
@@ -545,4 +554,17 @@ export function apply(ctx: Context) {
     when: context => context.activeTab !== undefined,
     run: () => contentSettings.toggleAutoRefresh(),
   })
+}
+
+/**
+ * `ctx.commands` when this context is a page (client kernel), else `undefined`.
+ * One module serves both halves, and Cordis throws on reading a service that is
+ * neither provided nor injected — so the server half asks instead of assuming.
+ */
+function clientCommands(ctx: Context): CommandsService | undefined {
+  try {
+    return (ctx as unknown as { commands?: CommandsService }).commands
+  } catch {
+    return undefined
+  }
 }

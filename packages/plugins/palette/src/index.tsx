@@ -16,7 +16,7 @@ import type { CommandsService } from 'diorama-kernel/client'
 import { provideEntry, useKernel } from 'diorama-ui'
 
 export const name = 'palette'
-export const inject = ['slots', 'commands']
+export const inject = ['slots']
 
 /**
  * The palette's open state is page-local UI state; the kernel does not own it.
@@ -161,7 +161,10 @@ function Palette() {
 }
 
 export function apply(ctx: Context) {
-  const commands = (ctx as unknown as { commands: CommandsService }).commands
+  // A client-only kernel service: absent in the server tree, where this piece
+  // contributes nothing (and must not fail to activate).
+  const commands = clientCommands(ctx)
+  if (commands === undefined) return
   provideEntry(ctx, { id: 'palette:overlay', name: 'layout.overlay', order: 100 }, Palette)
   // Opening the palette is a command like any other: registered here because
   // the palette owns the open state, bound here so `mod+k` needs no extra path.
@@ -171,4 +174,17 @@ export function apply(ctx: Context) {
     run: () => setOpen(!state().open),
   })
   commands.bind({ keys: 'mod+k', command: 'palette.toggle' })
+}
+
+/**
+ * `ctx.commands` when this context is a page (client kernel), else `undefined`.
+ * One module serves both halves, and Cordis throws on reading a service that is
+ * neither provided nor injected — so the server half asks instead of assuming.
+ */
+function clientCommands(ctx: Context): CommandsService | undefined {
+  try {
+    return (ctx as unknown as { commands?: CommandsService }).commands
+  } catch {
+    return undefined
+  }
 }
