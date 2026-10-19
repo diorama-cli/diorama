@@ -1,6 +1,8 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { expect, test } from '@playwright/test'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { fixture, repoRoot } from './support.ts'
 import { join } from 'node:path'
 
@@ -30,11 +32,14 @@ test('every built-in plugin boots on the server too (no half fails)', async () =
 
 test('a real server boot reports no plugin failures', async ({ page }) => {
   const directory = fixture()
+  // `--foreground`: this test owns a server process and reads its console, so
+  // it uses the in-process gateway form (a daemon would write to gateway.log).
+  const home = mkdtempSync(join(tmpdir(), 'diorama-halves-'))
   const { spawn } = await import('node:child_process')
   const child = spawn(
     process.execPath,
-    [join(repoRoot, 'packages/cli/bin/diorama'), directory.root, '--port', '0'],
-    { cwd: repoRoot, stdio: ['ignore', 'pipe', 'pipe'] },
+    [join(repoRoot, 'packages/cli/bin/diorama'), directory.root, '--port', '0', '--foreground'],
+    { cwd: repoRoot, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, DIORAMA_HOME: home } },
   )
   let output = ''
   child.stdout.on('data', chunk => (output += String(chunk)))
@@ -51,6 +56,7 @@ test('a real server boot reports no plugin failures', async ({ page }) => {
   } finally {
     child.kill('SIGTERM')
     await new Promise<void>(done => child.on('exit', () => done()))
+    rmSync(home, { recursive: true, force: true })
     directory.dispose()
   }
 })

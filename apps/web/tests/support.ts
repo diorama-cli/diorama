@@ -103,15 +103,24 @@ export interface Diorama {
   stop(): Promise<void>
 }
 
-/** Start `diorama <dir>` on a free port and resolve once it prints its URL. */
+/**
+ * Start `diorama <dir>` on a free port and resolve once it prints its URL.
+ *
+ * Since M3 the CLI is short-lived: it starts (or reuses) a gateway in a
+ * throwaway `DIORAMA_HOME`, mounts the directory and exits. `stop()` stops
+ * that gateway, so every test still owns its server and its state directory.
+ */
 export async function startDiorama(dir: string, args: string[] = []): Promise<Diorama> {
+  const home = mkdtempSync(join(tmpdir(), 'diorama-cli-run-'))
+  const env = { ...process.env, DIORAMA_HOME: home }
   const child: ChildProcess = spawn(process.execPath, [cli, dir, '--port', '0', ...args], {
     cwd: repoRoot,
     stdio: ['ignore', 'pipe', 'pipe'],
+    env,
   })
   let output = ''
   const url = await new Promise<string>((resolveUrl, reject) => {
-    const timer = setTimeout(() => reject(new Error(`diorama did not start in time:\n${output}`)), 15_000)
+    const timer = setTimeout(() => reject(new Error(`diorama did not start in time:\n${output}`)), 30_000)
     const onData = (chunk: Buffer): void => {
       output += chunk.toString()
       const match = output.match(/http:\/\/[^\s]+\//)
@@ -123,26 +132,42 @@ export async function startDiorama(dir: string, args: string[] = []): Promise<Di
     child.stdout?.on('data', onData)
     child.stderr?.on('data', onData)
     child.on('exit', code => {
+      // The short-lived CLI exits 0 once the mount is up; a non-zero exit is
+      // the server failing to start.
+      if (code === 0) return
       clearTimeout(timer)
       reject(new Error(`diorama exited (${code ?? '?'}):\n${output}`))
     })
   })
+  const serverUrl = url
   return {
     url,
     port: new URL(url).port === '' ? 80 : Number(new URL(url).port),
     output: () => output,
-    stop: () =>
-      new Promise<void>(done => {
-        if (child.exitCode !== null) {
-          done()
-          return
-        }
-        child.on('exit', () => done())
-        child.kill('SIGTERM')
-      }),
+    stop: async () => {
+      // The gateway the CLI started is detached; stop it through its socket
+      // and wait until its port stops answering before removing the home.
+      await controlRequest(join(home, 'diorama.sock'), 'stop').catch(() => {})
+      await expectPortClosed(serverUrl)
+      rmSync(home, { recursive: true, force: true })
+    },
   }
 }
 
+/** Wait until a mount port stops answering (a gateway stop is asynchronous). */
+export async function expectPortClosed(url: string, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    try {
+      const response = await fetch(`${url}plugin.json`)
+      if (!response.ok) return
+    } catch {
+      return
+    }
+    if (Date.now() > deadline) throw new Error(`port of ${url} is still answering`)
+    await new Promise(resolve => setTimeout(resolve, 50))
+  }
+}
 
 /** A resident gateway on a throwaway `DIORAMA_HOME` (contract.md §7). */
 export interface GatewayFixture {

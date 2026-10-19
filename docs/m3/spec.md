@@ -90,6 +90,8 @@ pnpm --filter diorama-web exec playwright test
 | S2 gateway 骨架 | ✅ | `feat(m3-s2)` |
 | S3 `ctx.fork()` 生命周期 | ✅ | `feat(m3-s3)` |
 | S3b watch 共享 + 上限 | ✅ | `feat(m3-s3b)` |
+| S4 `ls` / `gateway …` / `restart` | ✅ | `feat(m3-s4)` |
+| S6 CLI 迁到 gateway | ✅（并入 S4：默认已走 gateway） | `feat(m3-s4)` |
 
 ### 6.2 踩到的坑（S3，M3 后续步骤请先读）
 
