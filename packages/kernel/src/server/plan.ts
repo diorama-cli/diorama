@@ -151,8 +151,14 @@ export interface BootManifest {
   kernel: string
   contract: string
   mountId: string
-  /** Display root of the mount; the browser fills in the url host/port itself. */
+  /** Directory this mount serves (absolute). */
   root: string
+  /** The mount's page origin, e.g. `http://127.0.0.1:54321/` (contract.md §7.3). */
+  url?: string
+  /** The port `url` names. */
+  port?: number
+  /** The `diorama.toml` the configuration came from; absent = defaults (contract.md §4.1). */
+  configFile?: string
   /** Effective configuration (contract.md §4.1); absent in `--dump-plan`-less contexts. */
   config?: EffectiveConfig
   plugins: PluginPlan[]

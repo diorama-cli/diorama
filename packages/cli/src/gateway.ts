@@ -1,0 +1,340 @@
+/**
+ * The resident gateway (contract.md §7): one process, one HTTP port per mounted
+ * directory, one Cordis tree per directory.
+ *
+ * The kernel owns the mount table (`Gateway` in `diorama-kernel/server`:
+ * realpath, port binding, HTTP listener, RPC channel). This module owns what
+ * only the CLI build can do: assemble server halves, boot a tree per mount, and
+ * serve the control plane on `$DIORAMA_HOME/diorama.sock`.
+ */
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { dirname } from 'node:path'
+import {
+  bootPlugins,
+  builtinSource,
+  CONTROL_PROTOCOL,
+  CONTRACT_VERSION,
+  CONTROL_TOPICS,
+  connectControl,
+  createControlServer,
+  createDispatcher,
+  Gateway,
+  planPlugins,
+  type BootManifest,
+  type ControlServer,
+  type ControlTopic,
+  type EffectiveConfig,
+  type GatewayInfo,
+  type GatewayStatus,
+  type MountStatus,
+  type MountTree,
+  type RpcDispatcher,
+} from 'diorama-kernel/server'
+import { assetsRoot, selectPlugins, withSubscriptions } from './run.ts'
+
+/** What `diorama gateway run` was told (the CLI parsed it; the gateway obeys it). */
+export interface GatewayServeOptions {
+  /** Unix socket path (`$DIORAMA_HOME/diorama.sock`). */
+  socket: string
+  /** Where the built shell lives; defaults to `assetsRoot()`. */
+  assets?: string
+  /** Console sink; the daemon writes it to `$DIORAMA_HOME/gateway.log`. */
+  log?: (message: string) => void
+  /** Written once the socket is bound, removed on shutdown (contract.md §7.4). */
+  pidFile?: string
+}
+
+export interface StoppableGateway {
+  readonly info: GatewayInfo
+  /** The bound control socket. */
+  readonly socket: ControlServer
+  readonly mounts: Gateway
+  /** Unmount everything, then drop the control socket. */
+  close(): Promise<void>
+}
+
+/** Mount parameters as the CLI sends them (contract.md §7.3). */
+export interface MountParams {
+  root: string
+  config: EffectiveConfig
+  configFile?: string
+  /** Verification switch (M0 acceptance point 5). */
+  breakPlugin?: string
+}
+
+/** Services a mount may proxy over RPC (contract.md §4); only these leave the tree. */
+const PROXYABLE = ['fs'] as const
+
+/**
+ * Boot the gateway: bind the control socket, then answer control requests.
+ * Rejects when the socket cannot be bound (another gateway owns it).
+ */
+export async function serveGateway(options: GatewayServeOptions): Promise<StoppableGateway> {
+  const log = options.log ?? ((message: string) => console.error(message))
+  const assets = options.assets ?? assetsRoot()
+  const mounts = new Gateway({ assetsRoot: assets, log })
+  /** Per-mount trees, so a dispatcher can reach the services of its own mount. */
+  const trees = new Map<string, MountTree>()
+  const info: GatewayInfo = {
+    pid: process.pid,
+    version: process.env.DIORAMA_VERSION ?? '0.0.1-m3',
+    contract: CONTRACT_VERSION,
+    protocol: CONTROL_PROTOCOL,
+    startedAt: Date.now(),
+  }
+  /** Degraded at the process level: an error nobody could attribute (contract.md §11). */
+  let gatewayState: GatewayStatus['state'] = 'ok'
+  let closing = false
+
+  const status = (): GatewayStatus => ({ ...info, state: gatewayState, mounts: mounts.list() })
+
+  for (const signal of ['uncaughtException', 'unhandledRejection'] as const) {
+    process.on(signal, (error: unknown) => {
+      // Contract §11: an unattributed error does not kill the gateway; it marks
+      // the gateway and is logged. Per-mount errors are attributed at the
+      // RPC/HTTP boundaries instead.
+      log(`[diorama] gateway: unattributed ${signal}: ${error instanceof Error ? error.stack ?? error.message : String(error)}`)
+      gatewayState = 'degraded'
+    })
+  }
+
+  const shutdown = async (): Promise<void> => {
+    if (closing) return
+    closing = true
+    await control.close().catch(() => {})
+    await mounts.close()
+    rmSync(options.socket, { force: true })
+    if (options.pidFile !== undefined) rmSync(options.pidFile, { force: true })
+    log('[diorama] gateway stopped')
+  }
+
+  const control = createControlServer({
+    log,
+    async handle(method, params, peer) {
+      switch (method) {
+        case 'ping':
+          return { ...info }
+        case 'status':
+          return status()
+        case 'list':
+          return { mounts: mounts.list() }
+        case 'mount': {
+          const { mount, created } = await mountOne({ mounts, trees, assets, params, log })
+          control.emit('mounted', mount.status)
+          return { ...mount.status, created }
+        }
+        case 'unmount': {
+          const mountId = typeof params.mountId === 'string' ? params.mountId : undefined
+          const root = typeof params.root === 'string' ? params.root : undefined
+          if (mountId === undefined && root === undefined) throw coded('EBADREQUEST', 'unmount needs "mountId" or "root"')
+          if (mountId !== undefined && mounts.get(mountId) === undefined) {
+            return { mountId, root: root ?? '' } // already gone: idempotent (contract.md §7.3)
+          }
+          if (mountId === undefined && root !== undefined && (await mounts.findByRoot(root)) === undefined) {
+            throw coded('ENOMOUNT', `no mount for "${root}"`)
+          }
+          const removed = await mounts.unmount({
+            ...(mountId === undefined ? {} : { mountId }),
+            ...(root === undefined ? {} : { root }),
+          })
+          if (removed === undefined) return { mountId: mountId ?? '', root: root ?? '' }
+          trees.delete(removed.mountId)
+          control.emit('unmounted', removed)
+          return removed
+        }
+        case 'stop':
+          // Answer first: the CLI must see `{ stopping: true }`, then the
+          // process drains mounts and exits.
+          setTimeout(() => {
+            void shutdown().then(() => {
+              // The listener is closed; with nothing else open the process exits.
+              if (process.getActiveResourcesInfo().length === 0) process.exit(0)
+            })
+          }, 0)
+          return { stopping: true }
+        case 'events': {
+          const wanted = Array.isArray(params.topics) ? params.topics.filter(isTopic) : [...CONTROL_TOPICS]
+          peer.subscribe(wanted)
+          return { subscribed: true }
+        }
+        default:
+          throw coded('EMETHOD', `unknown control method "${method}"`)
+      }
+    },
+  })
+
+  await bindSocket(control, options.socket, log)
+  if (options.pidFile !== undefined) writePidFile(options.pidFile, options.socket)
+  log(`[diorama] gateway listening on ${options.socket} (pid ${process.pid})`)
+
+  return {
+    info,
+    socket: control,
+    mounts,
+    async close() {
+      await shutdown()
+    },
+  }
+}
+
+interface MountContext {
+  mounts: Gateway
+  trees: Map<string, MountTree>
+  assets: string
+  params: Record<string, unknown>
+  log: (message: string) => void
+}
+
+/** Mount one directory: validate, plan, boot its tree, bind its port. */
+async function mountOne(context: MountContext): Promise<{ mount: { status: MountStatus }; created: boolean }> {
+  const params = parseMountParams(context.params)
+  const config = params.config
+  // The boot plan validates the plugin selection and the contract range; the
+  // client entries are the same for every mount (one build, one plugin set).
+  const plan = planPlugins(config.plugins, 'plan', params.root, builtinSource, config)
+  const clientEntries = new Map(plan.plugins.map(plugin => [plugin.id, plugin.clientEntry]))
+  const serverIds = [...new Set(['fs', ...config.plugins])]
+  const halves = await selectPlugins(serverIds, params.breakPlugin)
+  void context.assets
+
+  return context.mounts.mount({
+    root: params.root,
+    config,
+    ...(params.configFile === undefined ? {} : { configFile: params.configFile }),
+    clientEntries,
+    manifest: (mountId, port, url): BootManifest =>
+      bootManifest(mountId, params, config, port, url),
+    async boot(mountId, port, url) {
+      void port
+      void url
+      const tree = await bootPlugins({
+        plugins: halves,
+        root: params.root,
+        mountId,
+        config,
+        log: message => context.log(`[mount:${mountId}] ${message}`),
+      })
+      const mountTree: MountTree = {
+        dispatcher: dispatcherFor(mountId, tree.mount as unknown as MountServices),
+        dispose: () => tree.stop(),
+      }
+      context.trees.set(mountId, mountTree)
+      return mountTree
+    },
+  })
+}
+
+/** The parts of a mount's Cordis context the dispatcher reads. */
+interface MountServices {
+  get(name: string): unknown
+}
+
+/** RPC dispatcher of one mount (contract.md §4): only `describe()`d services are proxied. */
+function dispatcherFor(mountId: string, mount: MountServices): RpcDispatcher {
+  const services = (): Record<string, unknown> => {
+    const out: Record<string, unknown> = {}
+    for (const name of PROXYABLE) {
+      let service: unknown
+      try {
+        service = mount.get(name)
+      } catch {
+        service = undefined // the service plugin never activated on this mount
+      }
+      if (service !== undefined && typeof (service as { describe?: unknown }).describe === 'function') out[name] = service
+    }
+    return out
+  }
+  void mountId
+  return withSubscriptions(createDispatcher(services), services)
+}
+
+/** The boot graph of one mount (contract.md §4.1): its URL and configuration source. */
+function bootManifest(mountId: string, params: MountParams, config: EffectiveConfig, port: number, url: string): BootManifest {
+  const plan = planPlugins(config.plugins, mountId, params.root, builtinSource, config)
+  return {
+    ...plan,
+    mountId,
+    port,
+    url,
+    ...(params.configFile === undefined ? {} : { configFile: params.configFile }),
+  }
+}
+
+/** Validate `mount` params: the CLI sends what it parsed, nothing more. */
+function parseMountParams(params: Record<string, unknown>): MountParams {
+  const root = params.root
+  const config = params.config
+  if (typeof root !== 'string' || root === '') throw coded('EBADREQUEST', 'mount needs a "root" directory')
+  if (!isEffectiveConfig(config)) {
+    throw coded('EBADREQUEST', 'mount needs a merged "config" (contract.md §4.1: the CLI merges it)')
+  }
+  return {
+    root,
+    config,
+    ...(typeof params.configFile === 'string' ? { configFile: params.configFile } : {}),
+    ...(typeof params.breakPlugin === 'string' ? { breakPlugin: params.breakPlugin } : {}),
+  }
+}
+
+function isEffectiveConfig(value: unknown): value is EffectiveConfig {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
+  const record = value as Record<string, unknown>
+  const watch = record.watch as Record<string, unknown> | undefined
+  return (
+    typeof record.host === 'string' &&
+    typeof record.port === 'number' &&
+    Array.isArray(record.plugins) &&
+    Array.isArray(record.ignore) &&
+    watch !== null &&
+    typeof watch === 'object' &&
+    typeof watch.debounceMs === 'number' &&
+    typeof watch.enabled === 'boolean'
+  )
+}
+
+function coded(code: 'EBADREQUEST' | 'EMETHOD' | 'ENOMOUNT', message: string): Error & { code: string } {
+  return Object.assign(new Error(message), { code })
+}
+
+function isTopic(value: unknown): value is ControlTopic {
+  return typeof value === 'string' && (CONTROL_TOPICS as readonly string[]).includes(value)
+}
+
+/**
+ * Bind the control socket. A stale file from a crashed gateway is removed; a
+ * live socket is not — whoever answers on it owns the path, and this gateway
+ * fails with `EADDRINUSE` (contract.md §7.4).
+ */
+async function bindSocket(control: ControlServer, path: string, log: (message: string) => void): Promise<void> {
+  mkdirSync(dirname(path), { recursive: true })
+  try {
+    await control.listen(path)
+    return
+  } catch (failure) {
+    if ((failure as { code?: string }).code !== 'EADDRINUSE') throw failure
+  }
+  if (await socketIsLive(path)) {
+    log(`[diorama] gateway: ${path} is already served by another gateway`)
+    throw Object.assign(new Error(`${path} is already in use`), { code: 'EADDRINUSE' })
+  }
+  log(`[diorama] gateway: removing a stale socket at ${path}`)
+  rmSync(path, { force: true })
+  await control.listen(path)
+}
+
+/** Whether something answers control requests on `path`. */
+async function socketIsLive(path: string): Promise<boolean> {
+  try {
+    const client = await connectControl({ path, log: () => {} })
+    client.close()
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** `{ pid, socket, startedAt }` next to the socket (contract.md §7.4). */
+function writePidFile(path: string, socket: string): void {
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, `${JSON.stringify({ pid: process.pid, socket, startedAt: Date.now() }, null, 2)}\n`)
+}

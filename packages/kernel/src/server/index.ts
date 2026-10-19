@@ -34,6 +34,16 @@ export {
 } from './plan.ts'
 export { createMountServer, listen, type MountOptions, type MountServer } from './http.ts'
 export {
+  Gateway,
+  MAX_PORT_ATTEMPTS,
+  mountUrl,
+  newMountId,
+  type GatewayMount,
+  type GatewayMountInput,
+  type GatewayOptions,
+  type MountTree,
+} from './gateway.ts'
+export {
   CONFIG_FILE,
   ConfigError,
   defaultConfig,
@@ -62,6 +72,9 @@ export {
 export {
   CONTROL_PROTOCOL,
   CONTROL_TOPICS,
+  type GatewayInfo,
+  type GatewayStatus,
+  type MountStatus,
   controlError,
   frameLine,
   isControlErrorCode,

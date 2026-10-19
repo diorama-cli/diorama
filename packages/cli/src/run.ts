@@ -76,9 +76,8 @@ $DIORAMA_HOME) and is overridden by these options:
   -h, --help              Show this help
 
 Environment:
-  DIORAMA_HOME            Directory holding the built web assets and the
-                          fallback diorama.toml (default: packages/cli/web,
-                          then apps/web/dist; ~/.diorama for the config)
+  DIORAMA_HOME            State directory (default ~/.diorama): the fallback
+                          diorama.toml, the gateway socket, pid file and log
 `
 
 /** Parse argv (without `node` and the script path). */
@@ -168,9 +167,14 @@ export function packageDir(): string {
   return fileURLToPath(new URL('..', import.meta.url)).replace(/[\\/]$/, '')
 }
 
-/** Locate the built shell assets. */
-export function assetsRoot(env: NodeJS.ProcessEnv = process.env): string {
-  if (env.DIORAMA_HOME !== undefined && env.DIORAMA_HOME !== '') return resolve(env.DIORAMA_HOME)
+/**
+ * Locate the built shell assets.
+ *
+ * The CLI package carries them in `web/` when published; in a checkout they
+ * come from `apps/web/dist`. `DIORAMA_HOME` is the state directory and is *not*
+ * searched here (contract.md §4.1, v0.4).
+ */
+export function assetsRoot(_env: NodeJS.ProcessEnv = process.env): string {
   const packaged = join(packageDir(), 'web')
   if (existsSync(join(packaged, 'index.html'))) return packaged
   return resolve(packageDir(), '../../apps/web/dist')
@@ -292,7 +296,7 @@ export async function main(argv: readonly string[], env: NodeJS.ProcessEnv = pro
   if (!existsSync(join(assets, 'index.html'))) {
     process.stderr.write(
       `diorama: built web assets not found at ${assets}\n` +
-        'run "pnpm build" first, or set DIORAMA_HOME to a directory containing index.html\n',
+        'run "pnpm build" first, or install a CLI build that ships its web assets\n',
     )
     return 2
   }

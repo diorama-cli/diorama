@@ -55,6 +55,45 @@ export function controlError<C extends ControlErrorCode>(code: C, message = CONT
   return new ControlError(code, message)
 }
 
+/** One mount as the control plane reports it (contract.md §7.3). */
+export interface MountStatus {
+  mountId: string
+  /** Absolute directory (realpath) the mount serves. */
+  root: string
+  port: number
+  /** Origin of the mount's page, e.g. `http://127.0.0.1:54321/`. */
+  url: string
+  state: 'starting' | 'ok' | 'degraded' | 'stopped'
+  /** Milliseconds since epoch when the mount entered `state`. */
+  since: number
+  /** The `diorama.toml` the configuration came from; absent when defaults apply. */
+  configFile?: string
+  /** Client plugin selection, in boot order. */
+  plugins: string[]
+  /** Effective ignore patterns (what `fs.list` hides). */
+  hidden: string[]
+  /** Why the mount is degraded (contract.md §11.1). */
+  lastError?: { code?: string; message: string; at: number }
+}
+
+/** What `ping` answers (contract.md §7.3). */
+export interface GatewayInfo {
+  pid: number
+  version: string
+  contract: string
+  protocol: typeof CONTROL_PROTOCOL
+  startedAt: number
+}
+
+/** What `status` answers (contract.md §7.3). */
+export interface GatewayStatus extends GatewayInfo {
+  state: 'ok' | 'degraded'
+  mounts: MountStatus[]
+}
+
+/** What a client sends: an id plus either frame. */
+export type AnyControlFrame = ControlRequest | ControlResponse
+
 /** The largest line a control connection accepts (contract.md §7.1: 1 MiB). */
 export const MAX_CONTROL_LINE_BYTES = 1024 * 1024
 

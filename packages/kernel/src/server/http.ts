@@ -186,6 +186,8 @@ async function serveShell(assetsRoot: string, res: ServerResponse): Promise<bool
 export interface MountServer {
   server: Server
   channel: RpcChannel
+  /** The boot graph `/plugin.json` serves (replaceable: the port is known after binding). */
+  manifest: BootManifest
   /** Stop accepting, drop RPC peers, close. */
   close(): Promise<void>
 }
@@ -194,9 +196,11 @@ export interface MountServer {
 export function createMountServer(options: MountOptions): MountServer {
   const log = options.log ?? (message => console.error(`[mount:${options.mountId}] ${message}`))
   const channel = new RpcChannel({ dispatcher: options.dispatcher, log })
-  const manifest = options.manifest
+  // `/plugin.json` carries the mount URL, which a random port only decides at
+  // bind time (contract.md §7.3): the gateway replaces the manifest afterwards
+  // and the running server answers with the replacement.
   const server = createServer((req, res) => {
-    handleRequest(options, manifest, req, res).catch((error: unknown) => {
+    handleRequest(options, mountServer.manifest, req, res).catch((error: unknown) => {
       if (res.headersSent) {
         res.destroy()
         return
@@ -218,9 +222,10 @@ export function createMountServer(options: MountOptions): MountServer {
     if (!channel.upgrade(request, socket, head)) socket.destroy()
   })
   server.on('clientError', (_error, socket) => socket.destroy())
-  return {
+  const mountServer: MountServer = {
     server,
     channel,
+    manifest: options.manifest,
     async close() {
       channel.close()
       // Drop every remaining socket hard (keep-alive HTTP and any upgrade the
@@ -230,6 +235,7 @@ export function createMountServer(options: MountOptions): MountServer {
       await new Promise<void>(done => server.close(() => done()))
     },
   }
+  return mountServer
 }
 
 /** Listen on an explicit port; `EADDRINUSE` is surfaced to the caller. */
