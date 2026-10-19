@@ -51,6 +51,30 @@ export {
 export { createIgnore, DEFAULT_IGNORE, type IgnoreRules } from '../shared/ignore.ts'
 export { createDispatcher, handleFrame, RpcChannel, RPC_PATH, type RpcDispatcher } from './rpc.ts'
 export {
+  connectControl,
+  createControlServer,
+  type ControlClient,
+  type ControlClientOptions,
+  type ControlPeer,
+  type ControlServer,
+  type ControlServerOptions,
+} from './control.ts'
+export {
+  CONTROL_PROTOCOL,
+  CONTROL_TOPICS,
+  controlError,
+  frameLine,
+  isControlErrorCode,
+  MAX_CONTROL_LINE_BYTES,
+  parseRequest,
+  requestIdOf,
+  type ControlErrorCode,
+  type ControlRequest,
+  type ControlResponse,
+  type ControlTopic,
+} from '../shared/control.ts'
+export type { ControlError } from '../shared/errors.ts'
+export {
   bootPlugins,
   createMounts,
   describePlugin,

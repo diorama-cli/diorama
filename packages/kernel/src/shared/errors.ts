@@ -53,6 +53,22 @@ export function fsError(code: FsErrorCode, message = MESSAGES[code], cause?: unk
   return codedError(code, message, cause)
 }
 
+/**
+ * Error of the gateway control plane (contract.md §7): the CLI and the gateway
+ * share its `code`, which is one of `ControlErrorCode` (see `shared/control.ts`).
+ * Declared here without importing the control module so the fs/RPC error
+ * helpers stay dependency-free.
+ */
+export class ControlError extends Error {
+  readonly code: string
+
+  constructor(code: string, message: string) {
+    super(`${code}: ${message}`)
+    this.name = 'ControlError'
+    this.code = code
+  }
+}
+
 /** Create an RPC error (`ESERVICE`, `EMETHOD`, …). */
 export function rpcError(code: RpcErrorCode, message = MESSAGES[code]): Error & { code: RpcErrorCode } {
   return codedError(code, message)
