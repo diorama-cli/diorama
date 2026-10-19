@@ -158,6 +158,7 @@ export function apply(ctx: Context) {
     id: 'tree.focus',
     title: '聚焦文件树',
     when: context => context.focus !== 'tree',
+    // (With nothing focused — `other` — focusing the tree is still useful.)
     run: () => {
       const first = document.querySelector<HTMLElement>('[data-testid="file-tree"] [data-path]')
       first?.focus()

@@ -446,3 +446,73 @@ code {
 .diorama-code .hljs-addition {
   background: #eaffea;
 }
+
+/* Command palette (a layout.overlay entry, M2) */
+.diorama-palette {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+}
+
+.diorama-palette__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.diorama-palette__panel {
+  position: relative;
+  width: min(560px, 90vw);
+  margin: 12vh auto 0;
+  border: 1px solid var(--dio-border);
+  border-radius: 8px;
+  background: var(--dio-bg);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
+  overflow: hidden;
+}
+
+.diorama-palette__input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--dio-border);
+  background: var(--dio-bg);
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+}
+
+.diorama-palette__list {
+  max-height: 50vh;
+  margin: 0;
+  padding: 4px 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.diorama-palette__item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.diorama-palette__item--active {
+  background: rgba(47, 111, 235, 0.12);
+}
+
+.diorama-palette__id {
+  color: var(--dio-muted);
+  font-size: 11px;
+}
+
+.diorama-palette__empty {
+  padding: 14px;
+  color: var(--dio-muted);
+  font-size: 13px;
+}

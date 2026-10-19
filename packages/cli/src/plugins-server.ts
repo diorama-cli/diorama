@@ -31,6 +31,7 @@ const halves: Record<BuiltinPluginId, HalfLoader> = {
   'plaintext': () => import('diorama-plugin-plaintext'),
   'markdown': () => import('diorama-plugin-markdown'),
   'code': () => import('diorama-plugin-code'),
+  'palette': () => import('diorama-plugin-palette'),
 }
 
 /** Resolve the server-half module of one plugin id. */

@@ -26,7 +26,8 @@
     "diorama-plugin-slots": "workspace:*",
     "diorama-plugin-tabs": "workspace:*",
     "diorama-plugin-markdown": "workspace:*",
-    "diorama-plugin-code": "workspace:*"
+    "diorama-plugin-code": "workspace:*",
+    "diorama-plugin-palette": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",

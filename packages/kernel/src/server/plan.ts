@@ -31,6 +31,7 @@ export const BUILTIN_PLUGIN_IDS = [
   'plaintext',
   'markdown',
   'code',
+  'palette',
 ] as const
 
 export type BuiltinPluginId = (typeof BUILTIN_PLUGIN_IDS)[number]

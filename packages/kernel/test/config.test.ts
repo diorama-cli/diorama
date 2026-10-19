@@ -27,6 +27,7 @@ test('config: defaults match contract §4.1', () => {
     'plaintext',
     'markdown',
     'code',
+    'palette',
   ])
 })
 

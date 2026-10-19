@@ -275,10 +275,14 @@ function focusOf(element: Element): CommandContext['focus'] | undefined {
   return undefined
 }
 
-/** Whether a key press belongs to a text field (it never triggers a command). */
+/**
+ * Whether a key press belongs to a surface that owns its keys (it never
+ * triggers a command): text fields, and anything marked `data-command-keys` —
+ * the palette, whose own field handles Escape / arrows / Enter.
+ */
 function inTextEntry(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false
-  return target.closest('input, textarea, select, [contenteditable="true"], [contenteditable=""]') !== null
+  return target.closest('input, textarea, select, [contenteditable="true"], [contenteditable=""], [data-command-keys]') !== null
 }
 
 /**
