@@ -13,6 +13,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { CONTRACT_RANGE, CONTRACT_VERSION, KERNEL_NAME } from '../contract.ts'
+import type { EffectiveConfig } from './config.ts'
 import { ContractMismatchError, PluginLoadError, type PluginManifest } from './errors.ts'
 import { readManifest } from './manifest.ts'
 
@@ -151,6 +152,8 @@ export interface BootManifest {
   mountId: string
   /** Display root of the mount; the browser fills in the url host/port itself. */
   root: string
+  /** Effective configuration (contract.md §4.1); absent in `--dump-plan`-less contexts. */
+  config?: EffectiveConfig
   plugins: PluginPlan[]
 }
 
@@ -169,6 +172,7 @@ export function planPlugins(
   mountId: string,
   root: string,
   source: PluginSource = builtinSource,
+  config?: EffectiveConfig,
 ): BootManifest {
   const seen = new Set<string>()
   const known = new Map<string, PluginManifest>()
@@ -200,5 +204,12 @@ export function planPlugins(
       }
     }
   }
-  return { kernel: KERNEL_NAME, contract: CONTRACT_VERSION, mountId, root, plugins }
+  return {
+    kernel: KERNEL_NAME,
+    contract: CONTRACT_VERSION,
+    mountId,
+    root,
+    ...(config === undefined ? {} : { config }),
+    plugins,
+  }
 }

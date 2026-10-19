@@ -11,6 +11,7 @@
  */
 import { Context } from 'cordis'
 import { CONTRACT_VERSION, KERNEL_NAME } from '../contract.ts'
+import type { EffectiveConfig } from './config.ts'
 import { FsService } from './fs.ts'
 
 /** What the kernel publishes on the root as `ctx.diorama`. */
@@ -24,6 +25,8 @@ export interface DioramaFace {
 export interface MountInfo {
   root: string
   mountId: string
+  /** The effective `diorama.toml` + CLI configuration (contract.md §4.1). */
+  config?: EffectiveConfig
 }
 
 /** The mount registry a service plugin draws its per-directory instance from. */
@@ -172,6 +175,8 @@ export async function bootPlugins(options: {
   plugins: readonly unknown[]
   root: string
   mountId: string
+  /** Effective configuration for this mount (contract.md §4.1). */
+  config?: EffectiveConfig
   log?: (message: string) => void
 }): Promise<ServerTree> {
   const log = options.log ?? ((message: string) => console.error(message))
@@ -189,7 +194,7 @@ export async function bootPlugins(options: {
   // plugin provides into it from inside `onMount`.
   const mount = root.isolate('fs') as unknown as Context & CordisSurface
   mount.provide('mountId', options.mountId)
-  const info: MountInfo = { root: options.root, mountId: options.mountId }
+  const info: MountInfo = { root: options.root, mountId: options.mountId, ...(options.config === undefined ? {} : { config: options.config }) }
   const unmount = mounts.mount(mount as unknown as Context, info)
   const fs = (mount as unknown as { get(name: string): unknown }).get('fs')
   if (!(fs instanceof FsService)) {
@@ -199,7 +204,7 @@ export async function bootPlugins(options: {
   return {
     root,
     mount,
-    fs: fs instanceof FsService ? fs : new FsService(options.root),
+    fs: fs instanceof FsService ? fs : new FsService(options.root, { ignore: options.config?.ignore }),
     mounts: mounts.face.mounts,
     failures,
     async stop() {

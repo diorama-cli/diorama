@@ -1,10 +1,11 @@
-# 插件契约 v0.2
+# 插件契约 v0.3
 
-> 记录于 2026-10-18（v0.1 草案已归档为 [contract-v0.1.md](contract-v0.1.md)）。
+> 记录于 2026-10-18；v0.3 记录于 2026-10-19（v0.1 草案已归档为 [contract-v0.1.md](contract-v0.1.md)）。
 > 契约先行：这份文档是内核与插件之间的唯一约定，改它 = 破环变更。
 >
-> **状态：v0.2 已定稿，M1 按它实现。** 与 v0.1 的差异都是 M1 决策（见 §12）。
-> 内核契约版本 `0.2`，所有插件声明 `contract: ">=0.2 <0.3"`；内核**已启用**范围检查（§6）。
+> **状态：v0.3 已定稿，M2 按它实现。** v0.1 → v0.2 的差异都是 M1 决策（§12），
+> v0.2 → v0.3 的差异都是 M2 决策（§13）。内核契约版本 `0.3`，所有插件声明
+> `contract: ">=0.3 <0.4"`；内核**已启用**范围检查（§6）。
 
 ## 0. 术语
 
@@ -26,7 +27,7 @@
   "name": "diorama-plugin-markdown",
   "version": "0.1.0",
   "diorama": {
-    "contract": ">=0.2 <0.3",                     // 必须：兼容的内核契约范围（§6）
+    "contract": ">=0.3 <0.4",                     // 必须：兼容的内核契约范围（§6）
     "id": "markdown",                              // 必须：全局唯一，短名；外部插件建议带前缀
     "displayName": "Markdown",
     "server": { "entry": "./lib/server.mjs" },     // 可选
@@ -39,7 +40,8 @@
 规则：
 
 - `server` 和 `client` 至少有一个。
-- `id` 冲突时：内置插件优先，外部同名插件拒绝加载并报错。
+- **`id` 冲突时**：内置插件优先，外部同名插件拒绝加载并报错。插件 `id` 不含 `:`，命令 id 用
+  `<插件id>:<命令>` 即天然不冲突（§3.7）。
 - **`plugins`（选择清单）与 `requires`（依赖）是两回事**：
   - `--plugins` 决定加载哪些插件；
   - `requires` 保证基础设施在位。boot 图只列 `--plugins` 选中的插件，但执行时在前方**补齐**它们 `requires` 的插件（M0 就有的行为：去掉 file-tree 时 layout 仍在）。
@@ -102,7 +104,7 @@ export function apply(root: Context) {
 
 ## 3. 服务清单
 
-### 3.1 `ctx.fs`（server + client 半边）✅ v0.2 定
+### 3.1 `ctx.fs`（server + client 半边）✅ v0.2 定 / v0.3 补 watch 与忽略
 
 插件访问文件的**唯一**途径。禁止 `import 'node:fs'` / `'node:fs/promises'`（契约约定）。
 
@@ -148,13 +150,27 @@ interface FsService {
 | `EIO` | 其它 I/O 错误 |
 
 - 错误对象的形状：`Error` 且带 `code: FsErrorCode`，`message` 以 `CODE: ...` 开头；`cause` 可能含原始错误（服务端）。
-- **`watch`（签名现在定，实现 M2）**：文件级/目录级，内核做 debounce（100ms）。事件：
+- **`watch`（v0.3 定，M2 实现）**：**只接受目录**（含根 `''`）；它监听该目录**自身一层**。
+  文件的变化由**父目录**的监听产生 `{ type: 'change', path }`；要看某个文件，watch 它的父目录
+  并按 `path` 过滤。返回 disposer，disposer 之后不再回调。
+  - 事件形态（本进程内直接调用服务）：
 
-  ```ts
-  type FsWatchEvent = { type: 'change' | 'add' | 'unlink'; path: RelPath }
-  ```
+    ```ts
+    type FsWatchEvent = { type: 'change' | 'add' | 'unlink'; path: RelPath }
+    ```
 
-  M1 内核的 `watch` 返回 disposer，但**不产生事件**（实现随 M2）；client 半边通过 RPC 订阅的事件形态在 M2 定（§4）。
+  - **debounce（内核，双端同一套规则）**：同一 `path` 的同类事件在 **300ms** 窗口内合并为
+    一次（抖动编辑只产生一个 `change`）；不同 `path` 互不合并。窗口**跨一次**事件传递地
+    合并自身。
+  - **`type` 是提示，不是真相**：一次 rename 可能同时产生 `change` 与 `unlink`（多义）。
+    接收方拿 `path` 发一次 `fs.stat` 定夺：存在 → `add`/`change`，`ENOENT` → `unlink`。
+  - 订阅时**不**补发初态：调用方先 `list` / `stat` 一次，再 watch。
+  - server 半边：文件级监听用“父目录监听 + 过滤”；client 半边：通过 RPC 订阅（§4），
+    签名与本地一致。
+- **`list` 与忽略规则（v0.3 定，M2）**：`list(path)` **不返回**被 `ignore` 规则隐藏的条目
+  （§4.1，`diorama.toml` 的 `[ignore]` 加上内置默认 `'.git'`、`node_modules`；`--all` 解除）。
+  这是隐藏规则的**唯一强制点**：文件树、palette 的文件检索、watch 都读 `list`，因此天然一致。
+  `stat` 不受影响（直接按路径取信息）：已被打开的文件即使被隐藏，也照样能读。
 - client 半边：`mountCtx.fs` 与上面**同名同签名**，底层走 RPC（§4），调用形状与本地服务一致。
 
 ### 3.2 `ctx.git`（server）🔲 未定
@@ -199,7 +215,39 @@ ctx.slots.register({
 分别由 tabs / file-tree / layout 插件暴露，供其他插件操作。属于**跨插件协作**，走服务而非组件导入。
 
 - `tabs` **只负责打开与切换，不提供编辑**。
-- M1 的 `ctx.tabs` 仍是 M0 的单 tab 语义（`open` / `close` / `active` / `getSnapshot`），多 tab 在 M2；`ctx.layout` 未定、M1 不提供。
+- `ctx.layout` 仍是 🔲（M2 不提供）。
+- **`ctx.tabs`（v0.3 定，M2 多 tab）：**
+
+  ```ts
+  interface TabInfo {
+    id: string           // tab id，同页内唯一；tabs.content 的 key 用它
+    path: RelPath        // 打开时的文件路径；内容由内容区自己 fs.stat / 读
+  }
+
+  interface TabsSnapshot {
+    tabs: readonly TabInfo[]
+    activeId: string | undefined
+  }
+
+  interface TabsService {
+    open(file: FileInfo): TabInfo      // 已在某个 tab 打开 → 激活它，不新开
+    close(id?: string): void           // 缺省关活动 tab
+    activate(id: string): void
+    next(): void                       // 循环
+    prev(): void                       // 循环
+    readonly active: TabInfo | undefined
+    readonly count: number             // 命令的 when 用
+    getSnapshot(): TabsSnapshot        // 不可变，仅变化时替换
+    subscribe(listener: () => void): () => void
+  }
+  ```
+
+  - **一个文件只有一个 tab**：`open` 的键是 `path`。`TabInfo` 不再带 `FileInfo` 快照——
+    文件变化时内容区用 `fs.stat` 重读，tab 本身不持有文件数据（tabs 不依赖 fs）。
+  - **关闭后的激活**：右边的 tab，没有则左边的，都没有则空。
+  - **标签栏由 `tabs` 自己画**（不开新 seat）；每个 tab 的内容画进 `tabs.content`（§5，
+    key = tab id）。
+  - `open` 从 v0.2 的 `void` 改为返回 `TabInfo`：源码层面兼容（`void` 用法照旧编译）。
 
 ### 3.5 `ctx.diorama.mounts`（server）
 
@@ -222,11 +270,91 @@ interface Mounts {
 
 写盘只有一处：**`~/.diorama/`**。插件若要持久化状态，走内核提供的 `ctx.storage` 🔲，而不是自己拼路径。
 
-### 3.7 `ctx.commands`（client）— M2
+### 3.7 `ctx.commands`（client）✅ v0.3 定，M2 实现
 
-快捷键与 command palette 共用同一套命令模型。**注册表只有一个；快捷键是绑定，palette 是它的检索界面。** M1 不实现，形态见 v0.1 §3.7。
+快捷键与 command palette 共用同一套命令模型。**注册表只有一个；快捷键是绑定，palette 是它的检索界面。**
 
-## 4. RPC / 通信 ✅ v0.2 定
+**归属**：`ctx.commands` 由**内核内置**（kernel 的 client 半边注入到页面的 root ctx，和 `mount` /
+`mounts` / `kernel` 同级），**不是**某个可选插件的服务——否则 `.diorama-toml` 少选一个插件，
+快捷键就静默失效。`palette` 是**插件**（§5 `layout.overlay` 上的条目），它只是 `ctx.commands` 的一个消费面。
+
+```ts
+/** 内核采集的上下文：插件不各自查询。 */
+interface CommandContext {
+  mountId: string
+  /** 活动 tab（含路径）；由 tabs 服务给出。 */
+  activeTab?: { id: string; path: RelPath }
+  /** 活动 tab 当前由哪个渲染器条目画（失败回退链之后的结果）；内容区未就位时缺省。 */
+  activeRenderer?: string
+  /** 焦点所在的编辑面（选单只记录来源，不记录节点）。 */
+  focus: 'tabs' | 'tree' | 'editor' | 'other'
+}
+
+type CommandWhen = (ctx: CommandContext) => boolean
+
+interface CommandSpec {
+  /** 全局唯一：`<插件id>:<命令>`（插件 id 不含 `:`）。 */
+  id: string
+  title: string
+  when?: CommandWhen                   // 缺省恒真；不返回 false 以外的真值判定
+  run(ctx: CommandContext): void | Promise<void>
+}
+
+interface KeybindingSpec {
+  /** 键记法：`mod+alt+w`、`mod+k`、`mod+shift+[`、`ctrl+tab`（见下）。 */
+  keys: string
+  command: string                      // 命令 id；必须是已注册（或稍后注册）的 id
+  when?: CommandWhen
+}
+
+interface CommandsService {
+  register(spec: CommandSpec): () => void
+  /** 可执行性（when 缺省恒真）。未注册的 id 为 false。 */
+  canRun(id: string): boolean
+  /** 不存在 / when 为假 → 返回 false 并 warn，不抛错。 */
+  run(id: string): Promise<boolean>
+  /** 按当前 CommandContext 可执行的绑定。 */
+  bindings(): readonly { keys: string; command: string }[]
+  bind(spec: KeybindingSpec): () => void
+  /** 可观察快照（palette 用 useSyncExternalStore 读）。 */
+  getSnapshot(): CommandsSnapshot
+  subscribe(listener: () => void): () => void
+}
+```
+
+**规则（v0.3 定）：**
+
+| 条款 | 取值 |
+|---|---|
+| 命令 id 重复 | **fail loud：`register` 抛错**（与 §3.3 的 `id` 重复同一条规则） |
+| 键记法 | 修饰键 `mod`（mac = ⌘，其它 = Ctrl）、`ctrl`、`alt`、`shift`；键名小写，取 `KeyboardEvent.key` 的小写名（`w`、`k`、`arrowleft`、`[`、`tab`）；`mod+alt+w` 这种 `+` 分隔、顺序无关；`mod` 与 `ctrl` 同平台重复 → 拒绝并 warn |
+| **冲突（键相同）** | **字面重复才 fail loud**：同一个按键、且二者 `when` 都可能同时为真 → `bind` **抛错**。`when` 显式互斥的绑定可以共存。 |
+| **冲突（执行时）** | 某一按键在当前上下文命中的绑定 `canRun` 同时为真且来自不同命令 → **warn，只执行第一条**（先注册者优先） |
+| 触发条件 | 页面 mounted；按键命中且非 `repeat`；焦点不在 `input` / `textarea` / `[contenteditable]` 内；命中的绑定 `when` 为真 |
+| 浏览器保留键 | 拦不住（`mod+w`、`mod+t`…）。**关闭 tab = `mod+alt+w`**；`ctrl+tab` / `ctrl+shift+tab` 绑定“到边界不动”，`mod+alt+→` / `mod+alt+←` 绑定“循环切换” |
+| palette | 是插件（`requires: ['layout']`、`inject: ['commands']`），注册在 `layout.overlay`（single）上；打开时把按键交还给它（输入框内的按键不当作快捷键）。**默认只列可执行的命令**（不灰显），`Esc` 关闭，`Enter` 执行 |
+| 执行失败 | `run` 的 Promise 拒绝 → 控制台报错 + `warn`，不冒泡到按键处理（一次失败不拖垮页面） |
+| 生命周期 | `register` / `bind` 返回 disposer；注册属于**页面级**（一个页面一棵 client 树，§11），卸载即撤销 |
+| O8 | “开关型”交互（如自动刷新开关）用命令实现，v1 不做用户自定义快捷键 |
+
+**内核内置命令（`m2` 最小集合，每个都有 e2e）：**
+
+| id | 标题 | 快捷键 | when |
+|---|---|---|---|
+| `tabs.close` | 关闭当前标签页 | `mod+alt+w` | 有活动 tab |
+| `tabs.next` | 下一个标签页 | `mod+alt+arrowright` | tab 数 > 1 |
+| `tabs.prev` | 上一个标签页 | `mod+alt+arrowleft` | tab 数 > 1 |
+| `tabs.nextEdge` | 下一个标签页（到末尾停） | `ctrl+tab` | tab 数 > 1 |
+| `tabs.prevEdge` | 上一个标签页（到开头停） | `ctrl+shift+tab` | tab 数 > 1 |
+| `tree.focus` | 聚焦文件树 | `mod+alt+f` | 焦点不在树 |
+| `palette.toggle` | 打开命令面板 | `mod+k` | 焦点不在输入框 |
+| `view.refresh` | 重新读取当前文件 | `mod+alt+r` | 有活动 tab |
+| `view.toggleAutoRefresh` | 自动刷新：开 / 关 | 无（palette） | 有活动 tab |
+
+命令的**来源插件**决定注册点：`tabs.*` 由 tabs 插件注册、`tree.*` 由 file-tree 注册、
+`palette.toggle` 由 palette 注册、`view.*` 由 renderer-registry 注册（它持有文件内容缓存）。
+
+## 4. RPC / 通信 ✅ v0.2 定 / v0.3 补事件 session 与 §4.1 配置
 
 **形态：自动代理（A1）。** server 插件的服务公开方法自动成为浏览器可调的 RPC 方法：client 半边里 `mountCtx.fs.list(...)` 的形状与 server 服务一致。
 
@@ -244,11 +372,27 @@ interface Mounts {
 ```ts
 // client → server
 { type: 'call', id: number, method: `${service}.${method}`, args: unknown[] }
+{ type: 'cancel', session: string }                     // v0.3：取消一个订阅端点（§3.1 watch）
 // server → client
 { type: 'result', id: number, value: unknown }          // 二进制值以 base64 呈现（见下）
 { type: 'error', id: number, code: string, message: string }
-{ type: 'event', topic: string, payload: unknown }      // M2 起的推送
+{ type: 'event', topic: string, payload: unknown, session?: string }
 ```
+
+**订阅端点与事件 session（v0.3 定，M2 起）**
+
+- 有些服务方法是**订阅端点**：调用它不是请求—响应，而是注册一个推送端点。当前唯一一个是
+  `fs.watch`（§3.1）。订阅端点**不出现在** `describe()` 里（`describe()` 只列普通方法）；
+  RPC 按**约定名**路由：`<service>.watch`。
+- 调用订阅端点：`{ type: 'call', method: 'fs.watch', args: [path] }` → `{ type: 'result', id, value: { session: string } }`。
+  订阅期间服务端为该端点产生的事件帧带上同一个 `session`。
+- 取消：`{ type: 'cancel', session }`。**连接关闭 = 该连接上所有端点自动取消**（一次性清理，
+  不需要逐条 unsubscribe 帧）。
+- 事件路由：**带 `session` 的帧只投给创建它的那条连接**；不带 `session` 的帧沿用广播
+  （`RpcChannel.broadcast`，M1 的形态）。`RpcClient.onSession(session, listener)` 订阅后者。
+- `ctx.fs.watch(path, listener)` 的**签名不变**：client 半边内部完成“订阅端点 → onSession →
+  300ms 窗口合并 → listener”的转换，返回的 disposer 发 `{ type: 'cancel' }`。
+- 这是**增量**：客户端帧、结果帧、调用帧都不变；M1 的客户端遇到 `session` 只是忽略该字段。
 
 **方法发现与边界**
 
@@ -260,6 +404,45 @@ interface Mounts {
 
 **与 M0 的关系**：M0 的 `GET /api/fs/list`、`/api/fs/read` **删除**。`/plugin.json`、`/plugins/<id>.js`、`/__diorama__/*` 仍是 HTTP。
 
+### 4.1 `diorama.toml` ✅ v0.3 定，M2 实现
+
+唯一的配置文件。**查找顺序**：`<被服务的目录>/diorama.toml` → `$DIORAMA_HOME/diorama.toml`
+（`DIORAMA_HOME` 默认 `~/.diorama`；两个路径都找不到就用默认值）。只读**第一个找到的文件**，不合并。
+
+```toml
+# diorama.toml —— 全部字段可选
+host = "127.0.0.1"          # 监听网卡；默认 127.0.0.1（architecture §8）
+port = 0                    # 0 = 随机空闲端口（默认）
+plugins = ["slots", "layout", "file-tree", "tabs", "renderer-registry", "plaintext", "markdown", "code", "palette"]
+ignore = [".git", "node_modules"]   # 隐藏规则（覆盖内置默认）
+
+[watch]
+debounceMs = 300            # 事件窗口合并（§3.1）；0–60000
+```
+
+| 字段 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `host` | string | `"127.0.0.1"` | 等价 `--host` |
+| `port` | integer 0–65535 | `0` | 等价 `--port` |
+| `plugins` | string[] | 全部内置 | 等价 `--plugins`；未知 id → fail loud |
+| `ignore` | string[] | `[".git", "node_modules"]` | 隐藏规则；`[]` 或 `--all` 表示不隐藏 |
+| `watch.debounceMs` | integer 0–60000 | `300` | `fs.watch` 的合并窗口 |
+| `watch.enabled` | boolean | `true` | `false` 时 `fs.watch` 立即返回空 disposer（不监听） |
+
+**优先级：CLI > `diorama.toml` > 默认值。**
+
+- **注意**：`--port` / `--host` / `--plugins` 的“没给”与“给了默认值”必须区分——CLI 解析出的
+  `undefined` 才落回 toml。`--port 0` 是显式随机端口。
+- `--all`（或 `--ignore ''`）：忽略规则为空。
+- **`ignore` 的匹配**：gitignore 语法子集——`name`（任意层同名）、`dir/`（只匹配目录）、
+  `a/b`（相对根）、`*` `?` `[...]`（不跨 `/`）、`**`（跨层）。**不读 `.gitignore`**（v1）。
+  强制点是 `fs.list`（§3.1）。
+- **`diorama.toml` 写错 = fail loud**：语法错误或字段类型/范围不对 → 打印文件名与原因，
+  CLI 退出码 2，绝不静默忽略。
+- **失败与展示**：CLI/`--dump-plan` 打印生效的配置来源（`config: <path>` 或 `config: none`）。
+- **下发到页面**：`/plugin.json` 增加 `config: EffectiveConfig`，内容是合成后的有效配置
+  （不含 toml 原文）。M2 只有文件树/palette 读 `ignore`——但它们走 `fs.list`，页面不需要再过滤。
+
 ## 5. slot 清单
 
 | slot | 类型 | 声明者 | 条目 | 说明 |
@@ -267,9 +450,12 @@ interface Mounts {
 | `root` | 单 | 内核 | 1 | 整个页面 |
 | `layout.main` | 单 | `layout` | 1 | 左右分栏 |
 | `sidebar.tree` | 单 | `layout` | 1 | 左侧导航 |
-| `tabs.content` | keyed | `tabs` | N | 每个 tab 的内容区（key = tab id） |
+| `tabs.content` | **keyed** | `tabs` | N | 每个 tab 的内容区（**key = tab id**，§3.4） |
 | `file.renderer` | keyed（内部排序） | `renderer-registry` | N | 按文件类型派发；M1 起带 matcher（§5.1） |
+| `layout.overlay` | 单 | `layout` | 1 | 覆盖层（v0.3 新增：palette 等命令面板；M2 只给 `palette` 用） |
 
+- **`tabs.content` 的 key**：v0.3 起是 **tab id**；`tabs` 为**每个 tab**（而不只是活动 tab）渲染一个
+  `tabs.content` 座位，非活动座位隐藏而非卸载（每个 tab 的滚动位置与渲染状态彼此独立）。
 - **`statusbar`：v1 不做**，从 slot 表移除（需要时再议）。
 - **没有 toolbar**：只读工具没有“要对文件做的事”，v1 不提供 `file.toolbar` / `tabs.actions`（O8）。
 - **回退链**：`file.renderer` 的条目按 §5.1 排序，命中者渲染；渲染抛错 → 标记失败 → **尝试下一个**；matcher 全不命中 → 兜底条目（plaintext）；一个条目都没有 → 「无可用渲染器」。
@@ -318,10 +504,13 @@ interface FileRendererProps {
 
 ## 6. contract version 规则 ✅ v0.2 起强制
 
-- 内核版本 `0.x` 期间：**minor 改动即破环**，插件写窄范围（`>=0.2 <0.3`）。
+- 内核版本 `0.x` 期间：**minor 改动即破环**，插件写窄范围（`>=0.3 <0.4`）。
 - **检查时间**：读 manifest 时（加载前）。不满足 → 拒绝加载该插件，并解释原因（终端 + 浏览器控制台）。
-- 内置插件同样检查：M0 遗留的 `>=0.1 <0.2` 会被内核拒绝，所以 M1 把所有内置插件升到 `>=0.2 <0.3`。
-- M1 内核**没有**外部插件，因此"UI 显示「插件 X 因契约不兼容未加载」"的展示面随外部插件一起推迟；拒绝本身仍然 fail loud（CLI 退出码非 0 / boot 图里不出现）。
+- 内置插件同样检查：M1 遗留的 `>=0.2 <0.3` 会被 v0.3 内核拒绝，所以 M2 把所有内置插件升到
+  `>=0.3 <0.4`。**内核与半边必须一起重新构建**（builtin manifest 与 kernel 的 `CONTRACT_VERSION`
+  来自同一份构建）。
+- M2 起**没有**外部插件（§9），因此"UI 显示「插件 X 因契约不兼容未加载」"的展示面随外部插件一起推迟；
+  拒绝本身仍然 fail loud（CLI 退出码非 0 / boot 图里不出现）。
 
 ## 7. Gateway 控制面 — M3
 
@@ -393,6 +582,9 @@ CLI 与 gateway 之间的 socket 协议，M3 实现，见 v0.1 §7。M1 仍是�
 | 渲染 | 无可用条目 | 「无可用渲染器」，不白屏 |
 | 渲染 | 读文件失败 | 显示错误码与原因，不白屏 |
 | RPC | 服务不存在 / 方法不存在 | `ESERVICE` / `EMETHOD`，日志 + 调用方失败 |
+| 订阅 | 订阅端点失败 / `cancel` 未知 session | 失败帧带 `code`；未知 session 记日志后忽略 |
+| 命令 | 命令 id 重复 / 键字面重复 | `register` / `bind` 抛错（§3.7） |
+| 配置 | `diorama.toml` 语法或字段错误 | CLI 退出码 2，点名文件与原因，不静默忽略（§4.1） |
 
 ## 12. v0.1 → v0.2 变更清单（破环，故升 minor）
 
@@ -412,13 +604,33 @@ CLI 与 gateway 之间的 socket 协议，M3 实现，见 v0.1 §7。M1 仍是�
 | 外部插件 | v1 | §9 推迟到最后一个里程碑，接口保留 |
 | zod | v1 | 规则定，M1 无调用者 |
 
-## 待定清单（v0.2 后仍 🔲）
+## 13. v0.2 → v0.3 变更清单（破环，故升 minor）
+
+> 2026-10-19，M2 开工前用户逐条拍板（推荐值全采纳）。
+
+| 条款 | v0.2 | v0.3 |
+|---|---|---|
+| `TabInfo` | `{ id, file: FileInfo }` | `{ id, path }`（内容区自己 stat/读） |
+| `ctx.tabs` | 单 tab：`open`/`close`/`active`/`getSnapshot` | 多 tab：`open`（返回 `TabInfo`）/ `close` / `activate` / `next` / `prev` / `count`（§3.4） |
+| `tabs.content` | single | **keyed，key = tab id**；每个 tab 一个座位（§5） |
+| `layout.overlay` | 无 | 新增 single seat，palette 占用（§5） |
+| `ctx.commands` | 🔲（“形态见 v0.1 §3.7”） | ✅ 内核内置；命令 id fail loud、键冲突字面重复才抛错、执行时多命中 warn 取第一条、`mod` = ⌘/Ctrl、`CommandContext` 内核采集、内置命令表（§3.7） |
+| palette | 🔲 | 插件，`layout.overlay` 条目，**只列可执行命令**（§3.7） |
+| `fs.watch` | 签名定、实现 M2、debounce 100ms | 只接受目录、每 300ms 窗口合并、`type` 为提示、不补发初态（§3.1） |
+| `fs.list` | 返回目录全部条目 | **不返回被 `ignore` 隐藏的条目**（§3.1、§4.1） |
+| RPC 事件帧 | `{ type: 'event', topic, payload }`（广播） | 加 `session?`；订阅端点 `fs.watch` + `{ type: 'cancel' }`；连接关闭自动取消（§4） |
+| `diorama.toml` | 只定了名字 | 字段、查找顺序、CLI 优先级、gitignore 子集、fail loud（§4.1） |
+| contract version | `0.2` / `>=0.2 <0.3` | `0.3` / `>=0.3 <0.4`（全部内置插件） |
+
+## 待定清单（v0.3 后仍 🔲）
 
 - [ ] `ctx.git` 具体签名（只读：diff / status / log）— M4
-- [ ] `fs.watch` 的实现与 RPC 事件形态（签名已定）— M2
-- [ ] `ctx.commands` / palette — M2
+- [ ] `ctx.layout` 的服务面（M2 不提供，overlay 走 slot）
 - [ ] `ctx.storage` 签名 — 待定
 - [ ] 插件异步任务托管 API — 待定
-- [ ] O8：渲染模式切换 / 图片缩放 / diff 并排的落点
+- [ ] O8：渲染模式切换 / 图片缩放 / diff 并排的落点（命令化已缓解“开关型”）
 - [ ] 外部插件的发现、bundle 校验、`--plugins-dir` — 最后一个里程碑
 - [ ] gateway 控制面事件订阅 — M3
+- [ ] palette 附录文件检索（`Ctrl+P`）与全量列出灰显 — 以后再定
+- [ ] `.gitignore` 是否纳入隐藏规则 — 以后再定
+- [ ] 多 tab 状态持久化（刷新后恢复）— O5

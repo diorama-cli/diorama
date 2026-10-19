@@ -11,6 +11,7 @@
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 import { fsError } from '../shared/errors.ts'
+import { createIgnore, DEFAULT_IGNORE, type IgnoreRules } from '../shared/ignore.ts'
 import type { MethodDescriptor } from '../shared/rpc.ts'
 import type { FileInfo, FsWatchEvent, RelPath } from '../shared/types.ts'
 import type { Mounts } from './plugins.ts'
@@ -71,6 +72,12 @@ const METHODS: MethodDescriptor[] = [
   { name: 'readBytes', arity: 1 },
 ]
 
+/** Per-mount behaviour the kernel hands `FsService` (contract.md §4.1). */
+export interface FsServiceOptions {
+  /** Ignore patterns hidden from `list`; defaults to `.git` + `node_modules`. */
+  ignore?: readonly string[]
+}
+
 /**
  * Read-only file access rooted at one mounted directory.
  * Instances are created per mount (contract.md §2.5).
@@ -79,8 +86,12 @@ export class FsService {
   /** Absolute mount root. Immutable once constructed. */
   readonly root: string
 
-  constructor(root: string) {
+  /** Hidden-name rules: the single enforcement point of `ignore` (contract.md §3.1). */
+  readonly ignore: IgnoreRules
+
+  constructor(root: string, options: FsServiceOptions = {}) {
     this.root = resolve(root)
+    this.ignore = createIgnore(options.ignore ?? DEFAULT_IGNORE)
   }
 
   /** The methods the RPC channel may proxy (contract.md §4). */
@@ -104,7 +115,11 @@ export class FsService {
           const childInfo = await stat(childAbs)
           const kind = childInfo.isDirectory() ? 'dir' : childInfo.isFile() ? 'file' : undefined
           if (kind === undefined) return undefined // sockets, fifos, devices: not browsable
-          return toFileInfo(childPath(path, dirent.name), dirent.name, kind, childInfo.size, childInfo.mtimeMs)
+          const child = childPath(path, dirent.name)
+          // Hidden entries are absent from `list` — files as well as directories
+          // (and `stat` still reaches them by path, contract.md §3.1).
+          if (this.ignore.matches(child, kind)) return undefined
+          return toFileInfo(child, dirent.name, kind, childInfo.size, childInfo.mtimeMs)
         } catch {
           return undefined // vanished between readdir and stat
         }
@@ -191,8 +206,11 @@ export const fsHalf = {
     // The registry the kernel publishes — never a module-local copy: this half
     // is bundled into the CLI separately from the kernel's own code, and a
     // second `createMounts()` would register on a mount nobody fires.
-    ctx.diorama.mounts.onMount((mountCtx, { root }) => {
-      ;(mountCtx as unknown as { provide(name: string, value: unknown): unknown }).provide('fs', new FsService(root))
+    ctx.diorama.mounts.onMount((mountCtx, info) => {
+      ;(mountCtx as unknown as { provide(name: string, value: unknown): unknown }).provide(
+        'fs',
+        new FsService(info.root, { ignore: info.config?.ignore }),
+      )
       return () => {}
     })
   },

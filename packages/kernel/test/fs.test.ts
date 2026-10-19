@@ -59,6 +59,45 @@ test('ctx.fs: oversized files are ETOOLARGE before reading', async t => {
   await assert.rejects(fs.readBytes('huge.bin'), /ETOOLARGE/)
 })
 
+test('ctx.fs: list hides ignored entries; stat still reaches them', async t => {
+  const root = fixture()
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  mkdirSync(join(root, 'node_modules', 'pkg'), { recursive: true })
+  writeFileSync(join(root, 'node_modules', 'pkg', 'index.js'), 'x')
+  mkdirSync(join(root, '.git'))
+  writeFileSync(join(root, '.gitignore'), 'ignored.txt\n')
+  writeFileSync(join(root, 'ignored.txt'), 'x')
+  writeFileSync(join(root, 'dist.log'), 'x')
+
+  const defaults = new FsService(root)
+  // `.gitignore` is not read (contract.md §4.1): `ignored.txt` stays visible.
+  assert.deepEqual((await defaults.list('')).map(entry => entry.name).sort(), [
+    '.gitignore',
+    'a.txt',
+    'blob.bin',
+    'dist.log',
+    'docs',
+    'ignored.txt',
+  ])
+  // Hidden from `list`, still addressable by path (contract.md §3.1).
+  assert.equal((await defaults.stat('node_modules/pkg/index.js')).kind, 'file')
+  assert.equal((await defaults.list('node_modules')).length, 1)
+
+  const custom = new FsService(root, { ignore: ['*.log', 'docs/'] })
+  assert.deepEqual((await custom.list('')).map(entry => entry.name).sort(), [
+    '.git',
+    '.gitignore',
+    'a.txt',
+    'blob.bin',
+    'ignored.txt',
+    'node_modules',
+  ])
+  // Hidden entries stay addressable by path (contract.md §3.1).
+  assert.deepEqual((await custom.list('docs')).map(entry => entry.name), ['b.md'])
+  assert.equal((await custom.list('node_modules')).length, 1)
+  assert.equal(await custom.readText('dist.log'), 'x')
+})
+
 test('ctx.fs: watch has its signature but emits nothing yet', () => {
   const fs = new FsService(process.cwd())
   const dispose = fs.watch('', () => {

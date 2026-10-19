@@ -9,7 +9,7 @@ export { codedError, fsError, isErrorCode, rpcError } from '../shared/errors.ts'
 export { extensionOf, mimeOf } from '../shared/mime.ts'
 export { explainMismatch, parseRange, satisfies } from '../shared/semver.ts'
 
-export { FsService, fsHalf, MAX_BINARY_BYTES, MAX_TEXT_BYTES, resolveInside } from './fs.ts'
+export { FsService, fsHalf, MAX_BINARY_BYTES, MAX_TEXT_BYTES, resolveInside, type FsServiceOptions } from './fs.ts'
 export {
   ContractMismatchError,
   HttpError,
@@ -33,6 +33,22 @@ export {
   type PluginSource,
 } from './plan.ts'
 export { createMountServer, listen, type MountOptions, type MountServer } from './http.ts'
+export {
+  CONFIG_FILE,
+  ConfigError,
+  defaultConfig,
+  dioramaHome,
+  loadFileConfig,
+  mergeConfig,
+  parseConfigFile,
+  resolveConfig,
+  validateFileConfig,
+  type ConfigOrigin,
+  type EffectiveConfig,
+  type FileConfig,
+  type ResolveOptions,
+} from './config.ts'
+export { createIgnore, DEFAULT_IGNORE, type IgnoreRules } from '../shared/ignore.ts'
 export { createDispatcher, handleFrame, RpcChannel, RPC_PATH, type RpcDispatcher } from './rpc.ts'
 export {
   bootPlugins,

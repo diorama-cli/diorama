@@ -1,5 +1,9 @@
 /**
- * The `diorama` command (M0): serve one directory in the foreground.
+ * The `diorama` command: serve one directory in the foreground.
+ *
+ * Configuration is `diorama.toml` + CLI + defaults (contract.md §4.1); the CLI
+ * carries `undefined` for "not given" so a toml value is never shadowed by a
+ * CLI default.
  *
  * `--plugins` / `--break-plugin` are verification switches: they let the M0
  * acceptance scenarios (plan.md) be reproduced without editing sources.
@@ -10,26 +14,39 @@ import { realpath, stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-  BUILTIN_PLUGIN_IDS,
+  builtinSource,
+  ConfigError,
   bootPlugins,
   createDispatcher,
   createMountServer,
+  dioramaHome,
   listen,
   planPlugins,
+  resolveConfig,
   type BootManifest,
+  type ConfigOrigin,
+  type EffectiveConfig,
 } from 'diorama-kernel/server'
 import { loadServerHalf } from './plugins-server.ts'
 
 export interface CliOptions {
   dir: string
-  port: number
-  host: string
-  /** Plugin ids to load; defaults to the static assembly list. */
-  plugins: readonly string[]
+  /** `undefined` = take `diorama.toml`, then the default (`0` = a free port). */
+  port?: number
+  /** `undefined` = take `diorama.toml`, then `127.0.0.1`. */
+  host?: string
+  /** `undefined` = take `diorama.toml`, then every built-in plugin. */
+  plugins?: readonly string[]
+  /** Explicit `diorama.toml`; skips the lookup in the directory and `$DIORAMA_HOME`. */
+  config?: string
+  /** `--all`: show everything (no ignore rules). */
+  all: boolean
   /** Simulate a plugin missing its `name` export: `"<id>:name"`. */
   breakPlugin?: string
   /** Print the boot plan and exit; may run without built assets. */
   dumpPlan: boolean
+  /** Print the effective configuration and exit. */
+  dumpConfig: boolean
 }
 
 export interface ParsedArgs {
@@ -42,28 +59,49 @@ const USAGE = `Usage: diorama [dir] [options]
 
 Serve one directory as a read-only diorama in the browser (foreground).
 
-Options:
-  --port <n>              Port to listen on (default: random free port)
-  --host <ip>             Interface to bind (default: 127.0.0.1)
-  --plugins <a,b,...>     Built-in plugins to load (default: all)
+Configuration comes from diorama.toml (the served directory, then
+$DIORAMA_HOME) and is overridden by these options:
+
+  --port <n>              Port to listen on (default from diorama.toml, else random)
+  --host <ip>             Interface to bind (default from diorama.toml, else 127.0.0.1)
+  --plugins <a,b,...>     Built-in plugins to load (default from diorama.toml, else all)
+  --config <path>         Read this diorama.toml instead of looking one up
+  --all                   Show ignored entries too (.git, node_modules, ignore = [])
   --break-plugin <id:name>
                           Simulate a broken plugin, e.g. "plaintext:name"
   --dump-plan             Print the plugin boot plan as JSON and exit
+  --dump-config           Print the effective configuration as JSON and exit
   -h, --help              Show this help
 
 Environment:
-  DIORAMA_HOME            Directory holding the built web assets
-                          (default: packages/cli/web, then apps/web/dist)
+  DIORAMA_HOME            Directory holding the built web assets and the
+                          fallback diorama.toml (default: packages/cli/web,
+                          then apps/web/dist; ~/.diorama for the config)
 `
 
 /** Parse argv (without `node` and the script path). */
 export function parseArgs(argv: readonly string[]): ParsedArgs {
   let dir: string | undefined
-  let port = 0
-  let host = '127.0.0.1'
-  let plugins: string[] = [...BUILTIN_PLUGIN_IDS]
+  let port: number | undefined
+  let host: string | undefined
+  let plugins: string[] | undefined
+  let config: string | undefined
+  let all = false
   let breakPlugin: string | undefined
   let dumpPlan = false
+  let dumpConfig = false
+
+  const current = (): CliOptions => ({
+    dir: '',
+    ...(port === undefined ? {} : { port }),
+    ...(host === undefined ? {} : { host }),
+    ...(plugins === undefined ? {} : { plugins }),
+    ...(config === undefined ? {} : { config }),
+    all,
+    ...(breakPlugin === undefined ? {} : { breakPlugin }),
+    dumpPlan,
+    dumpConfig,
+  })
 
   const takeValue = (index: number, flag: string): [string, number] | string => {
     const value = argv[index + 1]
@@ -73,20 +111,28 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
 
   for (let index = 0; index < argv.length; index++) {
     const arg = argv[index] as string
-    if (arg === '-h' || arg === '--help') return { options: { dir: '', port, host, plugins, dumpPlan: true }, error: 'help' }
+    if (arg === '-h' || arg === '--help') return { options: current(), error: 'help' }
     if (arg === '--dump-plan') {
       dumpPlan = true
       continue
     }
-    if (arg === '--port' || arg === '--host' || arg === '--plugins' || arg === '--break-plugin') {
+    if (arg === '--dump-config') {
+      dumpConfig = true
+      continue
+    }
+    if (arg === '--all') {
+      all = true
+      continue
+    }
+    if (arg === '--port' || arg === '--host' || arg === '--plugins' || arg === '--break-plugin' || arg === '--config') {
       const taken = takeValue(index, arg)
-      if (typeof taken === 'string') return { options: { dir: '', port, host, plugins, dumpPlan }, error: taken }
+      if (typeof taken === 'string') return { options: current(), error: taken }
       const [value, next] = taken
       index = next
       if (arg === '--port') {
         const parsed = Number(value)
         if (!Number.isInteger(parsed) || parsed < 0 || parsed > 65535) {
-          return { options: { dir: '', port, host, plugins, dumpPlan }, error: `invalid --port "${value}"` }
+          return { options: current(), error: `invalid --port "${value}"` }
         }
         port = parsed
       } else if (arg === '--host') {
@@ -96,21 +142,23 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
           .split(',')
           .map(id => id.trim())
           .filter(id => id !== '')
+      } else if (arg === '--config') {
+        config = value
       } else {
         breakPlugin = value
       }
       continue
     }
     if (arg.startsWith('--')) {
-      return { options: { dir: '', port, host, plugins, dumpPlan }, error: `unknown option "${arg}"` }
+      return { options: current(), error: `unknown option "${arg}"` }
     }
     if (dir !== undefined) {
-      return { options: { dir: '', port, host, plugins, dumpPlan }, error: `unexpected argument "${arg}"` }
+      return { options: current(), error: `unexpected argument "${arg}"` }
     }
     dir = arg
   }
 
-  return { options: { dir: dir ?? '.', port, host, plugins, breakPlugin, dumpPlan } }
+  return { options: { ...current(), dir: dir ?? '.' } }
 }
 
 /** Directory containing this CLI's built code (`lib/`, bundled flat by tsdown). */
@@ -173,10 +221,37 @@ export async function main(argv: readonly string[], env: NodeJS.ProcessEnv = pro
     return 2
   }
 
+  // diorama.toml + CLI + defaults, merged once (contract.md §4.1). A bad file
+  // is fail loud: the message names it, nothing is guessed.
+  let config: EffectiveConfig
+  let origin: ConfigOrigin
+  try {
+    ;({ config, origin } = resolveConfig({
+      root,
+      home: dioramaHome(env),
+      ...(options.config === undefined ? {} : { configPath: options.config }),
+      cli: {
+        ...(options.host === undefined ? {} : { host: options.host }),
+        ...(options.port === undefined ? {} : { port: options.port }),
+        ...(options.plugins === undefined ? {} : { plugins: options.plugins }),
+        all: options.all,
+      },
+    }))
+  } catch (failure) {
+    if (!(failure instanceof ConfigError)) throw failure
+    process.stderr.write(`diorama: ${failure.message}\n`)
+    return 2
+  }
+
+  if (options.dumpConfig) {
+    process.stdout.write(`${JSON.stringify({ config, configFile: origin.path ?? null }, null, 2)}\n`)
+    return 0
+  }
+
   const mountId = newMountId()
   let manifest: BootManifest
   try {
-    manifest = planPlugins(options.plugins, mountId, root)
+    manifest = planPlugins(config.plugins, mountId, root, builtinSource, config)
   } catch (failure) {
     process.stderr.write(`diorama: ${(failure as Error).message}\n`)
     return 2
@@ -199,11 +274,12 @@ export async function main(argv: readonly string[], env: NodeJS.ProcessEnv = pro
   // Server half: a real Cordis tree per served directory (architecture.md §11).
   // `fs` is infrastructure on this side — it has no client half, so `--plugins`
   // (a client-graph selection) can neither add nor remove it.
-  const serverIds = [...new Set(['fs', ...options.plugins])]
+  const serverIds = [...new Set(['fs', ...config.plugins])]
   const tree = await bootPlugins({
     plugins: await selectPlugins(serverIds, options.breakPlugin),
     root,
     mountId,
+    config,
   })
   const clientEntries = new Map(manifest.plugins.map(plugin => [plugin.id, plugin.clientEntry]))
 
@@ -231,23 +307,25 @@ export async function main(argv: readonly string[], env: NodeJS.ProcessEnv = pro
   const server = mountServer.server
   let port: number
   try {
-    port = await listen(server, options.host, options.port)
+    port = await listen(server, config.host, config.port)
   } catch (failure) {
     const code = (failure as { code?: string }).code
     process.stderr.write(
       code === 'EADDRINUSE'
-        ? `diorama: port ${options.port} is already in use\n`
-        : `diorama: cannot listen on ${options.host}:${options.port}: ${(failure as Error).message}\n`,
+        ? `diorama: port ${config.port} is already in use\n`
+        : `diorama: cannot listen on ${config.host}:${config.port}: ${(failure as Error).message}\n`,
     )
     await tree.stop()
     return 2
   }
 
-  const displayHost = options.host === '0.0.0.0' || options.host === '::' ? '127.0.0.1' : options.host
+  const displayHost = config.host === '0.0.0.0' || config.host === '::' ? '127.0.0.1' : config.host
   const url = `http://${displayHost.includes(':') ? `[${displayHost}]` : displayHost}:${port}/`
   process.stdout.write(`diorama serving ${root}\n`)
   process.stdout.write(`  ${url}\n`)
-  process.stdout.write(`  [mount:${mountId}] plugins: ${options.plugins.join(', ') || '(none)'}\n`)
+  process.stdout.write(`  config: ${origin.path ?? 'none (defaults)'}\n`)
+  process.stdout.write(`  [mount:${mountId}] plugins: ${config.plugins.join(', ') || '(none)'}\n`)
+  if (config.ignore.length > 0) process.stdout.write(`  hidden: ${config.ignore.join(', ')}\n`)
 
   if (tree.failures.length > 0) {
     process.stderr.write(
