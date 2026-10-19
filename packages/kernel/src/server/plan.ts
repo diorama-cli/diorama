@@ -159,6 +159,10 @@ export interface BootManifest {
   port?: number
   /** The `diorama.toml` the configuration came from; absent = defaults (contract.md §4.1). */
   configFile?: string
+  /** Whether this mount is healthy (contract.md §11.1); the page shows a banner when not. */
+  state?: 'ok' | 'degraded'
+  /** Why the mount is degraded. */
+  lastError?: { code?: string; message: string; at: number }
   /** Effective configuration (contract.md §4.1); absent in `--dump-plan`-less contexts. */
   config?: EffectiveConfig
   plugins: PluginPlan[]

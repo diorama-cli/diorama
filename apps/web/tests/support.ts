@@ -226,12 +226,12 @@ export function controlRequest(socket: string, method: string, params: Record<st
 }
 
 /** Start `diorama gateway run` on a temp state directory and wait for the socket. */
-export async function startGateway(): Promise<GatewayFixture> {
+export async function startGateway(options: { env?: Record<string, string> } = {}): Promise<GatewayFixture> {
   const home = mkdtempSync(join(tmpdir(), 'diorama-gateway-'))
   const child: ChildProcess = spawn(process.execPath, [cli, 'gateway', 'run'], {
     cwd: repoRoot,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, DIORAMA_HOME: home },
+    env: { ...process.env, DIORAMA_HOME: home, ...options.env },
   })
   let output = ''
   child.stdout?.on('data', (chunk: Buffer) => (output += chunk.toString()))

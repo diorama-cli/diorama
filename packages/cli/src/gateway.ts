@@ -11,6 +11,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import {
   builtinSource,
+  onMountFailure,
   CONTROL_PROTOCOL,
   CONTRACT_VERSION,
   CONTROL_TOPICS,
@@ -125,9 +126,24 @@ export async function serveGateway(options: GatewayServeOptions): Promise<Stoppa
     })
   }
 
+  /** Degraded / recovered → control `events` and the mount's own pages (contract.md §11.1). */
+  const states = mounts.onStateChange((mount, previous) => {
+    control.emit(mount.state === 'degraded' ? 'degraded' : 'recovered', mount)
+    // A page learns about it without polling: the RPC broadcast reaches every
+    // connected page of that mount (contract.md §4 broadcast frames).
+    mounts.broadcast(mount.mountId, 'mount.state', mount)
+    void previous
+  })
+  /** `onMount` callbacks of a service plugin threw: that plugin failed on that mount. */
+  const offMountFailure = onMountFailure((mountId, failure) => {
+    mounts.degrade(mountId, failure)
+  })
+
   const shutdown = async (): Promise<void> => {
     if (closing) return
     closing = true
+    states()
+    offMountFailure()
     await control.close().catch(() => {})
     await mounts.close()
     await host?.dispose().catch(() => {})
@@ -180,6 +196,17 @@ export async function serveGateway(options: GatewayServeOptions): Promise<Stoppa
             })
           }, 0)
           return { stopping: true }
+        case 'fail': {
+          // Test hook (contract.md §11.1 note): make one mount's next work fail,
+          // so a degraded transition can be exercised end to end. Only with
+          // DIORAMA_TEST_HOOKS=1; off by default and absent from the table.
+          if (!testHooks()) throw coded('EMETHOD', `unknown control method "fail"`)
+          const mountId = typeof params.mountId === 'string' ? params.mountId : ''
+          const failure = new Error(typeof params.message === 'string' ? params.message : 'injected failure')
+          mounts.degrade(mountId, failure)
+          mounts.broadcast(mountId, 'mount.state', mounts.get(mountId) ?? {})
+          return { mountId, state: mounts.get(mountId)?.state ?? 'missing' }
+        }
         case 'events': {
           const wanted = Array.isArray(params.topics) ? params.topics.filter(isTopic) : [...CONTROL_TOPICS]
           peer.subscribe(wanted)
@@ -229,7 +256,10 @@ async function mountOne(context: MountContext): Promise<{ mount: { status: Mount
     config,
     ...(params.configFile === undefined ? {} : { configFile: params.configFile }),
     clientEntries,
-    manifest: (mountId, port, url): BootManifest => bootManifest(mountId, params, config, port, url),
+    manifest: (mountId, port, url): BootManifest => {
+      const status = context.mounts.get(mountId)
+      return bootManifest(mountId, params, config, port, url, status)
+    },
     async boot(mountId, port, url) {
       const host = await context.pluginHost(config.plugins, params.breakPlugin)
       // contract.md §2.5: one fork per mount; `fs` (and `mountId`) live there,
@@ -244,7 +274,7 @@ async function mountOne(context: MountContext): Promise<{ mount: { status: Mount
         log: message => context.log(`[mount:${mountId}] ${message}`),
       })
       const mountTree: MountTree = {
-        dispatcher: dispatcherFor(tree.ctx as unknown as MountServices),
+        dispatcher: guardedDispatcher(mountId, dispatcherFor(tree.ctx as unknown as MountServices), context.mounts),
         dispose: () => tree.dispose(),
       }
       context.trees.set(mountId, mountTree)
@@ -279,7 +309,14 @@ function dispatcherFor(mount: MountServices): RpcDispatcher {
 }
 
 /** The boot graph of one mount (contract.md §4.1): its URL and configuration source. */
-function bootManifest(mountId: string, params: MountParams, config: EffectiveConfig, port: number, url: string): BootManifest {
+function bootManifest(
+  mountId: string,
+  params: MountParams,
+  config: EffectiveConfig,
+  port: number,
+  url: string,
+  status: MountStatus | undefined,
+): BootManifest {
   const plan = planPlugins(config.plugins, mountId, params.root, builtinSource, config)
   return {
     ...plan,
@@ -287,6 +324,54 @@ function bootManifest(mountId: string, params: MountParams, config: EffectiveCon
     port,
     url,
     ...(params.configFile === undefined ? {} : { configFile: params.configFile }),
+    ...(status === undefined ? {} : { state: status.state === 'degraded' ? 'degraded' : 'ok' }),
+    ...(status?.lastError === undefined ? {} : { lastError: status.lastError }),
+  }
+}
+
+/**
+ * Attribute failures to the mount they happened in (contract.md §11): a
+ * rejected RPC call marks that mount degraded, and a successful call after it
+ * marks it recovered. Unattributed process errors are the gateway's own (§11).
+ */
+function guardedDispatcher(mountId: string, inner: RpcDispatcher, mounts: Gateway): RpcDispatcher {
+  return {
+    services: () => inner.services(),
+    async call(method, args) {
+      try {
+        const value = await inner.call(method, args)
+        mounts.recover(mountId)
+        return value
+      } catch (failure) {
+        // A rejected call is the plugin's own failure, not a protocol error.
+        const code = (failure as { code?: string }).code
+        if (code !== 'EMETHOD' && code !== 'ESERVICE' && code !== 'EBADREQUEST') mounts.degrade(mountId, failure)
+        throw failure
+      }
+    },
+    async subscribe(method, args, push) {
+      const subscribe = inner.subscribe?.bind(inner)
+      if (subscribe === undefined) return () => {}
+      try {
+        const dispose = await subscribe(method, args, payload => {
+          try {
+            push(payload)
+          } catch (failure) {
+            mounts.degrade(mountId, failure)
+          }
+        })
+        return () => {
+          try {
+            dispose()
+          } catch (failure) {
+            mounts.degrade(mountId, failure)
+          }
+        }
+      } catch (failure) {
+        mounts.degrade(mountId, failure)
+        throw failure
+      }
+    },
   }
 }
 
@@ -324,6 +409,11 @@ function isEffectiveConfig(value: unknown): value is EffectiveConfig {
 
 function coded(code: 'EBADREQUEST' | 'EMETHOD' | 'ENOMOUNT', message: string): Error & { code: string } {
   return Object.assign(new Error(message), { code })
+}
+
+/** Whether the contract's test hooks are enabled for this process (contract.md §11.1). */
+function testHooks(): boolean {
+  return process.env.DIORAMA_TEST_HOOKS === '1'
 }
 
 function isTopic(value: unknown): value is ControlTopic {

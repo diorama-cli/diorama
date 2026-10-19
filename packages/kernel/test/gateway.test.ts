@@ -241,3 +241,67 @@ test('gateway: close unmounts everything', async t => {
   await delay(10)
   assert.deepEqual(gateway.list(), [])
 })
+
+test('gateway: degrade marks a mount, broadcasts once, and keeps it serving', async t => {
+  const a = served()
+  t.after(() => a.dispose())
+  const gateway = new Gateway({ assetsRoot: a.assets, log: () => {}, restartDelayMs: 60_000 })
+  t.after(() => gateway.close())
+  const seen: string[] = []
+  gateway.onStateChange((status, previous) => seen.push(`${previous}->${status.state}`))
+  const { mount } = await gateway.mount({
+    root: a.root,
+    config: defaultConfig(),
+    clientEntries: new Map(),
+    manifest: manifestOf('a'),
+    boot: async () => stubTree([], 'a'),
+  })
+  const degraded = gateway.degrade(mount.status.mountId, Object.assign(new Error('plugin exploded'), { code: 'EIO' }))
+  assert.equal(degraded?.state, 'degraded')
+  assert.equal(degraded?.lastError?.code, 'EIO')
+  assert.equal(degraded?.lastError?.message, 'plugin exploded')
+  // The port still answers (contract.md §11.1: no blocking).
+  assert.equal((await fetch(`http://127.0.0.1:${mount.status.port}/plugin.json`)).status, 200)
+  // A second failure while already degraded does not announce again.
+  gateway.degrade(mount.status.mountId, new Error('again'))
+  assert.deepEqual(seen, ['ok->degraded'])
+  // A healthy request recovers it.
+  const recovered = gateway.recover(mount.status.mountId)
+  assert.equal(recovered?.state, 'ok')
+  assert.equal(recovered?.lastError, undefined)
+  assert.deepEqual(seen, ['ok->degraded', 'degraded->ok'])
+})
+
+test('gateway: a degraded mount auto-restarts once, then stays put', async t => {
+  const a = served()
+  t.after(() => a.dispose())
+  // A short delay keeps the test fast; production is 2s (DEFAULT_RESTART_DELAY_MS).
+  const gateway = new Gateway({ assetsRoot: a.assets, log: () => {}, restartDelayMs: 30 })
+  t.after(() => gateway.close())
+  const boots: string[] = []
+  const input = {
+    root: a.root,
+    config: defaultConfig(),
+    clientEntries: new Map(),
+    manifest: manifestOf('a'),
+    boot: async (mountId: string) => {
+      boots.push(mountId)
+      return stubTree([], mountId)
+    },
+  }
+  const { mount } = await gateway.mount(input)
+  gateway.degrade(mount.status.mountId, new Error('first failure'))
+  // The restart unmounts and mounts again under a new id.
+  await new Promise(resolve => setTimeout(resolve, 150))
+  const live = gateway.list()
+  assert.equal(live.length, 1)
+  assert.notEqual(live[0]?.mountId, mount.status.mountId)
+  assert.equal(live[0]?.state, 'ok')
+  assert.equal(boots.length, 2)
+
+  // A second degradation on the fresh mount is not restarted again.
+  gateway.degrade(live[0]!.mountId, new Error('second failure'))
+  await new Promise(resolve => setTimeout(resolve, 150))
+  assert.equal(boots.length, 2, 'one automatic restart per mount lineage')
+  assert.equal(gateway.list()[0]?.state, 'degraded')
+})

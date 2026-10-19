@@ -9,10 +9,18 @@ import type { ReactNode } from 'react'
 import type { MountHandle } from 'diorama-kernel/client'
 import { describeError, Slot, useKernel, type KernelContextValue } from './slot.tsx'
 
+/** Health of the directory this page serves (contract.md §11.1). */
+export interface MountHealth {
+  state: 'ok' | 'degraded'
+  message?: string
+}
+
 /** Everything the page renderer needs; assembled by the shell. */
 export interface PageKernel extends KernelContextValue {
   /** Plugins the shell could not boot; listed above the page. */
   failures: readonly { id: string; message: string }[]
+  /** The mount's health: a degraded directory shows a banner, not a blank page. */
+  health?: MountHealth
 }
 
 /** Props the `root` entry receives. */
@@ -31,11 +39,22 @@ export function FailurePanel({ title, children }: { title: string; children?: Re
 }
 
 /** Render the page. The shell has installed its page kernel before rendering. */
-export function DioramaRoot({ failures = [] }: { failures?: PageKernel['failures'] }) {
+export function DioramaRoot({
+  failures = [],
+  health = { state: 'ok' },
+}: {
+  failures?: PageKernel['failures']
+  health?: MountHealth
+}) {
   const kernel = useKernel()
   const props = rootProps(kernel.mount)
   return (
     <>
+      {health.state === 'degraded' && (
+        <div className="diorama-banner diorama-banner--degraded" role="alert" data-testid="mount-degraded">
+          此目录已降级：{health.message ?? '部分插件出错，页面仍可浏览已有内容'}
+        </div>
+      )}
       {failures.length > 0 && (
         <div className="diorama-banner" role="status">
           {failures.map(failure => (

@@ -92,6 +92,7 @@ pnpm --filter diorama-web exec playwright test
 | S3b watch 共享 + 上限 | ✅ | `feat(m3-s3b)` |
 | S4 `ls` / `gateway …` / `restart` | ✅ | `feat(m3-s4)` |
 | S6 CLI 迁到 gateway | ✅（并入 S4：默认已走 gateway） | `feat(m3-s4)` |
+| S5 degraded | ✅ | `feat(m3-s5)` |
 
 ### 6.2 踩到的坑（S3，M3 后续步骤请先读）
 
@@ -118,6 +119,19 @@ pnpm --filter diorama-web exec playwright test
    不共享（计划风险清单里“M3 时验证”的那条，已用单测与 e2e `2f` 固定）。上层订阅（树、每个
    tab 的父目录）在服务端合并成一次 `fs.watch` 与一套 debounce，监听者各自收到同一个事件。
    上限 `watch.maxDirectories`（默认 64）超限时返回 no-op disposer 并只 warn 一次，不抛错。
+
+### 6.2b degraded 的触发与验收（S5）
+
+契约 §11.1 只定义了“RPC/订阅/HTTP 抛错、`onMount` 抛错、无法归因的进程错误”三种触发。为了让
+degraded **可验收**，控制面增加了一个**受环境变量保护的测试钩子**：
+
+- `fail { mountId, message? }`：让该 mount 立即进入 degraded（并广播 `mount.state`）。
+- **仅当 `DIORAMA_TEST_HOOKS=1`** 时存在；否则 `EMETHOD`（e2e `6d` 守这条）。
+
+真实的归因路径：`guardedDispatcher` 把 mount 内被拒绝的 RPC 调用与订阅回调错误归到该 mount
+（协议错误 `EMETHOD`/`ESERVICE`/`EBADREQUEST` 除外），成功的调用让该 mount 回到 `ok`；
+`onMountFailure` 把服务插件在 `onMount` 里的抛错归到该 mount；进程级的
+`uncaughtException`/`unhandledRejection` 只标 gateway 级 degraded。
 
 ### 6.3 与契约的对应（当前）
 

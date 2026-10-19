@@ -19,13 +19,20 @@ import {
   type MountHandle,
   type MountManifest,
 } from 'diorama-kernel/client'
-import { DioramaRoot, FailurePanel, type PageKernel } from 'diorama-ui'
+import { DioramaRoot, FailurePanel, type MountHealth, type PageKernel } from 'diorama-ui'
 import 'diorama-ui/styles.css'
 
 type Phase =
   | { kind: 'loading' }
-  | { kind: 'ready'; page: PageKernel }
+  | { kind: 'ready'; page: PageKernel; health: MountHealth }
   | { kind: 'failed'; error: string }
+
+/** The mount's health as `/plugin.json` reports it (contract.md §4.1, §11.1). */
+function healthOf(manifest: { state?: string; lastError?: { message?: string } }): MountHealth {
+  return manifest.state === 'degraded'
+    ? { state: 'degraded', ...(manifest.lastError?.message === undefined ? {} : { message: manifest.lastError.message }) }
+    : { state: 'ok' }
+}
 
 /** One half's registration, as the page loader collected it. */
 interface HalfRegistration {
@@ -64,6 +71,9 @@ interface PageBoot {
   result: BootResult
   page: PageKernel
   failures: { id: string; message: string }[]
+  health: MountHealth
+  /** Late health changes (the gateway broadcasts `mount.state`, contract.md §11.1). */
+  onHealth(listener: (health: MountHealth) => void): () => void
 }
 
 /** Fetch the boot graph, load every half, boot Cordis. */
@@ -141,15 +151,42 @@ async function boot(): Promise<PageBoot> {
   // The kernel has already installed the page handle at this point; the renderer
   // reads it from the bridge, not from this object.
   const page: PageKernel = { views, ctx: result.ctx, mount: result.mount, failures: [] }
-  return { result, page, failures: [...loadFailures, ...result.failures] }
+  const health = healthOf(manifest as unknown as { state?: string; lastError?: { message?: string } })
+  const listeners = new Set<(health: MountHealth) => void>()
+  // The gateway also pushes `mount.state` on a degraded/recovered transition
+  // (contract.md §11.1): the banner appears and disappears without a reload.
+  mountHandle.rpc.on('mount.state', payload => {
+    const status = payload as { state?: string; lastError?: { message?: string } }
+    const next = healthOf(status)
+    for (const listener of [...listeners]) listener(next)
+  })
+  return {
+    result,
+    page,
+    failures: [...loadFailures, ...result.failures],
+    health,
+    onHealth(listener) {
+      listeners.add(listener)
+      return () => {
+        listeners.delete(listener)
+      }
+    },
+  }
 }
 
 function App(): React.ReactElement | null {
   const [phase, setPhase] = React.useState<Phase>({ kind: 'loading' })
   React.useEffect(() => {
     let live = true
+    let stopHealth: (() => void) | undefined
     boot().then(
-      ({ page, failures }) => live && setPhase({ kind: 'ready', page: { ...page, failures } }),
+      ({ page, failures, health, onHealth }) => {
+        if (!live) return
+        setPhase({ kind: 'ready', page: { ...page, failures }, health })
+        stopHealth = onHealth(next => {
+          if (live) setPhase(current => (current.kind === 'ready' ? { ...current, health: next } : current))
+        })
+      },
       (error: unknown) => {
         console.error(error)
         if (live) setPhase({ kind: 'failed', error: describe(error) })
@@ -157,6 +194,7 @@ function App(): React.ReactElement | null {
     )
     return () => {
       live = false
+      stopHealth?.()
     }
   }, [])
   switch (phase.kind) {
@@ -169,7 +207,7 @@ function App(): React.ReactElement | null {
         </FailurePanel>
       )
     case 'ready':
-      return <DioramaRoot failures={phase.page.failures} />
+      return <DioramaRoot failures={phase.page.failures} health={phase.health} />
   }
 }
 

@@ -15,4 +15,4 @@ export {
   type SlotPropsSeat,
   type Store,
 } from './slot.tsx'
-export { DioramaRoot, FailurePanel, rootProps, type PageKernel } from './root.tsx'
+export { DioramaRoot, FailurePanel, rootProps, type MountHealth, type PageKernel } from './root.tsx'

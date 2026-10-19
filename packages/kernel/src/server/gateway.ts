@@ -52,6 +52,8 @@ export interface GatewayMount {
 export interface GatewayOptions {
   /** Assets directory of the built shell. */
   assetsRoot: string
+  /** Delay before the one automatic restart of a degraded mount (contract.md §11.1). */
+  restartDelayMs?: number
   /** Console sink; defaults to `console.error`. */
   log?: (message: string) => void
 }
@@ -66,6 +68,9 @@ export function mountUrl(host: string, port: number): string {
   const shown = displayHost(host)
   return `http://${shown.includes(':') ? `[${shown}]` : shown}:${port}/`
 }
+
+/** The single automatic restart waits this long (contract.md §11.1). */
+export const DEFAULT_RESTART_DELAY_MS = 2_000
 
 /** Ids appear in log prefixes and are never reused (contract.md §2.5). */
 export function newMountId(): string {
@@ -148,9 +153,110 @@ export class Gateway {
   /** Ports already handed out in this process (a just-released port must not be reused silently). */
   private readonly usedPorts = new Set<number>()
   private readonly log: (message: string) => void
+  /** How many times each mount already auto-restarted (contract.md §11.1: once). */
+  private readonly restarts = new Map<string, number>()
+  private readonly degradedListeners = new Set<(status: MountStatus) => void>()
+  /** Input of every live mount, so a degraded mount can be remounted in place. */
+  private readonly inputs = new Map<string, GatewayMountInput>()
+  /** Delay before the single automatic restart (contract.md §11.1). */
+  readonly restartDelayMs: number
 
   constructor(private readonly options: GatewayOptions) {
     this.log = options.log ?? ((message: string) => console.error(message))
+    this.restartDelayMs = options.restartDelayMs ?? DEFAULT_RESTART_DELAY_MS
+  }
+
+  /** Observe degraded / recovered transitions (contract.md §11.1 → events). */
+  onStateChange(listener: (status: MountStatus, previous: MountStatus['state']) => void): () => void {
+    this.degradedListeners.add(listener as (status: MountStatus) => void)
+    return () => {
+      this.degradedListeners.delete(listener as (status: MountStatus) => void)
+    }
+  }
+
+  private announce(previous: MountStatus['state'], status: MountStatus): void {
+    for (const listener of this.degradedListeners) {
+      try {
+        ;(listener as unknown as (status: MountStatus, previous: MountStatus['state']) => void)({ ...status }, previous)
+      } catch (failure) {
+        this.log(`[mount:${status.mountId}] error: a state listener failed: ${(failure as Error)?.message ?? String(failure)}`)
+      }
+    }
+  }
+
+  /**
+   * Enter `degraded` for one mount (contract.md §11.1). The mount keeps
+   * serving; it is auto-restarted **once** (2s), and a second failure keeps it
+   * degraded for `diorama restart <dir>`.
+   */
+  degrade(mountId: string, failure: unknown): MountStatus | undefined {
+    const mount = this.mounts.get(mountId)
+    if (mount === undefined || mount.status.state === 'stopped') return undefined
+    const previous = mount.status.state
+    const code = (failure as { code?: unknown } | null)?.code
+    const message = failure instanceof Error ? failure.message : String(failure)
+    if (previous === 'ok') {
+      mount.status = {
+        ...mount.status,
+        state: 'degraded',
+        since: Date.now(),
+        lastError: { ...(typeof code === 'string' ? { code } : {}), message, at: Date.now() },
+      }
+      this.log(`[mount:${mountId}] degraded: ${message}`)
+      this.announce(previous, mount.status)
+    } else {
+      this.log(`[mount:${mountId}] degraded again: ${message}`)
+    }
+    const restarted = this.restarts.get(mountId) ?? 0
+    if (restarted === 0) {
+      this.restarts.set(mountId, 1)
+      this.scheduleRestart(mountId)
+    }
+    return { ...mount.status }
+  }
+
+  /** Push one event to every page connected to a mount (contract.md §4 broadcast). */
+  broadcast(mountId: string, topic: string, payload: unknown): void {
+    this.mounts.get(mountId)?.server?.channel.broadcast(topic, payload)
+  }
+
+  /** Mark a healthy mount `recovered` (a request succeeded after a degrade). */
+  recover(mountId: string): MountStatus | undefined {
+    const mount = this.mounts.get(mountId)
+    if (mount === undefined || mount.status.state !== 'degraded') return undefined
+    const previous = mount.status.state
+    const { lastError: _dropped, ...rest } = mount.status
+    mount.status = { ...rest, state: 'ok', since: Date.now() }
+    this.log(`[mount:${mountId}] recovered`)
+    this.announce(previous, mount.status)
+    return { ...mount.status }
+  }
+
+  /** Doctor the automatic restart (once per mount id, contract.md §11.1). */
+  private scheduleRestart(mountId: string): void {
+    const timer = setTimeout(() => {
+      void this.restartInPlace(mountId)
+    }, this.restartDelayMs)
+    timer.unref?.()
+  }
+
+  /** Tear the mount down and mount it again under a **new** mount id (a fork is not revived). */
+  private async restartInPlace(mountId: string): Promise<void> {
+    const input = this.inputs.get(mountId)
+    const mount = this.mounts.get(mountId)
+    if (input === undefined || mount === undefined || mount.status.state !== 'degraded') return
+    const root = mount.status.root
+    this.log(`[mount:${mountId}] auto-restarting ${root}`)
+    await this.unmount({ mountId })
+    try {
+      const { mount: fresh } = await this.mount(input)
+      // The automatic restart is the same allowance for the new id; a second
+      // degradation will not restart again (the counter carries over).
+      this.restarts.set(fresh.status.mountId, 1)
+      this.announce('degraded', fresh.status)
+    } catch (failure) {
+      this.log(`[mount:${mountId}] auto-restart failed: ${(failure as Error)?.message ?? String(failure)}`)
+    }
   }
 
   /** Every live mount, in mount order (contract.md §3.5: `mounts.list()`). */
@@ -209,6 +315,7 @@ export class Gateway {
     const mount: GatewayMount = { status }
     // Visible while `starting` so a concurrent `unmount` can find it.
     this.mounts.set(mountId, mount)
+    this.inputs.set(mountId, input)
     try {
       // Bind a bare listener first to learn the port, then build the server
       // that its manifest needs (contract.md §7.3: the URL carries the port).
@@ -258,6 +365,8 @@ export class Gateway {
     if (mount === undefined) return undefined // already gone: idempotent
     this.mounts.delete(mountId)
     this.byRoot.delete(mount.status.root)
+    this.inputs.delete(mountId)
+    this.restarts.delete(mountId)
     mount.status = { ...mount.status, state: 'stopped', since: Date.now() }
     try {
       await mount.server?.close()

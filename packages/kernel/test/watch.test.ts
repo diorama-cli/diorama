@@ -212,6 +212,9 @@ test('watch: two mounts never share a watcher (plan.md risk: multi-directory wat
   const b = new FsService(second, { debounceMs: 50 })
   t.after(() => a.close())
   t.after(() => b.close())
+  // Let the fixture's own writes settle: macOS may report them late, after the
+  // watchers below exist, which would look like cross-mount leakage.
+  await new Promise(resolve => setTimeout(resolve, 150))
   const seenA: FsWatchEvent[] = []
   const seenB: FsWatchEvent[] = []
   a.watch('', event => seenA.push(event))
