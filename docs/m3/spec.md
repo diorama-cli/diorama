@@ -81,4 +81,43 @@ pnpm --filter diorama-web exec playwright test
 
 ## 6. 实现记录
 
-（每步完成后追加：验收结果、踩到的坑、与契约的对应。）
+### 6.1 进度
+
+| 步 | 状态 | 提交 |
+|---|---|---|
+| S0 契约 v0.4 | ✅ | `docs(m3-s0)` |
+| S1 控制面库 | ✅ | `feat(m3-s1)` |
+| S2 gateway 骨架 | ✅ | `feat(m3-s2)` |
+| S3 `ctx.fork()` 生命周期 | ✅ | `feat(m3-s3)` |
+
+### 6.2 踩到的坑（S3，M3 后续步骤请先读）
+
+1. **`isolate(name)` 不能共享标签。** Cordis 的 `isolate(name, label)` 按 **label** 在
+   shadow 表里登记一个符号；不传 label 时默认 `Symbol(name)`，于是**所有 mount 拿到同一个
+   isolate key**，第一个 `provide` 占住槽位，卸载任一 mount 时会把**所有 mount 的同名服务**
+   一起注销。每个 mount 必须 `isolate('fs', Symbol(mountId))`。
+2. **`provide` 属于 fiber 生命周期，不只属于 ctx。** `ctx.provide()` 是 fiber effect：
+   只有把 `provide` 放在该 mount **自己的 plugin fiber**（`ctx.plugin({...})`）里，
+   `fiber.dispose()` 才只回滚这个 mount。在共享 fiber 上 `provide`，卸载一个 mount 会把
+   兄弟 mount 的服务一起清掉（S3 的 e2e `2e` 就是这样抓到的）。
+3. **`ctx.plugin()` 的返回值是 Fiber，不是 ctx。** 清理要 `fiber.dispose()`；读它提供的
+   服务要先 `await fiber.await?.()`（effect 在 fiber 激活后才跑）。
+4. **`mountId` 是记录，不是服务。** 用 `provide('mountId', …)` 会在第二次挂载同一个
+   isolate 时报 `service "mountId" has been registered`；用 `Object.defineProperty` 设成普通
+   属性，插件以属性读取即可（也不该有人 `inject` 它）。
+5. **`dispatcher.services` 别和服务表闭包重名。** `withSubscriptions(createDispatcher(f), f)`
+   里第二个参数同名时，`{...dispatcher}` 展开会把 `services` 方法覆盖成服务表，症状是
+   RPC 报 `ESERVICE: no service "fs" on this mount`。
+6. **CLI 的 tsdown 入口是 `src/main.ts`**，不是 `src/run.ts`——改错入口时子命令不会进包。
+7. **`DIORAMA_HOME` 不再兼作 web 资源目录**（契约 §4.1 v0.4）：资源来自包的 `web/` 或
+   `apps/web/dist`，否则 gateway 起出来的页面 404。
+
+### 6.3 与契约的对应（当前）
+
+| 契约 | 实现位置 |
+|---|---|
+| §7.1–§7.3 控制面帧与方法 | `kernel/src/shared/control.ts`、`kernel/src/server/control.ts`、`cli/src/gateway.ts` |
+| §3.5 `MountInfo`（`port`/`url`/`configFile`）、`mounts.list()` | `kernel/src/server/plugins.ts` |
+| §2.5 一个 mount = 一个 fork 子 ctx；卸载四步顺序 | `kernel/src/server/plugins.ts`（`createPluginHost` / `forkMount`）、`kernel/src/server/gateway.ts`（listener/RPC 先关） |
+| §7.3 幂等 mount / 端口规则 / `ENOTDIR` | `kernel/src/server/gateway.ts` |
+| §7.4 socket、pid 文件、陈旧 socket 接管 | `cli/src/gateway.ts`、`cli/src/gateway-command.ts` |

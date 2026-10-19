@@ -137,3 +137,53 @@ test('2d. a page on one port never sees the other directory’s writes', async (
     second.dispose()
   }
 })
+
+test('2e. unmounting one directory leaves the other serving (fork contexts are independent)', async ({ browser }) => {
+  const first = fixture({ 'a.md': '# A\n' })
+  const second = fixture({ 'b.md': '# B\n' })
+  const pageB = await browser.newPage()
+  try {
+    const a = await gateway!.mount(first.root)
+    const b = await gateway!.mount(second.root)
+    await pageB.goto(b.url)
+    await waitForPage(pageB)
+    await pageB.getByTestId('file-tree').locator('[data-path="b.md"]').click()
+    await expect(pageB.getByTestId('markdown')).toContainText('B', { timeout: 10_000 })
+
+    // Unmount A: its port stops answering, B keeps working without a reload.
+    await gateway!.request('unmount', { mountId: a.mountId })
+    await expect.poll(async () => {
+      try {
+        return (await fetch(`http://127.0.0.1:${a.port}/plugin.json`)).status
+      } catch {
+        return 'closed'
+      }
+    }, { timeout: 5_000 }).toBe('closed')
+    const stillThere = await pageB.evaluate(async () => {
+      const fs = (globalThis as unknown as { __diorama_page__: { getKernel(): { mount: { fs: { readText(p: string): Promise<string> } } } } }).__diorama_page__.getKernel().mount.fs
+      return fs.readText('b.md')
+    })
+    expect(stillThere).toContain('B')
+    expect(pageB.isClosed()).toBe(false)
+
+    // The plugin graph of the gateway survived: mounting A again boots a new
+    // fork without restarting the process (same pid in `ping`).
+    const before = (await gateway!.request('ping')) as { pid: number }
+    const again = await gateway!.mount(first.root)
+    expect(again.created).toBe(true)
+    expect(again.mountId).not.toBe(a.mountId)
+    expect(((await gateway!.request('ping')) as { pid: number }).pid).toBe(before.pid)
+    const pageA = await browser.newPage()
+    try {
+      await pageA.goto(again.url)
+      await waitForPage(pageA)
+      await expect(pageA.getByTestId('file-tree')).toContainText('a.md')
+    } finally {
+      await pageA.close()
+    }
+  } finally {
+    await pageB.close()
+    first.dispose()
+    second.dispose()
+  }
+})

@@ -10,7 +10,6 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import {
-  bootPlugins,
   builtinSource,
   CONTROL_PROTOCOL,
   CONTRACT_VERSION,
@@ -18,6 +17,8 @@ import {
   connectControl,
   createControlServer,
   createDispatcher,
+  createPluginHost,
+  forkMount,
   Gateway,
   planPlugins,
   type BootManifest,
@@ -28,6 +29,7 @@ import {
   type GatewayStatus,
   type MountStatus,
   type MountTree,
+  type PluginHost,
   type RpcDispatcher,
 } from 'diorama-kernel/server'
 import { assetsRoot, selectPlugins, withSubscriptions } from './run.ts'
@@ -88,6 +90,31 @@ export async function serveGateway(options: GatewayServeOptions): Promise<Stoppa
 
   const status = (): GatewayStatus => ({ ...info, state: gatewayState, mounts: mounts.list() })
 
+  /**
+   * The plugin graph of this *process* (contract.md §2.5): loaded once, then
+   * each mount forks a child context from it. Which plugins load is decided by
+   * the first mount's selection, because a process has one plugin graph — the
+   * selection is a build-level choice, not a per-directory one.
+   */
+  let host: PluginHost | undefined
+  let hostFailure: string | undefined
+  let loading: Promise<PluginHost> | undefined
+  const pluginHost = (ids: readonly string[], breakPlugin?: string): Promise<PluginHost> => {
+    if (loading !== undefined) return loading
+    loading = (async () => {
+      const created = await createPluginHost(log)
+      const halves = await selectPlugins([...new Set(['fs', ...ids])], breakPlugin)
+      const failures = await created.load(halves)
+      if (failures.length > 0) {
+        hostFailure = failures.map(failure => `${failure.id}: ${failure.message}`).join('; ')
+        log(`[diorama] gateway: ${failures.length} plugin(s) failed to load: ${hostFailure}`)
+      }
+      host = created
+      return created
+    })()
+    return loading
+  }
+
   for (const signal of ['uncaughtException', 'unhandledRejection'] as const) {
     process.on(signal, (error: unknown) => {
       // Contract §11: an unattributed error does not kill the gateway; it marks
@@ -103,6 +130,7 @@ export async function serveGateway(options: GatewayServeOptions): Promise<Stoppa
     closing = true
     await control.close().catch(() => {})
     await mounts.close()
+    await host?.dispose().catch(() => {})
     rmSync(options.socket, { force: true })
     if (options.pidFile !== undefined) rmSync(options.pidFile, { force: true })
     log('[diorama] gateway stopped')
@@ -119,9 +147,9 @@ export async function serveGateway(options: GatewayServeOptions): Promise<Stoppa
         case 'list':
           return { mounts: mounts.list() }
         case 'mount': {
-          const { mount, created } = await mountOne({ mounts, trees, assets, params, log })
+          const { mount, created } = await mountOne({ mounts, trees, assets, params, log, pluginHost })
           control.emit('mounted', mount.status)
-          return { ...mount.status, created }
+          return { ...mount.status, created, ...(hostFailure === undefined ? {} : { pluginFailures: hostFailure }) }
         }
         case 'unmount': {
           const mountId = typeof params.mountId === 'string' ? params.mountId : undefined
@@ -183,9 +211,10 @@ interface MountContext {
   assets: string
   params: Record<string, unknown>
   log: (message: string) => void
+  pluginHost(ids: readonly string[], breakPlugin?: string): Promise<PluginHost>
 }
 
-/** Mount one directory: validate, plan, boot its tree, bind its port. */
+/** Mount one directory: validate, plan, fork its child context, bind its port. */
 async function mountOne(context: MountContext): Promise<{ mount: { status: MountStatus }; created: boolean }> {
   const params = parseMountParams(context.params)
   const config = params.config
@@ -193,8 +222,6 @@ async function mountOne(context: MountContext): Promise<{ mount: { status: Mount
   // client entries are the same for every mount (one build, one plugin set).
   const plan = planPlugins(config.plugins, 'plan', params.root, builtinSource, config)
   const clientEntries = new Map(plan.plugins.map(plugin => [plugin.id, plugin.clientEntry]))
-  const serverIds = [...new Set(['fs', ...config.plugins])]
-  const halves = await selectPlugins(serverIds, params.breakPlugin)
   void context.assets
 
   return context.mounts.mount({
@@ -202,21 +229,23 @@ async function mountOne(context: MountContext): Promise<{ mount: { status: Mount
     config,
     ...(params.configFile === undefined ? {} : { configFile: params.configFile }),
     clientEntries,
-    manifest: (mountId, port, url): BootManifest =>
-      bootManifest(mountId, params, config, port, url),
+    manifest: (mountId, port, url): BootManifest => bootManifest(mountId, params, config, port, url),
     async boot(mountId, port, url) {
-      void port
-      void url
-      const tree = await bootPlugins({
-        plugins: halves,
+      const host = await context.pluginHost(config.plugins, params.breakPlugin)
+      // contract.md §2.5: one fork per mount; `fs` (and `mountId`) live there,
+      // the plugin graph itself is shared with every other mount.
+      const tree = await forkMount(host, {
         root: params.root,
         mountId,
         config,
+        port,
+        url,
+        ...(params.configFile === undefined ? {} : { configFile: params.configFile }),
         log: message => context.log(`[mount:${mountId}] ${message}`),
       })
       const mountTree: MountTree = {
-        dispatcher: dispatcherFor(mountId, tree.mount as unknown as MountServices),
-        dispose: () => tree.stop(),
+        dispatcher: dispatcherFor(tree.ctx as unknown as MountServices),
+        dispose: () => tree.dispose(),
       }
       context.trees.set(mountId, mountTree)
       return mountTree
@@ -230,8 +259,8 @@ interface MountServices {
 }
 
 /** RPC dispatcher of one mount (contract.md §4): only `describe()`d services are proxied. */
-function dispatcherFor(mountId: string, mount: MountServices): RpcDispatcher {
-  const services = (): Record<string, unknown> => {
+function dispatcherFor(mount: MountServices): RpcDispatcher {
+  const table = (): Record<string, unknown> => {
     const out: Record<string, unknown> = {}
     for (const name of PROXYABLE) {
       let service: unknown
@@ -244,8 +273,9 @@ function dispatcherFor(mountId: string, mount: MountServices): RpcDispatcher {
     }
     return out
   }
-  void mountId
-  return withSubscriptions(createDispatcher(services), services)
+  // `table` is the service lookup; the dispatcher's own `services()` method
+  // (which lists names) must survive the spread inside `withSubscriptions`.
+  return withSubscriptions(createDispatcher(table), table)
 }
 
 /** The boot graph of one mount (contract.md §4.1): its URL and configuration source. */

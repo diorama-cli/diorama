@@ -90,6 +90,9 @@ export type { ControlError } from '../shared/errors.ts'
 export {
   bootPlugins,
   createMounts,
+  createPluginHost,
+  forkMount,
+  onMountFailure,
   describePlugin,
   loadPlugins,
   pluginProblem,
@@ -97,6 +100,8 @@ export {
   type LoadPluginsResult,
   type MountInfo,
   type Mounts,
+  type MountTree as MountFork,
   type PluginFailure,
+  type PluginHost,
   type ServerTree,
 } from './plugins.ts'
