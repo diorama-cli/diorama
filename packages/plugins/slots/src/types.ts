@@ -49,6 +49,8 @@ export interface SlotMap {
   'tabs.content': { tab: TabInfo }
   /** Dispatch seat for file content, declared by `renderer-registry`. */
   'file.renderer': FileRendererProps
+  /** Overlay above the frame, declared by `layout` (palette, command panels). */
+  'layout.overlay': Record<string, never>
 }
 
 export type SlotName = keyof SlotMap

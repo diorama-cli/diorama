@@ -18,6 +18,7 @@ import type { Context } from 'cordis'
 import { useEffect, useEffectEvent, useMemo, useState, useSyncExternalStore, type ComponentType } from 'react'
 import { mimeOf } from 'diorama-kernel'
 import type { FileInfo, FileRendererProps, MountHandle, TabInfo } from 'diorama-kernel'
+import type { CommandsService, TabsService } from 'diorama-kernel/client'
 import type {} from 'diorama-plugin-slots'
 import type { RendererCandidate, RendererChoice, SlotEntry } from 'diorama-plugin-slots'
 import { chooseRenderer, PROBE_HEAD_BYTES, probeHead } from 'diorama-plugin-slots'
@@ -30,7 +31,7 @@ export const name = 'renderer-registry'
 // `tabs.content` itself), and its seat declaration must exist before this
 // piece's dispatch entry registers — otherwise both sit in the registry's
 // pending queue and are retried out of order (docs/m0/spec.md §11.3 rule 3).
-export const inject = ['slots', 'tabs']
+export const inject = ['slots', 'tabs', 'commands']
 
 /** The seat this piece owns and renders (contract.md §5). */
 const DECLARE = {
@@ -61,6 +62,45 @@ interface TabState {
 }
 
 const CACHE = new WeakMap<MountHandle, FileCache>()
+
+/** Every live cache (multi-mount is M3; a page has one today). */
+const CACHES = new Set<FileCache>()
+
+/**
+ * Page-wide content settings that commands and the watcher share: "re-read
+ * now" and "auto-refresh on/off" (contract.md §3.7 — the O8 switches that a
+ * toolbar would otherwise hold). Pure state plus a subscription, no React.
+ */
+class ContentSettings {
+  private readonly listeners = new Set<() => void>()
+  private autoRefresh = true
+
+  /** Whether file changes re-read content (S6's watcher honours this). */
+  get autoRefreshing(): boolean {
+    return this.autoRefresh
+  }
+
+  refreshAll(): void {
+    for (const cache of CACHES) cache.refresh()
+  }
+
+  toggleAutoRefresh(): void {
+    this.autoRefresh = !this.autoRefresh
+    if (this.autoRefresh) this.refreshAll()
+    for (const listener of [...this.listeners]) listener()
+  }
+
+  subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener)
+    return () => {
+      this.listeners.delete(listener)
+    }
+  }
+
+  getSnapshot = (): boolean => this.autoRefresh
+}
+
+const contentSettings = new ContentSettings()
 
 const LOADING: Loaded = { status: 'loading' }
 
@@ -227,6 +267,7 @@ function cacheFor(mount: MountHandle): FileCache {
   if (cache === undefined) {
     cache = new FileCache()
     CACHE.set(mount, cache)
+    CACHES.add(cache)
   }
   return cache
 }
@@ -403,7 +444,7 @@ export function apply(ctx: Context) {
   // `tabs.content` is keyed by tab id (contract.md §5): one dispatch entry per
   // open tab, registered as the tab list changes. The registry then owns the
   // per-seat dispatch; this piece only decides what each entry renders.
-  const tabs = (ctx as unknown as { tabs?: { getSnapshot(): { tabs: readonly TabInfo[] }; subscribe(listener: () => void): () => void } }).tabs
+  const tabs = (ctx as unknown as { tabs?: TabsService }).tabs
   if (tabs === undefined) {
     throw new Error('renderer-registry requires the "tabs" service (declare it in `inject`)')
   }
@@ -434,4 +475,29 @@ export function apply(ctx: Context) {
     },
     'renderer-registry: release seats',
   )
+
+  // Commands for the content (contract.md §3.7): it owns the file cache, so it
+  // owns "re-read this file" — the O8 switch that a toolbar would otherwise hold.
+  // Commands are a kernel service (contract.md §3.7) listed in this piece's
+  // `inject`, so the fiber waits for it before `apply` runs.
+  const commands = (ctx as unknown as { commands: CommandsService }).commands
+  commands.contribute({
+    activeTab: () => {
+      const active = tabs.active
+      return active === undefined ? undefined : { id: active.id, path: active.path }
+    },
+  })
+  commands.register({
+    id: 'view.refresh',
+    title: '重新读取当前文件',
+    when: context => context.activeTab !== undefined,
+    run: () => contentSettings.refreshAll(),
+  })
+  commands.bind({ keys: 'mod+alt+r', command: 'view.refresh' })
+  commands.register({
+    id: 'view.toggleAutoRefresh',
+    title: '自动刷新：开 / 关',
+    when: context => context.activeTab !== undefined,
+    run: () => contentSettings.toggleAutoRefresh(),
+  })
 }

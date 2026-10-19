@@ -18,11 +18,11 @@
 import type { Context } from 'cordis'
 import { useCallback, useEffect, useState } from 'react'
 import type { FileInfo, MountHandle } from 'diorama-kernel/client'
-import { createTreeService } from 'diorama-kernel/client'
+import { createTreeService, type CommandsService } from 'diorama-kernel/client'
 import { bindMethods, provideEntry, useKernel, useStore } from 'diorama-ui'
 
 export const name = 'file-tree'
-export const inject = ['slots']
+export const inject = ['slots', 'commands']
 
 /** Entries a collapsed-until-asked directory shows at first (M2). */
 export const PAGE_SIZE = 500
@@ -148,4 +148,20 @@ export function apply(ctx: Context) {
   // Bind: this half runs its own build of the service class (see `tabs`).
   ctx.provide('tree', bindMethods(createTreeService()))
   provideEntry(ctx, { id: 'file-tree:nav', name: 'sidebar.tree', order: 100 }, FileTreeRoot)
+
+  // `tree.focus` (contract.md §3.7): the tree owns the command that moves
+  // focus into it, and the tree is where focus lands.
+  // Commands are a kernel service (contract.md §3.7) listed in this piece's
+  // `inject`, so the fiber waits for it before `apply` runs.
+  const commands = (ctx as unknown as { commands: CommandsService }).commands
+  commands.register({
+    id: 'tree.focus',
+    title: '聚焦文件树',
+    when: context => context.focus !== 'tree',
+    run: () => {
+      const first = document.querySelector<HTMLElement>('[data-testid="file-tree"] [data-path]')
+      first?.focus()
+    },
+  })
+  commands.bind({ keys: 'mod+alt+f', command: 'tree.focus' })
 }

@@ -35,6 +35,9 @@ function SeatError({ label, message, testId }: { label: string; message: string;
 const DECLARE = {
   'sidebar.tree': { kind: 'single' },
   'layout.main': { kind: 'single' },
+  // The overlay seat (contract.md §5): the palette and other command surfaces
+  // draw here, above the frame and outside it.
+  'layout.overlay': { kind: 'single' },
 } as const
 
 function MainColumn() {
@@ -93,8 +96,28 @@ function useSlots(): { tree: boolean; main: boolean } {
   return { tree, main }
 }
 
+/** Whatever occupies `layout.overlay` (a palette, …); absent = nothing. */
+function Overlay() {
+  return (
+    <Slot
+      name="layout.overlay"
+      empty={null}
+      exhausted={() => null}
+      render={entry => {
+        const OverlayEntry = entry.component as unknown as (props: object) => ReactElement | null
+        return <OverlayEntry />
+      }}
+    />
+  )
+}
+
 function LayoutRoot(_props: LayoutRootProps) {
-  return <SplitFrame />
+  return (
+    <>
+      <SplitFrame />
+      <Overlay />
+    </>
+  )
 }
 
 export function apply(ctx: Context) {

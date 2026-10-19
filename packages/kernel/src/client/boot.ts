@@ -17,6 +17,7 @@
  * are typed locally through `KernelContext`.
  */
 import { Context } from 'cordis'
+import { collectCommandContext, createCommandsService, type CommandContext, type CommandContextSources } from './commands.ts'
 import { createMountHandle, type MountHandle, type MountManifest } from './mount.ts'
 import {
   ensurePageBridge,
@@ -51,6 +52,12 @@ export interface KernelServices {
 
 /** A Cordis context with exactly the kernel's own services. */
 export type KernelContext = Context & KernelServices
+
+/** Where the page's `CommandContext` comes from (the kernel collects it). */
+export interface CommandContextHook {
+  /** Installed once the page boots; pieces may add sources (they are read lazily). */
+  sources: CommandContextSources
+}
 /** How a plugin module looks to the loader. */
 type PluginModule = object
 
@@ -81,6 +88,11 @@ export interface BootOptions {
   resolve(id: string): Record<string, unknown> | Promise<Record<string, unknown>>
   /** Console sink for skipped plugins. Defaults to `console.warn`. */
   log?: (message: string) => void
+  /**
+   * Track keyboard focus for `CommandContext.focus` (defaults to the document,
+   * which is where the single key listener is installed). Tests omit it.
+   */
+  attachKeyboard?: boolean
   /**
    * Called once the `slots` piece has activated and before any other piece:
    * the place to publish the page kernel, so pieces that render during
@@ -120,6 +132,15 @@ export async function bootClient(options: BootOptions): Promise<BootResult> {
     },
   }
   ctx.provide('kernel', kernelApi)
+  // `ctx.commands` is kernel infrastructure (contract.md §3.7): one registry,
+  // bound to the page, present even when no palette piece is in the graph.
+  const focus = createFocusTracker()
+  const commands = createCommandsService({
+    context: () => collectCommandContext({ ...focus.sources, mountId: handle.mountId }),
+    warn: message => log(`[diorama] ${message}`),
+  })
+  ctx.provide('commands', commands)
+  const disposeKeyboard = options.attachKeyboard === false ? () => {} : installKeyboard(commands, focus)
 
   const failures = await loadManifest(ctx, options, log, handle ?? createMountHandle(options.manifest))
   // The context a component sees. Every read resolves through core's `get`, so a
@@ -138,7 +159,10 @@ export async function bootClient(options: BootOptions): Promise<BootResult> {
     ctx: pageContext as unknown as Context,
     mount: handle,
     failures,
-    dispose: () => ctx.fiber.dispose(),
+    dispose: async () => {
+      disposeKeyboard()
+      await ctx.fiber.dispose()
+    },
   }
 }
 
@@ -153,7 +177,7 @@ interface CordisSurface {
 }
 
 /** Services a piece provides after the tree root exists. */
-const LATE_SERVICES = ['views', 'slots', 'slotRegistry', 'tabs', 'tree', 'fs', 'kernel'] as const
+const LATE_SERVICES = ['views', 'slots', 'slotRegistry', 'tabs', 'tree', 'fs', 'kernel', 'commands'] as const
 
 /** A context whose reads always go through core's `get` (see `bootClient`). */
 function createPageContext(ctx: KernelContext & CordisSurface): KernelContext & CordisSurface {
@@ -226,8 +250,66 @@ async function loadManifest(
 }
 
 /**
+ * Focus tracking for `CommandContext`: the page records which surface the
+ * user last interacted with. Pieces never query the DOM for this.
+ */
+function createFocusTracker(): { sources: Omit<CommandContextSources, 'mountId'>; note(event: Event): void } {
+  let current: CommandContext['focus'] = 'other'
+  const note = (event: Event): void => {
+    const target = event.target as Element | null
+    if (target === null || typeof target.closest !== 'function') return
+    const active = document.activeElement
+    current = focusOf(target) ?? (active instanceof Element ? focusOf(active) : undefined) ?? 'other'
+  }
+  return {
+    sources: { focus: () => current },
+    note,
+  }
+}
+
+/** Which surface an element belongs to, by the slots that carry them. */
+function focusOf(element: Element): CommandContext['focus'] | undefined {
+  if (element.closest('[data-slot="sidebar.tree"]') !== null) return 'tree'
+  if (element.closest('[data-slot="layout.main"]') !== null) return 'tabs'
+  if (element.closest('[contenteditable="true"], textarea, input, .diorama-palette') !== null) return 'editor'
+  return undefined
+}
+
+/** Whether a key press belongs to a text field (it never triggers a command). */
+function inTextEntry(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false
+  return target.closest('input, textarea, select, [contenteditable="true"], [contenteditable=""]') !== null
+}
+
+/**
+ * The page's only `keydown` listener (contract.md §3.7): one dispatcher, so
+ * two pieces cannot fight over a key. Returns its disposer.
+ */
+function installKeyboard(commands: { handleKey(event: KeyboardEvent & { repeat?: boolean }): boolean }, focus: { note(event: Event): void }): () => void {
+  if (typeof document === 'undefined') return () => {}
+  const onKeyDown = (event: KeyboardEvent): void => {
+    if (event.defaultPrevented) return
+    if (inTextEntry(event.target)) return
+    if (commands.handleKey(event)) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+  }
+  const onPointerDown = (event: Event): void => focus.note(event)
+  const onFocusIn = (event: Event): void => focus.note(event)
+  document.addEventListener('keydown', onKeyDown, true)
+  document.addEventListener('pointerdown', onPointerDown, true)
+  document.addEventListener('focusin', onFocusIn, true)
+  return () => {
+    document.removeEventListener('keydown', onKeyDown, true)
+    document.removeEventListener('pointerdown', onPointerDown, true)
+    document.removeEventListener('focusin', onFocusIn, true)
+  }
+}
+
+/**
  * Let the microtask queue run until it is empty (see the note at the call
- * site). Effects that only chain promises settle here.
+ * site). Effects that only promise chain settle here.
  */
 async function settle(limit = 1000): Promise<void> {
   let rounds = 0

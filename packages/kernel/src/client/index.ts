@@ -17,6 +17,25 @@ export { createTabsService, TabsService, type TabsSnapshot } from './tabs.ts'
 export { createTreeService, TreeService, type TreeSnapshot } from './tree.ts'
 export { bootClient, provideRecord } from './boot.ts'
 export {
+  collectCommandContext,
+  CommandConflictError,
+  CommandsService,
+  createCommandsService,
+  exclusive,
+  isApplePlatform,
+  matchesKeys,
+  parseKeys,
+  type CommandContext,
+  type CommandContextSources,
+  type CommandSpec,
+  type CommandsOptions,
+  type CommandsSnapshot,
+  type CommandWhen,
+  type KeybindingSpec,
+  type KeyEventLike,
+  type ParsedKeys,
+} from './commands.ts'
+export {
   ensurePageBridge,
   getKernel,
   installKernel,

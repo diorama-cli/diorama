@@ -12,13 +12,12 @@
  */
 import type { Context } from 'cordis'
 import type { ReactElement } from 'react'
-import type { TabInfo } from 'diorama-kernel/client'
 import type {} from 'diorama-plugin-slots'
 import { bindMethods, provideEntry, Slot, useKernel, useStore } from 'diorama-ui'
-import { createTabsService } from 'diorama-kernel/client'
+import { createTabsService, type CommandsService, type TabInfo } from 'diorama-kernel/client'
 
 export const name = 'tabs'
-export const inject = ['slots']
+export const inject = ['slots', 'commands']
 
 /** The content seats, one per tab, keyed by tab id (contract.md §5). */
 const DECLARE = {
@@ -146,6 +145,46 @@ export function apply(ctx: Context) {
   // The kernel owns the service classes (`tabs` / `tree`) so every build agrees.
   // Bind: this half runs its own build of the service class, and a consumer in
   // another build may call the methods detached (docs/m0/spec.md §11.3 rule 3).
-  ctx.provide('tabs', bindMethods(createTabsService()))
+  const tabs = bindMethods(createTabsService())
+  ctx.provide('tabs', tabs)
   provideEntry(ctx, { id: 'tabs:content', name: 'layout.main', order: 100, declare: DECLARE }, TabsView)
+
+  // Commands own the tab keyboard (contract.md §3.7): the palette lists the
+  // same registry, so they are registered here, not at the key listener.
+  // Commands are a kernel service (contract.md §3.7) listed in this piece's
+  // `inject`, so the fiber waits for it before `apply` runs.
+  const commands = (ctx as unknown as { commands: CommandsService }).commands
+  commands.contribute({ activeTab: () => (tabs.active === undefined ? undefined : toContextTab(tabs.active)) })
+  const many = (): boolean => tabs.count > 1
+  const step = (delta: 1 | -1, wrap: boolean): void => {
+    if (!wrap) {
+      const list = tabs.getSnapshot().tabs
+      const index = list.findIndex(tab => tab.id === tabs.getSnapshot().activeId)
+      const target = list[index + delta]
+      if (target !== undefined) tabs.activate(target.id)
+      return
+    }
+    if (delta === 1) tabs.next()
+    else tabs.prev()
+  }
+  commands.register({
+    id: 'tabs.close',
+    title: '关闭当前标签页',
+    when: () => tabs.count > 0,
+    run: () => tabs.close(),
+  })
+  commands.register({ id: 'tabs.next', title: '下一个标签页', when: many, run: () => step(1, true) })
+  commands.register({ id: 'tabs.prev', title: '上一个标签页', when: many, run: () => step(-1, true) })
+  commands.register({ id: 'tabs.nextEdge', title: '下一个标签页（到末尾停）', when: many, run: () => step(1, false) })
+  commands.register({ id: 'tabs.prevEdge', title: '上一个标签页（到开头停）', when: many, run: () => step(-1, false) })
+  commands.bind({ keys: 'mod+alt+w', command: 'tabs.close' })
+  commands.bind({ keys: 'mod+alt+arrowright', command: 'tabs.next' })
+  commands.bind({ keys: 'mod+alt+arrowleft', command: 'tabs.prev' })
+  commands.bind({ keys: 'ctrl+tab', command: 'tabs.nextEdge' })
+  commands.bind({ keys: 'ctrl+shift+tab', command: 'tabs.prevEdge' })
+}
+
+/** `CommandContext.activeTab` carries the path, the id, and nothing else. */
+function toContextTab(tab: TabInfo): { id: string; path: string } {
+  return { id: tab.id, path: tab.path }
 }
