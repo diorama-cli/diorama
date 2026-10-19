@@ -7,7 +7,7 @@
 
 | 顺序 | 文档 | 读它为了 |
 |---|---|---|
-| 1 | [docs/contract.md](docs/contract.md) | **能不能**：内核与插件的唯一约定，带版本号（当前 **v0.4**）。改任何 `ctx.*` / slot 签名都算改契约 |
+| 1 | [docs/contract.md](docs/contract.md) | **能不能**：内核与插件的唯一约定，带版本号（当前 **v0.5**）。改任何 `ctx.*` / slot 签名都算改契约 |
 | 2 | [docs/architecture.md](docs/architecture.md) | **为什么**：已拍板的决定、放弃项、代价。不要重新讨论已拍板的事 |
 | 3 | [docs/features.md](docs/features.md) | **有什么**：能力清单与档位（✅ / v1 / 未来 / 不做） |
 | 4 | 最近一档的 `docs/mN/spec.md` | **怎么实现的** + **§6.2 的坑**（见下面 §5） |
@@ -55,6 +55,8 @@ docs/                     契约、架构、能力、排期、逐档 spec
 | RPC 帧、订阅端点、session | `kernel/src/shared/rpc.ts`、`server/rpc.ts`、`client/rpc.ts` |
 | `ctx.commands`、键记法、按键分发 | `kernel/src/client/commands.ts`、`client/boot.ts` |
 | `ctx.tabs` / `ctx.tree` | `kernel/src/client/tabs.ts`、`client/tree.ts` |
+| `ctx.git`（仓库探测、status/diff/log、上限） | `kernel/src/server/git.ts`、`kernel/src/shared/types.ts` |
+| `ctx.router`（`/~/` URL 与活动 tab） | `kernel/src/client/router.ts`、`kernel/src/server/http.ts`（`/~/` 回壳） |
 | 插件图、boot 顺序、`settle`、mount fork / `onMount` | `kernel/src/server/plugins.ts`、`client/boot.ts`、`server/plan.ts` |
 | gateway 的 mount 表、端口、degraded 状态机 | `kernel/src/server/gateway.ts` |
 | 控制面协议（帧、方法、错误码） | `kernel/src/shared/control.ts`、`kernel/src/server/control.ts` |
@@ -64,12 +66,12 @@ docs/                     契约、架构、能力、排期、逐档 spec
 
 ### 加一个内置插件：6 处要一起改
 
-1. `packages/plugins/<id>/` 新包：`package.json`（`diorama.id` / `contract: ">=0.4 <0.5"` / `client.entry` / `requires`）、`vite.config.ts`、`tsconfig.json`、`tsconfig.emit.json`（从任意现有插件复制）。
+1. `packages/plugins/<id>/` 新包：`package.json`（`diorama.id` / `contract: ">=0.5 <0.6"` / `client.entry` / `requires`）、`vite.config.ts`、`tsconfig.json`、`tsconfig.emit.json`（从任意现有插件复制）。
 2. `packages/kernel/src/server/plan.ts` 的 `BUILTIN_PLUGIN_IDS`（顺序 = boot 顺序）。
 3. `packages/cli/src/plugins-server.ts` 的 `halves` 映射（server 半边）。
 4. `packages/cli/package.json` 的 `dependencies` 加 `workspace:*`。
 5. 根 `package.json` 的 `build` 脚本加一条 `pnpm --filter diorama-plugin-<id> run build`（放在依赖它的包之前）。
-6. 需要新座位时：`packages/plugins/slots/src/types.ts` 的 `SlotMap`。
+6. 需要新座位时：`packages/plugins/slots/src/types.ts` 的 `SlotMap`；左侧栏的新视图注册进 `sidebar.views`（key = 视图 id），不要新开侧栏座位。
 
 `pnpm-workspace.yaml` 已覆盖 `packages/plugins/*`，无需改。
 
@@ -91,6 +93,8 @@ docs/                     契约、架构、能力、排期、逐档 spec
 | `service "mountId" has been registered` | `mountId` 被 `provide` 成服务 | 它是普通属性（`Object.defineProperty`），不要 inject |
 | 随机端口挂载 404 / `/plugin.json` 没有 port | manifest 在 bind 前建好 | 先探端口 → boot fork → 建 server（带最终 URL）→ listen |
 | 改子命令没有生效 | tsdown 入口仍是 `src/run.ts` | `packages/cli/tsdown.config.ts` 入口是 `src/main.ts` |
+| 左栏视图「注册了但不显示」 | `layout` 只画它知道的座位 | 视图用 `sidebar.views`（keyed，key = 视图 id）；非活动视图隐藏不卸载 |
+| URL 深链不生效 / 刷新丢文件 | 路由与 tabs 的写回方向搞反 | URL 只记活动 tab 的路径；`ctx.router` 订阅 tabs 回写，`popstate` 只反向打开 |
 
 ## 6. 边界（不要越过的线）
 

@@ -4,8 +4,8 @@
 > 分三档：**v1 必做**、**定过但不做/deliberately 不做**、**未来**。
 > 与 [architecture.md](architecture.md) 的决定、[contract.md](contract.md) 的契约对照看。
 >
-> **档位标注（2026-10-19，M3 完成时）**：标 ✅ 的已落地；**M3** 一栏均已实现并通过
-> [M3 实施说明](m3/spec.md) 的验收。其余仍是 v1 目标。契约见 [contract.md](contract.md) **v0.4**。
+> **档位标注（2026-10-19）**：标 ✅ 的已落地；本轮的 git 只读视图与 URL 路由见
+> [实施说明](m4/spec.md)。其余仍是 v1 目标。契约见 [contract.md](contract.md) **v0.5**。
 
 ## 一、CLI
 
@@ -39,13 +39,13 @@
 |---|---|---|---|
 | K1 | Cordis 插件树（双端） | ✅ M0→M1 | `cordis@4.0.0-rc.11`；`fs` 是真正的 server 半边（`mounts.onMount`）|
 | K2 | 客户端 Loader + 模块表 | ✅ M0→M1 | 闭合工厂 + 页面模块表（`react` / `react/jsx-runtime`，contract §8）；外部半边推迟 |
-| K3 | 插件 manifest + contract version 检查 | ✅ M1 | `>=0.4 <0.5` 强制；`requires` 进 boot 图 |
+| K3 | 插件 manifest + contract version 检查 | ✅ M0→M1 | `>=0.5 <0.6` 强制；`requires` 进 boot 图 |
 | K4 | 插件来源：内置 + `~/.diorama/plugins` | **未来（最后一个里程碑）** | `PluginSource` 接口与 `BuiltinSource` 就位；外部目录见 contract §9 |
 | K5 | 生命周期：代码全局、数据按目录 | ✅ M3 | `ctx.diorama.mounts` + `onMount`；每 mount 一个 fork 子 ctx（`isolate` + 自有 fiber）|
 | K6 | slot 系统 | ✅ M0→M1 | 冲突三类分开（contract §3.3）、`ctx.slots.declare`、`file.renderer` matcher |
 | K7 | fail loud + 回退链 | ✅ M0→M1 | 加载/契约/slot/渲染/RPC 五层；渲染器抛错→标记失败→下一个→plaintext |
 | K8 | `ctx.fs`（只读） | ✅ M2→M3 | `list`（尊重 ignore）/ `stat` / `readText` / `readBytes` / `watch`（目录、300ms 合并、**mount 内共享**、`maxDirectories` 上限）；`ETOOLARGE` 上限 |
-| K9 | `ctx.git`（只读） | v1 | diff / status / log 🔲 签名待定 |
+| K9 | `ctx.git`（只读） | ✅ 本轮 | `status` / `diff(scope)` / `log`；仓库探测、上限、错误码（contract §3.2）|
 | K10 | `ctx.slots` | ✅ M0→M1 | |
 | K11 | `ctx.commands` | ✅ M2 | 内核内置：命令 id fail loud、快捷键字面冲突抛错、`CommandContext` 内核采集、单一 keydown 分发 |
 | K12 | `ctx.diorama.mounts` | ✅ M3 | `onMount` 时机、卸载顺序、`MountInfo` 带 `port`/`url`/`configFile`（契约 §2.5/§3.5）|
@@ -68,11 +68,11 @@
 | P6 | `code` | ✅ M1 | highlight.js 按语言注册；`.md` 不在其中（归 markdown）|
 | P7 | `plaintext` | ✅ M0 | 兜底渲染器 |
 | P8 | `palette` | ✅ M2 | 插件，`layout.overlay` 条目，`mod+k`；只列可执行命令 |
-| P9 | `theme` / `i18n` | 🔲 待定 | 没讨论过 |
+| P9 | `theme` / `i18n` | 🔲 待定 | 主题本轮明确不做；`ctx.storage` 签名仍未定 |
 | P15 | `fs`（server 半边） | ✅ M1 | 内核自带；`--plugins` 不影响服务端 |
 | P10 | `image` 渲染器 | **未来** | 没讨论过 |
 | P11 | `pdf` 渲染器 | **未来** | 没讨论过 |
-| P12 | `git-diff` 渲染器 | **未来** | 需要 `ctx.git`；是名字里的卖点之一 |
+| P12 | `git-changes`（变更视图 + diff 座位） | ✅ 本轮 | 左栏「变更」是 `sidebar.views` 的一个视图；点开后该 tab 以 `view: 'diff'` 渲染 unified diff；不是仓库时整个视图不出现 |
 | P13 | `search`（全文检索） | **未来** | 没讨论过 |
 | P14 | `jupyter` / `.ipynb` | **未来** | 没讨论过 |
 
@@ -80,7 +80,7 @@
 
 | # | 功能 | 档位 | 说明 |
 |---|---|---|---|
-| U1 | 左侧树 + 右侧多 tab | ✅ M2 | 每个 tab 一个内容座位（隐藏不卸载）|
+| U1 | 左侧栏 + 右侧多 tab | ✅ M0→本轮 | 左栏是 `sidebar.views`（文件树 / 变更 …，VS Code 式切换）；每个 tab 一个内容座位（隐藏不卸载）|
 | U2 | 文件变化自动刷新（watch） | ✅ M2 | 内容与树；`view.toggleAutoRefresh` 可关 |
 | U3 | 快捷键 | ✅ M2 | 全局唯一绑定 + `when`；`mod` = ⌘/Ctrl |
 | U4 | command palette | ✅ M2 | 只列可执行命令（不灰显），`Esc` 关、`Enter` 跑 |
@@ -89,8 +89,8 @@
 | U7 | 图片缩放 / 适配窗口 | 🔲 待定 | O8 |
 | U8 | diff 并排 / 行内切换 | 🔲 待定 | O8 |
 | U9 | 状态栏 | **v1 不做** | 已从契约 slot 表移除 |
-| U10 | 多 tab 状态持久化（刷新后恢复） | 🔲 待定 | O5 |
-| U11 | URL 路由（可直接分享某个文件） | 🔲 待定 | 没讨论过 |
+| U10 | 多 tab 状态持久化（刷新后恢复整组 tab） | 🔲 待定 | O5；本轮刷新只恢复**活动文件**（URL）|
+| U11 | URL 路由（可直接分享某个文件） | ✅ 本轮 | `/~/<RelPath>`（path 形态，`/~/` 为保留前缀）；`ctx.router` 内核内置；刷新恢复单 tab（contract §3.8）|
 | U12 | 深色/浅色主题 | 🔲 待定 | 没讨论过 |
 
 ## 六、明确不做（v1 及以后）

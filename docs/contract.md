@@ -1,11 +1,12 @@
-# 插件契约 v0.4
+# 插件契约 v0.5
 
-> 记录于 2026-10-18；v0.3 记录于 2026-10-19；v0.4 记录于 2026-10-19（v0.1 草案已归档为 [contract-v0.1.md](contract-v0.1.md)）。
+> 记录于 2026-10-18；v0.3 记录于 2026-10-19；v0.4 记录于 2026-10-19；v0.5 记录于 2026-10-19
+> （v0.1 草案已归档为 [contract-v0.1.md](contract-v0.1.md)）。
 > 契约先行：这份文档是内核与插件之间的唯一约定，改它 = 破环变更。
 >
-> **状态：v0.4 已定稿，M3 按它实现。** v0.1 → v0.2 的差异都是 M1 决策（§12），
-> v0.2 → v0.3 的差异都是 M2 决策（§13），v0.3 → v0.4 的差异都是 M3 决策（§14）。
-> 内核契约版本 `0.4`，所有插件声明 `contract: ">=0.4 <0.5"`；内核**已启用**范围检查（§6）。
+> **状态：v0.5 已定稿。** v0.1 → v0.2 的差异是 M1 决策（§12），v0.2 → v0.3 是 M2 决策（§13），
+> v0.3 → v0.4 是 M3 决策（§14），v0.4 → v0.5 是最近一次补齐特性的决策（§15）。
+> 内核契约版本 `0.5`，所有插件声明 `contract: ">=0.5 <0.6"`；内核**已启用**范围检查（§6）。
 
 ## 0. 术语
 
@@ -27,7 +28,7 @@
   "name": "diorama-plugin-markdown",
   "version": "0.1.0",
   "diorama": {
-    "contract": ">=0.3 <0.4",                     // 必须：兼容的内核契约范围（§6）
+    "contract": ">=0.5 <0.6",                     // 必须：兼容的内核契约范围（§6）
     "id": "markdown",                              // 必须：全局唯一，短名；外部插件建议带前缀
     "displayName": "Markdown",
     "server": { "entry": "./lib/server.mjs" },     // 可选
@@ -194,11 +195,97 @@ interface FsService {
   `stat` 不受影响（直接按路径取信息）：已被打开的文件即使被隐藏，也照样能读。
 - client 半边：`mountCtx.fs` 与上面**同名同签名**，底层走 RPC（§4），调用形状与本地服务一致。
 
-### 3.2 `ctx.git`（server）🔲 未定
+### 3.2 `ctx.git`（server）✅ v0.5 定
 
-git 的**只读**视图。**只在目录是 git 仓库时才存在**，其它插件必须 `inject: { optional: ['git'] }` 或做能力检测。
+git 的**只读**视图。**只在目录是 git 仓库时才存在**（在 `onMount` 里探测），其它插件必须
+`inject: { optional: ['git'] }` 或做能力检测。**不提供任何写操作**（无 commit / stage / checkout）。
 
-待定：`diff(filePath)`、`status()`、`log()`。不提供任何写操作。
+```ts
+type RepoRelPath = string   // 相对挂载根，`/` 分隔，无前导 `/`；'' 表示挂载根（与 §3.1 的 RelPath 同义）
+
+interface GitStatusEntry {
+  file: RelPath
+  kind: 'added' | 'modified' | 'deleted' | 'renamed' | 'untracked' | 'conflicted'
+  /** porcelain 的状态串（如 `M `、`??`），原样；**调用方不应解析它**。 */
+  status: string
+  /** 仅 `renamed`：改名前的工作区路径。 */
+  oldPath?: RelPath
+}
+
+interface DiffScope {
+  /** 只看这个文件（相对挂载根）。缺省 = `scope` 子树的全部变更。 */
+  path?: RelPath
+  /** 只看这个目录（相对挂载根，'`' 表示挂载根）。左侧列表按子树过滤时用。 */
+  scope?: RelPath
+  /** 比较基准。v0.5 **只接受 `'HEAD'`**（工作区 vs HEAD）；缺省 = `'HEAD'`。 */
+  base?: 'HEAD'
+}
+
+interface DiffEntry {
+  file: RelPath
+  kind: GitStatusEntry['kind']
+  status: string
+  /** unified diff 文本（`--no-color`）；二进制文件没有 `text`，而有 `binary: true`。 */
+  text?: string
+  binary?: true
+  oldPath?: RelPath
+  /** 该文件 diff 超过上限，`text` 只是前缀。 */
+  truncated?: true
+}
+
+interface DiffResult {
+  /** 变更清单。单个文件读失败不拖垮列表：那一项只有 `file` 与 `error`。 */
+  entries: (DiffEntry | { file: RelPath; error: { code: string; message: string } })[]
+  /** 整次结果超过上限（4 MiB / 2000 行）：只回前缀，后续文件不出现在 `entries` 里。 */
+  truncated: boolean
+}
+
+interface GitLogEntry {
+  sha: string
+  shortSha: string
+  subject: string
+  author: string
+  /** ms since epoch。 */
+  at: number
+}
+
+interface GitService {
+  /** 工作区根的**绝对路径**（realpath 后）；挂载目录可能是仓库的子目录。 */
+  readonly root: string
+  status(): Promise<GitStatusEntry[]>                     // 扁平、不排序
+  diff(scope?: DiffScope): Promise<DiffResult>
+  log(options?: { limit?: number; path?: RelPath }): Promise<GitLogEntry[]>   // 新的在前
+}
+```
+
+规则：
+
+- **存在性**：`onMount` 时用 `git rev-parse --show-toplevel` 探测；工作区根 = 该命令的输出（可以
+  是挂载根，也可以是它的祖先）。不是仓库，或机器上没有 `git` → 该 mount **不 provide `git`**，
+  日志一条原因（`[mount:<id>] git: …`）。
+- **路径基准**一律是**相对挂载根**的 `RelPath`，与 §3.1 相同：绝对路径、`..` 越界、NUL →
+  `EINVAL` / `EOUTSIDE`；路径不在仓库内 → `EOUTSIDE`。服务端自行换算成仓库内路径。
+- **只读**：只运行只读的子命令（`status` / `diff` / `log` / `rev-parse`），带 `--no-color`、
+  不写 index、不碰工作区。
+- **上限**（单次调用的累计量，超限检查在返回前）：`diff()` 4 MiB / 2000 行，超出部分不进
+  `entries`，`truncated: true`；单个文件的 diff 超限时那一项 `truncated: true`。`log().limit`
+  默认 50、上限 500（`EINVAL`）。超限**不**报 `ETOOLARGE`——列表场景要的是前缀而不是失败。
+- **错误码**是方法契约（沿用 §3.1 的码，外加两个）：
+
+  | 码 | 含义 |
+  |---|---|
+  | `EINVAL` | 路径非法、`base` 不是 `'HEAD'`、`limit` 越界 |
+  | `ENOENT` | 文件不存在且不在任何变更里 |
+  | `EOUTSIDE` | 路径越出挂载根或不在仓库内 |
+  | `ENOTREPO` | 服务在，但工作区根已经不可用（目录被移走） |
+  | `EIO` | `git` 进程失败（stderr 摘要进 `message`） |
+
+- **形状**：`diff()` 按文件给，不给整次 patch 拼接——左右两栏各按自己的粒度用（左侧只要
+  `status` 的 kind，右侧要单个文件的 `text`）。
+- **未纳入版本库的文件没有 diff**：git 不拿它跟任何东西比较。`diff()` 对它只回
+  `{ file, kind: 'untracked' | 'added', status }` 与**无 `text`**；要显示内容的一方自己
+  用 `ctx.fs.readText` 读整个文件（§5.1 的同一条约定），不要指望 `ctx.git` 回文件正文。
+- client 半边通过 RPC 自动访问（§4），形状不变；`testid` 不在契约里。
 
 ### 3.3 `ctx.slots`（client）
 
@@ -243,6 +330,7 @@ ctx.slots.register({
   interface TabInfo {
     id: string           // tab id，同页内唯一；tabs.content 的 key 用它
     path: RelPath        // 打开时的文件路径；内容由内容区自己 fs.stat / 读
+    view?: 'content' | 'diff'   // 缺省 content；diff 表示这个 tab 画工作区改动（v0.5）
   }
 
   interface TabsSnapshot {
@@ -251,7 +339,8 @@ ctx.slots.register({
   }
 
   interface TabsService {
-    open(file: FileInfo): TabInfo      // 已在某个 tab 打开 → 激活它，不新开
+    /** `view` 缺省 content；对已打开的文件再次 open 会切换那个 tab 的 view（仍只有一个 tab）。 */
+    open(file: FileInfo, options?: { view?: 'content' | 'diff' }): TabInfo
     close(id?: string): void           // 缺省关活动 tab
     activate(id: string): void
     next(): void                       // 循环
@@ -265,6 +354,10 @@ ctx.slots.register({
 
   - **一个文件只有一个 tab**：`open` 的键是 `path`。`TabInfo` 不再带 `FileInfo` 快照——
     文件变化时内容区用 `fs.stat` 重读，tab 本身不持有文件数据（tabs 不依赖 fs）。
+  - **`view`（v0.5）**：`content`（缺省）画文件本身，`diff` 画它的工作区改动。**tab 的键是
+    `(path, view)`**：同一文件在两种视图下是**两个 tab**（可以并排看内容与 diff），同一
+    `(path, view)` 再次 `open` 只激活。画在哪里由 `tabs` 按 view 选座位（`tabs.content` 还是
+    `seats.git-diff`），内容渲染器永远看不到 diff tab。`tabs.find(path, view)` 是键查找。
   - **关闭后的激活**：右边的 tab，没有则左边的，都没有则空。
   - **标签栏由 `tabs` 自己画**（不开新 seat）；每个 tab 的内容画进 `tabs.content`（§5，
     key = tab id）。
@@ -307,7 +400,8 @@ interface Mounts {
 
 **被浏览的目录永远只读。** `ctx.fs` / `ctx.git` 不提供写接口。
 
-写盘只有一处：**`~/.diorama/`**。插件若要持久化状态，走内核提供的 `ctx.storage` 🔲，而不是自己拼路径。
+写盘只有一处：**`~/.diorama/`**。插件若要持久化状态，走内核提供的 `ctx.storage` 🔲（v0.5 仍未定，
+签名待议），而不是自己拼路径。
 
 ### 3.7 `ctx.commands`（client）✅ v0.3 定，M2 实现
 
@@ -393,6 +487,62 @@ interface CommandsService {
 命令的**来源插件**决定注册点：`tabs.*` 由 tabs 插件注册、`tree.*` 由 file-tree 注册、
 `palette.toggle` 由 palette 注册、`view.*` 由 renderer-registry 注册（它持有文件内容缓存）。
 
+### 3.8 `ctx.router`（client）✅ v0.5 定
+
+页面的 URL 与「当前文件」之间的唯一映射。**内核内置**（与 `ctx.commands` 同级，注入到页面的
+root ctx），不是某个可选插件的服务：少选一个插件就丢掉深链，与 §3.7 同一个理由。
+
+```ts
+interface RouteSnapshot {
+  /** 活动 tab 的文件路径；`undefined` = 没有活动 tab（URL 为根）。 */
+  file: RelPath | undefined
+}
+
+interface RouterService {
+  readonly file: RelPath | undefined
+  /** 打开并激活该文件的 tab（已有则激活）；路径非法 → 拒绝并返回 false。 */
+  open(file: RelPath): boolean
+  /** 关闭活动 tab（没有活动 tab 时无操作）。 */
+  close(): void
+  getSnapshot(): RouteSnapshot                            // 不可变，仅变化时替换
+  subscribe(listener: () => void): () => void
+}
+```
+
+**URL 形态（v0.5 定）：**
+
+| 项 | 取值 |
+|---|---|
+| 形式 | **path**：`<origin>/~/<RelPath>`，例如 `/~/src/app.js`；`/` 或 `/~/` = 无文件 |
+| 管什么 | **页面正在显示哪个文件**：活动 tab 的文件路径，**不论它的 view**。跟文件相关的视图（diff、某个提交的版本）是“关于这个文件的”，文件属于路径，**视图与参数才进 hash** |
+| **hash** | **插件可写的通用键值面**。跟文件相关的视图写**标记**（`#diff`，无值）；跟文件无关的状态（主题、搜索词）写在根页面（`/#theme=dark`）。内核不知道 `diff` / `theme` 是什么意思 |
+| 保留前缀 | **`/~/`**。其余任何路径（`/plugin.json`、`/assets/`、`/plugins/`、`/__diorama__/`）都不被路由解释；以后新增的服务端路由也不会与它相撞 |
+| 编码 | 每段 `encodeURIComponent`（`/` 保留为分隔符） |
+| 历史 | 每次「活动文件」变化 `pushState`；浏览器前进/后退 `popstate` → 激活/打开那条路径 |
+| 刷新 | **恢复单 tab**：启动时按 URL 打开该文件，tab 集合不进 URL（多 tab 记忆仍待定） |
+| 非法路径 | 绝对路径、`..` 越界（解码后归一化不在根内）、NUL → **不开 tab**，页面显示提示；其余情况（不存在、读不了）**总是开 tab**，错误由内容区按 §11 显示 |
+
+规则：
+
+- **`/~/` 跟着活动 tab**：活动 tab 换成 diff（甚至换到另一个文件的 diff）时，路径变成**那个 tab
+  的文件**——地址栏始终与画面一致。tab 顺序与非活动 tab 都不在 URL 里。
+- **hash 归插件**：
+  - 键形如 `[A-Za-z0-9_.-]+`，值经 `encodeURIComponent`；键排序后写出（同一状态 = 同一 URL）。
+  - **空值 = 标记**：`#diff` 与 `{ diff: '' }` 互为一对（写 `set('')`，删除用 `set(undefined)`）。
+    带参数时是 `#diff=HEAD~1`——**路径里的文件不在 hash 里重复**。
+  - `ctx.router.state(key)` → `{ get(), set(v \| undefined), onChange(fn) }`；同一个 key 多次调用
+    返回同一个槽位（按 key 共享）。
+  - **hash 变化用 `replaceState`**：拨一个开关不进历史（后退键只在文件之间跳）。
+  - **刷新保留**：启动时 hash 与 path 一起解码；插件在 `apply` 里读自己的键并恢复（diff 插件见
+    `#diff` 就把路径上的文件以 diff 视图打开）。hash 里的未知键不影响别人（缺插件时不报错）。
+  - **标记跟着活动 tab 双向同步**：写 `#diff` 的插件负责让“hash 里有这个标记”与“活动 tab 是这种
+    视图”始终等价——离开 diff tab 时删掉它（否则刷新会莫名其妙回到 diff），回到 diff tab 时
+    再加回来（否则地址栏与画面不一致）。
+  - 前缀与内容：`/~/` 的 path 部分、`/plugin.json`、`/assets/`、`/plugins/`、`/__diorama__/` 都不被
+    hash 影响；以后新增服务端路由也不会与它相撞。
+- 服务端对 `/~/…` **只回页面壳**（SPA 回退），不做文件服务——文件访问始终走 `ctx.fs`（§3.1）。
+- 路由不依赖 `tabs` 以外的客户端服务；`file-tree` 不在 boot 图里时深链仍然生效。
+
 ## 4. RPC / 通信 ✅ v0.2 定 / v0.3 补事件 session 与 §4.1 配置
 
 **形态：自动代理（A1）。** server 插件的服务公开方法自动成为浏览器可调的 RPC 方法：client 半边里 `mountCtx.fs.list(...)` 的形状与 server 服务一致。
@@ -469,7 +619,7 @@ maxDirectories = 64         # 每个目录同时监听的目录数上限（§3.1
 |---|---|---|---|
 | `host` | string | `"127.0.0.1"` | 等价 `--host` |
 | `port` | integer 0–65535 | `0` | 等价 `--port`；显式端口被占 → `EADDRINUSE`，不重试 |
-| `plugins` | string[] | 全部内置 | 等价 `--plugins`；未知 id → fail loud |
+| `plugins` | string[] | 全部内置**客户端**插件 | 等价 `--plugins`；未知 id → fail loud。`fs` / `git` 是内核服务（§3.1、§3.2），不在这个清单里，每个 mount 都自动加载 |
 | `ignore` | string[] | `[".git", "node_modules"]` | 隐藏规则；`[]` 或 `--all` 表示不隐藏 |
 | `watch.debounceMs` | integer 0–60000 | `300` | `fs.watch` 的合并窗口 |
 | `watch.enabled` | boolean | `true` | `false` 时 `fs.watch` 立即返回空 disposer（不监听） |
@@ -503,16 +653,48 @@ maxDirectories = 64         # 每个目录同时监听的目录数上限（§3.1
 |---|---|---|---|---|
 | `root` | 单 | 内核 | 1 | 整个页面 |
 | `layout.main` | 单 | `layout` | 1 | 左右分栏 |
-| `sidebar.tree` | 单 | `layout` | 1 | 左侧导航 |
+| `sidebar.views` | **keyed** | `layout` | N | 左侧栏的视图（**key = 视图 id**：`files`、`changes`…），`layout` 画切换器（§5.2） |
 | `tabs.content` | **keyed** | `tabs` | N | 每个 tab 的内容区（**key = tab id**，§3.4） |
 | `file.renderer` | keyed（内部排序） | `renderer-registry` | N | 按文件类型派发；M1 起带 matcher（§5.1） |
 | `layout.overlay` | 单 | `layout` | 1 | 覆盖层（v0.3 新增：palette 等命令面板；M2 只给 `palette` 用） |
+| `seats.git-diff` | 单 | `tabs` | 1 | `view: 'diff'` 的 tab 画在这里（v0.5）；没填时该 tab 显示「没有 diff 渲染器」 |
 
 - **`tabs.content` 的 key**：v0.3 起是 **tab id**；`tabs` 为**每个 tab**（而不只是活动 tab）渲染一个
   `tabs.content` 座位，非活动座位隐藏而非卸载（每个 tab 的滚动位置与渲染状态彼此独立）。
+- **`sidebar.tree`（v0.4 及以前）已被 `sidebar.views` 取代**（v0.5）：侧栏不再是“文件树专用的一栏”，
+  而是“一栏多视图”，file-tree 只是其中一个视图。
 - **`statusbar`：v1 不做**，从 slot 表移除（需要时再议）。
 - **没有 toolbar**：只读工具没有“要对文件做的事”，v1 不提供 `file.toolbar` / `tabs.actions`（O8）。
 - **回退链**：`file.renderer` 的条目按 §5.1 排序，命中者渲染；渲染抛错 → 标记失败 → **尝试下一个**；matcher 全不命中 → 兜底条目（plaintext）；一个条目都没有 → 「无可用渲染器」。
+
+### 5.2 `sidebar.views`（v0.5 定）
+
+侧栏是**一条栏、多个视图**，由 `layout` 拥有与绘制：
+
+```ts
+interface SidebarViewProps {
+  /** 是否为当前视图（非活动视图隐藏但不卸载）。 */
+  active: boolean
+}
+
+interface SidebarViewSpec {
+  /** 视图 id，即座椅的 key：`files`、`changes`…（不含 `:`）。 */
+  key: string
+  title: string            // 切换器上的文字（tooltip / 无障碍名）
+  icon?: string            // 可选：内联 SVG 字符串；缺省用 title 首字
+  order?: number           // 切换器里的顺序，缺省 100
+}
+```
+
+规则：
+
+- **注册即出现**：任何插件 `ctx.slots.register({ name: 'sidebar.views', key, title, icon }, Component)`；
+  视图之间**互不知道对方存在**，新增视图不改 `layout` 以外的包。
+- **切换器由 `layout` 画**（竖排图标条，VS Code 的 activity bar 形态）；切换状态由 `layout` 持有，
+  条目通过 `props.active` 得知。
+- **非活动视图隐藏不卸载**（与 `tabs.content` 同一做法）：展开、滚动、选择各自保留。
+- **没有视图被注册时，侧栏整栏不画**（M0 验收点 3 的语义，从 `sidebar.tree` 继承）。
+- `file-tree` 在最前（`order: 10`），git 的「变更」视图 `order: 20`。
 
 ### 5.1 `file.renderer` 匹配规则
 
@@ -539,7 +721,7 @@ interface RendererEntry {
 6. 全部不命中或无 matcher → **兜底条目**（`plaintext`，`matcher` 缺省）。没有兜底条目 → 「无可派发的渲染器」。
 7. 命中条目渲染抛错 → 标记失败，回到 2 继续（下一个候选），最终落到兜底；兜底也失败 → 显示失败原因。
 
-**渲染器 props**：渲染内容由内核预读、经 props 下发；渲染器不得自己发文件请求。
+**渲染器 props**：**文本**由内核预读、经 props 下发；需要字节的渲染器自己走 `mountCtx.fs.readBytes`（见下方 v0.5 的约定）。
 
 ```ts
 interface FileRendererProps {
@@ -554,15 +736,19 @@ interface FileRendererProps {
 ```
 
 - `text` 与 `bytes` 至少有一个；二进制文件只有 `bytes`。
+- **需要字节的渲染器自己取**（v0.5）：内核只保证**文本**预读；一个需要在 matcher 命中后读
+  原始字节的渲染器（图片等）**用 `props.mountCtx.fs.readBytes(path)`**，先 `fs.stat` 看 `size`，
+  超 `MAX_BINARY_BYTES`（32 MiB）**不请求**、直接显示「文件过大（大小）」。`ctx.fs` 的
+  `ETOOLARGE` 语义不变（§3.1）——渲染器**不得**因此白屏，仍然落进回退链（§5“回退链”、§11）。
 - `mime` 由内核按扩展名推断（M1 是小表：text/*、application/json、image/* 等；未知为 `application/octet-stream`）。
 
 ## 6. contract version 规则 ✅ v0.2 起强制
 
-- 内核版本 `0.x` 期间：**minor 改动即破环**，插件写窄范围（`>=0.4 <0.5`）。
+- 内核版本 `0.x` 期间：**minor 改动即破环**，插件写窄范围（`>=0.5 <0.6`）。
 - **检查时间**：读 manifest 时（加载前）。不满足 → 拒绝加载该插件，并解释原因（终端 + 浏览器控制台）。
-- 内置插件同样检查：M2 遗留的 `>=0.3 <0.4` 会被 v0.4 内核拒绝，所以 M3 把所有内置插件升到
-  `>=0.4 <0.5`。**内核与半边必须一起重新构建**（builtin manifest 与 kernel 的 `CONTRACT_VERSION`
-  来自同一份构建）。
+- 内置插件同样检查：旧范围的 manifest 会被新内核拒绝，所以每次升版都把全部内置插件一起升到
+  当前范围（v0.5 起为 `>=0.5 <0.6`）。**内核与半边必须一起重新构建**（builtin manifest 与 kernel
+  的 `CONTRACT_VERSION` 来自同一份构建）。
 - M2 起**没有**外部插件（§9），因此"UI 显示「插件 X 因契约不兼容未加载」"的展示面随外部插件一起推迟；
   拒绝本身仍然 fail loud（CLI 退出码非 0 / boot 图里不出现）。
 
@@ -865,13 +1051,32 @@ RPC 广播 `{ topic: 'mount.state', payload: MountStatus }`。
 | `DIORAMA_HOME` | 兼作 web 资源目录 | **只作状态目录**；资源只在包内 `web/` 或 `apps/web/dist`（CLI 侧规则） |
 | contract version | `0.3` / `>=0.3 <0.4` | `0.4` / `>=0.4 <0.5`（全部内置插件） |
 
+## 15. v0.4 → v0.5 变更清单（破环，故升 minor）
+
+> 2026-10-19，用户逐条拍板：范围 = git 的只读视图 + URL 路由（主题不做）；侧栏按 VS Code 的
+> 方式切换多个视图；URL 用 path 形态与 `/~/` 保留前缀；刷新恢复单 tab。
+
+| 条款 | v0.4 | v0.5 |
+|---|---|---|
+| §3.2 `ctx.git` | 🔲 一句“待定” | ✅ `status()` / `diff(scope?)` / `log(options?)`；`DiffScope` / `DiffEntry` / `DiffResult` / `GitStatusEntry` / `GitLogEntry`；`root` 为绝对路径；只读；单次 4 MiB / 2000 行、`log` 50/500；错误码 `EINVAL`/`ENOENT`/`EOUTSIDE`/`ENOTREPO`/`EIO`；不是仓库 → 不 provide |
+| §3.8 `ctx.router` | 无 | ✅ 内核内置客户端服务；`/~/<RelPath>` **记活动 tab 的文件**（任何视图），每次变化 `pushState`；`#key[=value]` 是**插件可写的键值面**（`ctx.router.state`，空值 = 标记，`replaceState` 不进历史，刷新保留）；`/` = 无文件；非法路径不开 |
+| §3.4 `TabInfo.view` / `tabs.open(file, { view })` | `TabInfo` 只有 `{ id, path }`，一个文件一个 tab、一种画法 | `view: 'content' \| 'diff'`（缺省 content）；**tab 的键是 `(path, view)`**，同一文件两种视图是两个 tab |
+| §5 `seats.git-diff` | 无 | 新增单座位（声明者 `tabs`）；`tabs` 按 view 派发 |
+| §5.2 视图元数据 | 无 | `sidebar.views` 条目的 `title` / `icon` 是**一等字段**（registry 会重建条目对象，自定义字段活不过一次 notify） |
+| §5 `sidebar.views` | 无（`sidebar.tree` 是单座位，file-tree 专用） | 新增 **keyed** 座位（key = 视图 id），`layout` 画切换器；`sidebar.tree` **移除**；无视图 → 侧栏不画（§5.2） |
+| §5.1 渲染器字节 | “内核预读、渲染器不得自己发文件请求”（与代码里已有的 `mountCtx` 不一致） | **文本**由内核预读；需要字节的渲染器自己 `mountCtx.fs.readBytes`，先 `stat`、超 32 MiB 不请求（§5.1） |
+| §3.6 `ctx.storage` | 🔲 | 🔲（本次不做主题，签名仍未定） |
+| contract version | `0.4` / `>=0.4 <0.5` | `0.5` / `>=0.5 <0.6`（全部内置插件） |
+
 ## 待定清单（v0.4 后仍 🔲）
 
-- [ ] `ctx.git` 具体签名（只读：diff / status / log）— v1 之外
+- [x] `ctx.git` 具体签名（只读：diff / status / log）— v0.5 定（§3.2）
+- [ ] git history 视图（`show` / 提交列表在左栏的落点）— 签名将新增方法，不改已有方法
 - [ ] `ctx.layout` 的服务面（overlay 走 slot）
-- [ ] `ctx.storage` 签名 — 待定
+- [ ] `ctx.storage` 签名（主题 / 偏好持久化）— 待定
 - [ ] 插件异步任务托管 API — 待定
-- [ ] O8：渲染模式切换 / 图片缩放 / diff 并排的落点（命令化已缓解“开关型”）
+- [ ] O8：渲染模式切换 / 图片缩放 / diff 并排的落点（命令化已缓解“开关型”；git diff 已是行内形态）
+- [ ] URL 里是否记多 tab（刷新恢复整组）— 与 U10 一起定
 - [ ] 外部插件的发现、bundle 校验、`--plugins-dir` — 最后一个里程碑
 - [ ] gateway 控制面事件的 CLI 消费者（`diorama ls --watch`）— 以后再定（协议已定，见 §7.3）
 - [ ] gateway 单点的 supervisor 兜底（崩溃自拉起，O6）— 以后再定

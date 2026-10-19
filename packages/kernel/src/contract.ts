@@ -9,10 +9,13 @@ export const KERNEL_NAME = 'diorama'
  * gateway serving many directories: one root context, per-directory fork
  * contexts (`ctx.fork()`), an HTTP port per mount, the control plane of
  * contract §7, `watch` sharing with a per-mount cap, and `mount.state` /
- * `degraded` (contract §14). Every plugin declares `contract: ">=0.4 <0.5"`,
- * enforced while reading manifests (`server/manifest.ts`).
+ * `degraded` (contract §14). `0.5` adds the read-only git view (`ctx.git`,
+ * contract §3.2), the URL router (`ctx.router`, §3.8) and `sidebar.views`
+ * (replacing `sidebar.tree`, §5.2). Every plugin declares
+ * `contract: ">=0.5 <0.6"`, enforced while reading manifests
+ * (`server/manifest.ts`).
  */
-export const CONTRACT_VERSION = '0.4'
+export const CONTRACT_VERSION = '0.5'
 
 /** What every plugin built against this kernel declares. */
-export const CONTRACT_RANGE = '>=0.4 <0.5'
+export const CONTRACT_RANGE = '>=0.5 <0.6'

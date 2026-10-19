@@ -84,12 +84,17 @@
 | 隔离 | 目录级故障隔离 + degraded 状态（一次自动重启 + 页面横幅） |
 | 移除 | 前台模式保留为 `--foreground` 调试模式 |
 
-## M4：补齐特性
+## M4：补齐特性 ✅ 已完成（2026-10-19）
 
-- `git-diff` 渲染器（取决于你确认它是否属于 v1 卖点）
-- 图片 / PDF / Notebook 渲染器
-- URL 路由（直接打开某文件）
-- 主题
+> 实施说明见 [m4/spec.md](m4/spec.md)。契约升到 **v0.5**（contract §15）。
+
+| 部分 | 做 | 状态 |
+|---|---|---|
+| git 只读视图 | `ctx.git`（status / diff / log）+ 左栏「变更」视图 + 单个文件的 diff 渲染 | ✅ |
+| URL 路由 | `ctx.router` + `/~/<path>` 深链；刷新恢复单 tab | ✅ |
+| 侧栏视图切换 | `sidebar.views` 取代 `sidebar.tree`（VS Code 式） | ✅ |
+| 图片 / PDF / Notebook 渲染器 | | **不做**（仍是「未来」） |
+| 主题 | | **本次不做**（`ctx.storage` 仍 🔲） |
 
 ## 里程碑之外、但必须同时做的
 

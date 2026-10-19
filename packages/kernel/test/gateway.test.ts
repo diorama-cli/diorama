@@ -47,7 +47,7 @@ function stubTree(order: string[], label: string): MountTree {
 function manifestOf(name: string): (mountId: string, port: number, url: string) => BootManifest {
   return (mountId, port, url) => ({
     kernel: 'diorama',
-    contract: '0.4',
+    contract: '0.5',
     mountId,
     root: '',
     port,
