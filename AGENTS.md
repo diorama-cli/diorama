@@ -55,7 +55,10 @@ docs/                     契约、架构、能力、排期、逐档 spec
 | RPC 帧、订阅端点、session | `kernel/src/shared/rpc.ts`、`server/rpc.ts`、`client/rpc.ts` |
 | `ctx.commands`、键记法、按键分发 | `kernel/src/client/commands.ts`、`client/boot.ts` |
 | `ctx.tabs` / `ctx.tree` | `kernel/src/client/tabs.ts`、`client/tree.ts` |
-| 插件图、boot 顺序、`settle` | `kernel/src/server/plugins.ts`、`client/boot.ts`、`server/plan.ts` |
+| 插件图、boot 顺序、`settle`、mount fork / `onMount` | `kernel/src/server/plugins.ts`、`client/boot.ts`、`server/plan.ts` |
+| gateway 的 mount 表、端口、degraded 状态机 | `kernel/src/server/gateway.ts` |
+| 控制面协议（帧、方法、错误码） | `kernel/src/shared/control.ts`、`kernel/src/server/control.ts` |
+| CLI 子命令、`ls` 表格、后台 gateway | `cli/src/main.ts`、`cli/src/control-client.ts`、`cli/src/gateway.ts`、`cli/src/gateway-command.ts` |
 | `diorama.toml` | `kernel/src/server/config.ts` |
 | 契约版本 | `kernel/src/contract.ts`（**只在这里改**） |
 
@@ -70,9 +73,9 @@ docs/                     契约、架构、能力、排期、逐档 spec
 
 `pnpm-workspace.yaml` 已覆盖 `packages/plugins/*`，无需改。
 
-## 5. 陷阱（M2 实测，按症状查）
+## 5. 陷阱（M2/M3 实测，按症状查）
 
-完整叙述见 [docs/m2/spec.md §6.2](docs/m2/spec.md)；这里是最容易再犯的几条。
+完整叙述见 [docs/m2/spec.md §6.2](docs/m2/spec.md) 与 [docs/m3/spec.md §6.2](docs/m3/spec.md)；这里是最容易再犯的几条。
 
 | 症状 | 根因 | 规则 |
 |---|---|---|
@@ -84,6 +87,10 @@ docs/                     契约、架构、能力、排期、逐档 spec
 | 界面永远「正在读取…」 | `useSyncExternalStore` 的快照每次渲染都是新引用 | store 暴露**绑定的稳定函数**（`subscribe` / `getVersion`），状态另读 |
 | watch 事件重复或漏 | `fs.watch` 的 `rename` 不可信（macOS 会给已存在文件报 rename） | 服务端用 `stat` 定性 add/change/unlink，按 **path**（不是 path+type）合并 |
 | 关闭时 CLI 不退出 / e2e 卡住 | `socket.close()` 是握手，HTTP `server.close()` 等所有 socket | `RpcChannel.close()` 先结束会话再 `terminate()` |
+| 卸载一个目录后，另一个目录 RPC 报 `ESERVICE: no service "fs"` | 两个 mount 共用了 isolate key 或共享 fiber 上的 `provide` | 每个 mount `isolate('fs', Symbol(mountId))`，`provide` 放进该 mount 自己的 `ctx.plugin()` fiber（m3/spec §6.2 1–2）|
+| `service "mountId" has been registered` | `mountId` 被 `provide` 成服务 | 它是普通属性（`Object.defineProperty`），不要 inject |
+| 随机端口挂载 404 / `/plugin.json` 没有 port | manifest 在 bind 前建好 | 先探端口 → boot fork → 建 server（带最终 URL）→ listen |
+| 改子命令没有生效 | tsdown 入口仍是 `src/run.ts` | `packages/cli/tsdown.config.ts` 入口是 `src/main.ts` |
 
 ## 6. 边界（不要越过的线）
 
@@ -99,4 +106,5 @@ docs/                     契约、架构、能力、排期、逐档 spec
 - 一个能力一块提交，提交信息写清"做了什么 + 为什么"。
 - 每块完成前跑 §3 四件套；**M0/M1 的验收用例必须保持绿**（它们是多 tab / 命令 / watch 改动的回归）。
 - 契约或座位类型变了：同步 `contract.md`（含 §13）与 `docs/features.md` 的档位。
-- 演示脚本：`node packages/cli/bin/diorama <dir>`，输出里的 `config:` 与 `hidden:` 两行能直接看出 `diorama.toml` 是否生效。
+- 演示脚本：`node packages/cli/bin/diorama <dir>`（短命 CLI：确保 gateway → 挂载 → 打印 URL；输出里的 `config:` 与 `hidden:` 两行能直接看出 `diorama.toml` 是否生效）。其它：`diorama ls`、`diorama gateway start|stop|status|restart`、`diorama restart <dir>`。
+- **测试隔离**：e2e 每个用例用自己的 `DIORAMA_HOME`（临时目录）与自己的 gateway；不要把测试指向真实的 `~/.diorama`。

@@ -79,66 +79,94 @@ pnpm --filter diorama-web exec playwright test
 - **e2e 隔离**：测试用临时 `DIORAMA_HOME` 起自己的 gateway，避免共享 `~/.diorama`。
 - **`DIORAMA_HOME` 语义收窄**：不再兼作 web 资源目录；现有 e2e 不依赖它（已确认）。
 
-## 6. 实现记录
+## 6. 实现记录（2026-10-19，M3 落地后）
 
-### 6.1 进度
+### 6.1 验收结果
 
-| 步 | 状态 | 提交 |
-|---|---|---|
-| S0 契约 v0.4 | ✅ | `docs(m3-s0)` |
-| S1 控制面库 | ✅ | `feat(m3-s1)` |
-| S2 gateway 骨架 | ✅ | `feat(m3-s2)` |
-| S3 `ctx.fork()` 生命周期 | ✅ | `feat(m3-s3)` |
-| S3b watch 共享 + 上限 | ✅ | `feat(m3-s3b)` |
-| S4 `ls` / `gateway …` / `restart` | ✅ | `feat(m3-s4)` |
-| S6 CLI 迁到 gateway | ✅（并入 S4：默认已走 gateway） | `feat(m3-s4)` |
-| S5 degraded | ✅ | `feat(m3-s5)` |
+```
+pnpm test:unit                                   # 92 passed
+pnpm -r --no-sort run typecheck                  # clean
+pnpm --filter diorama-web exec playwright test   # 49 passed
+```
 
-### 6.2 踩到的坑（S3，M3 后续步骤请先读）
+| 用例文件 | 覆盖 |
+|---|---|
+| `m0-acceptance`（5） | 原 5 条；启动方式改为“短命 CLI + 独立 gateway” |
+| `m1-acceptance`（7） | matcher、回退链、RPC、不卡死 |
+| `m2-*`（21） | 配置、树、多 tab、命令、palette、watch、服务端半边（`--foreground` 读控制台） |
+| `m3-gateway`（6） | 两目录两端口、各自页面互不串、幂等挂载、`ENOTDIR`、卸载一个不影响另一个、两页面共享目录监听 |
+| `m3-cli`（6） | 退出码（`ls` 0 / `status` 1 / `stop` 0）、`ls` 表格含 URL、`--json`、start 幂等、`restart` 换 URL、全局 toml、`gateway restart` 不保留挂载 |
+| `m3-degraded`（4） | 横幅只出现在受影响的页面、邻居不受影响、自动重启一次（新 id/端口）、不重启风暴、测试钩子默认关闭 |
+
+单测：控制面 11（帧、错误码、乱序、订阅、行缓冲边界）、gateway 10（端口/幂等/卸载顺序/
+degraded 状态机/一次重启）、fork 8（apply 一次、每 mount 服务、卸载顺序、隔离回归）、
+watch 9（窗口合并、共享、上限、跨 mount 不串）、config 7；其余沿用 M2。
+
+### 6.2 踩到的坑（按症状查）
 
 1. **`isolate(name)` 不能共享标签。** Cordis 的 `isolate(name, label)` 按 **label** 在
-   shadow 表里登记一个符号；不传 label 时默认 `Symbol(name)`，于是**所有 mount 拿到同一个
-   isolate key**，第一个 `provide` 占住槽位，卸载任一 mount 时会把**所有 mount 的同名服务**
-   一起注销。每个 mount 必须 `isolate('fs', Symbol(mountId))`。
-2. **`provide` 属于 fiber 生命周期，不只属于 ctx。** `ctx.provide()` 是 fiber effect：
-   只有把 `provide` 放在该 mount **自己的 plugin fiber**（`ctx.plugin({...})`）里，
-   `fiber.dispose()` 才只回滚这个 mount。在共享 fiber 上 `provide`，卸载一个 mount 会把
-   兄弟 mount 的服务一起清掉（S3 的 e2e `2e` 就是这样抓到的）。
-3. **`ctx.plugin()` 的返回值是 Fiber，不是 ctx。** 清理要 `fiber.dispose()`；读它提供的
-   服务要先 `await fiber.await?.()`（effect 在 fiber 激活后才跑）。
-4. **`mountId` 是记录，不是服务。** 用 `provide('mountId', …)` 会在第二次挂载同一个
-   isolate 时报 `service "mountId" has been registered`；用 `Object.defineProperty` 设成普通
-   属性，插件以属性读取即可（也不该有人 `inject` 它）。
-5. **`dispatcher.services` 别和服务表闭包重名。** `withSubscriptions(createDispatcher(f), f)`
+   shadow 表里登记符号；不传 label 时默认 `Symbol(name)`，**所有 mount 拿到同一个 isolate
+   key**，第一个 `provide` 占槽位，卸载任一 mount 会把所有 mount 的同名服务一起注销。
+   每个 mount 必须 `isolate('fs', Symbol(mountId))`。
+2. **`provide` 属于 fiber 生命周期。** `ctx.provide()` 是 fiber effect：只有把 `provide`
+   放在该 mount **自己的 plugin fiber**（`ctx.plugin({...})`）里，`fiber.dispose()` 才只回滚
+   这个 mount。在共享 fiber 上 `provide`，卸载一个 mount 会清掉兄弟 mount 的服务
+   （e2e `2e` 抓到的）。`ctx.plugin()` 的返回值是 **Fiber**，清理用 `fiber.dispose()`，
+   读它提供的服务要先 `await fiber.await?.()`。
+3. **`mountId` 是记录，不是服务。** `provide('mountId', …)` 在第二次挂载同一 isolate 时报
+   `service "mountId" has been registered`；用 `Object.defineProperty` 设普通属性。
+4. **`dispatcher.services` 别与服务表闭包重名。** `withSubscriptions(createDispatcher(f), f)`
    里第二个参数同名时，`{...dispatcher}` 展开会把 `services` 方法覆盖成服务表，症状是
    RPC 报 `ESERVICE: no service "fs" on this mount`。
-6. **CLI 的 tsdown 入口是 `src/main.ts`**，不是 `src/run.ts`——改错入口时子命令不会进包。
-7. **`DIORAMA_HOME` 不再兼作 web 资源目录**（契约 §4.1 v0.4）：资源来自包的 `web/` 或
+5. **CLI 的 tsdown 入口是 `src/main.ts`**（原来写的是 `src/run.ts`），改错入口子命令不会进包。
+6. **`DIORAMA_HOME` 不再兼作 web 资源目录**（契约 §4.1 v0.4）：资源来自包的 `web/` 或
    `apps/web/dist`，否则 gateway 起出来的页面 404。
-8. **watch 只在 mount 内共享。** 共享表的 key 是 `resolveInside` 之后的绝对目录；跨 mount
-   不共享（计划风险清单里“M3 时验证”的那条，已用单测与 e2e `2f` 固定）。上层订阅（树、每个
-   tab 的父目录）在服务端合并成一次 `fs.watch` 与一套 debounce，监听者各自收到同一个事件。
-   上限 `watch.maxDirectories`（默认 64）超限时返回 no-op disposer 并只 warn 一次，不抛错。
+7. **随机端口只能在 bind 之后知道。** manifest（`/plugin.json`）要带真实 URL，所以顺序是：
+   探测空闲端口 → boot fork（拿到 dispatcher）→ 建 server（manifest 带最终 URL）→ listen。
+   端口竞争按契约 §7.3 的“bind 成功者胜出 + 重试”处理。
+8. **watch 只在 mount 内共享**：key 是 `resolveInside` 之后的绝对目录；跨 mount 不共享
+   （计划风险清单“M3 时验证”已用单测与 e2e `2f` 固定）。上限超限时 no-op + 只 warn 一次。
+9. **macOS 的旧写入会延迟上报**：测试里先建文件再挂 watch，可能收到属于 fixture 创建期的
+   事件；跨 mount 断言前先等待稳定（单测里的 `150ms`）。
+10. **degraded 的验收需要一个故障源**：控制面加了 `fail` 测试钩子（仅
+    `DIORAMA_TEST_HOOKS=1`）。真实的归因路径见 §6.4。
 
-### 6.2b degraded 的触发与验收（S5）
-
-契约 §11.1 只定义了“RPC/订阅/HTTP 抛错、`onMount` 抛错、无法归因的进程错误”三种触发。为了让
-degraded **可验收**，控制面增加了一个**受环境变量保护的测试钩子**：
-
-- `fail { mountId, message? }`：让该 mount 立即进入 degraded（并广播 `mount.state`）。
-- **仅当 `DIORAMA_TEST_HOOKS=1`** 时存在；否则 `EMETHOD`（e2e `6d` 守这条）。
-
-真实的归因路径：`guardedDispatcher` 把 mount 内被拒绝的 RPC 调用与订阅回调错误归到该 mount
-（协议错误 `EMETHOD`/`ESERVICE`/`EBADREQUEST` 除外），成功的调用让该 mount 回到 `ok`；
-`onMountFailure` 把服务插件在 `onMount` 里的抛错归到该 mount；进程级的
-`uncaughtException`/`unhandledRejection` 只标 gateway 级 degraded。
-
-### 6.3 与契约的对应（当前）
+### 6.3 与契约的对应
 
 | 契约 | 实现位置 |
 |---|---|
-| §7.1–§7.3 控制面帧与方法 | `kernel/src/shared/control.ts`、`kernel/src/server/control.ts`、`cli/src/gateway.ts` |
-| §3.5 `MountInfo`（`port`/`url`/`configFile`）、`mounts.list()` | `kernel/src/server/plugins.ts` |
-| §2.5 一个 mount = 一个 fork 子 ctx；卸载四步顺序 | `kernel/src/server/plugins.ts`（`createPluginHost` / `forkMount`）、`kernel/src/server/gateway.ts`（listener/RPC 先关） |
-| §7.3 幂等 mount / 端口规则 / `ENOTDIR` | `kernel/src/server/gateway.ts` |
-| §7.4 socket、pid 文件、陈旧 socket 接管 | `cli/src/gateway.ts`、`cli/src/gateway-command.ts` |
+| §7.1–§7.3 控制面（NDJSON、方法、`MountStatus`、错误码） | `kernel/src/shared/control.ts`、`kernel/src/server/control.ts`、`cli/src/gateway.ts` |
+| §7.4 后台进程、pid、日志、陈旧 socket、`stop`/`restart` | `cli/src/control-client.ts`、`cli/src/gateway-command.ts` |
+| §7.5 `--foreground` | `cli/src/main.ts` |
+| §7.6 退出码与 `ls` 输出 | `cli/src/main.ts`、`cli/src/control-client.ts` |
+| §2.5 一个 mount = 一个 fork 子 ctx；卸载四步；`onMount` 时机 | `kernel/src/server/plugins.ts`（`createPluginHost` / `forkMount`）、`kernel/src/server/gateway.ts` |
+| §3.1 watch 共享与 `maxDirectories` | `kernel/src/server/fs.ts` |
+| §3.5 `MountInfo`、`mounts.list()` | `kernel/src/server/plugins.ts` |
+| §4.1 配置在 CLI 侧合成、`/plugin.json` 带 `state`/`lastError` | `cli/src/main.ts`、`cli/src/gateway.ts`、`kernel/src/server/plan.ts` |
+| §11 / §11.1 degraded | `kernel/src/server/gateway.ts`、`cli/src/gateway.ts`、`ui/src/root.tsx`、`apps/web/src/main.tsx` |
+| §14 contract 0.4 | `kernel/src/contract.ts`、全部内置插件 manifest |
+
+### 6.4 degraded 的触发与验收
+
+契约 §11.1 定义三种触发：mount 内的 RPC/订阅/HTTP 抛错、`onMount` 回调抛错、无法归因的
+进程错误。实现里的归因：
+
+- `guardedDispatcher`：mount 内被拒绝的 RPC 调用与订阅回调错误归到该 mount（协议错误
+  `EMETHOD`/`ESERVICE`/`EBADREQUEST` 不算）；随后成功的调用让它回到 `ok`。
+- `onMountFailure`：服务插件在 `onMount` 里的抛错归到该 mount。
+- 进程级 `uncaughtException` / `unhandledRejection`：只标 gateway 级 degraded 并记日志。
+
+为了让 degraded **可验收**，控制面增加测试钩子 `fail { mountId, message? }`：立即让该 mount
+进入 degraded 并广播 `mount.state`；**仅当 `DIORAMA_TEST_HOOKS=1`** 时存在，否则 `EMETHOD`
+（e2e `6d` 守这条）。生产默认不可用。
+
+### 6.5 遗留与取舍
+
+- **前台单进程模式**：保留为 `--foreground`（gateway 在 CLI 进程内跑，同样建 socket），
+  M2 的演示脚本照旧；生产默认走后台 gateway。
+- **启动竞态**：按用户早前的决定（v0.1 §7）不追求并发正确性——socket `bind` 成功者胜出、
+  CLI 重试连接；陈旧 socket 文件只在 `ping` 无响应时清理。
+- **gateway 单点**：进程崩溃带走所有目录（architecture §10 的代价）；supervisor 不做（O6）。
+- **`events` 订阅**：协议已实现，v1 没有 CLI 消费者（`ls` 不做 `--watch`）。
+- **degraded 的页面横幅**是壳的一部分（`diorama-ui` 的 `DioramaRoot` 接收 `health`），
+  不进 slot 面。

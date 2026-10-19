@@ -4,34 +4,34 @@
 > 分三档：**v1 必做**、**定过但不做/deliberately 不做**、**未来**。
 > 与 [architecture.md](architecture.md) 的决定、[contract.md](contract.md) 的契约对照看。
 >
-> **档位标注（2026-10-19，M2 完成时）**：标 ✅ 的已落地；**M2** 一栏均已实现并通过
-> [M2 实施说明](m2/spec.md) 的验收。其余仍是 v1 目标。契约见 [contract.md](contract.md) **v0.4**。
+> **档位标注（2026-10-19，M3 完成时）**：标 ✅ 的已落地；**M3** 一栏均已实现并通过
+> [M3 实施说明](m3/spec.md) 的验收。其余仍是 v1 目标。契约见 [contract.md](contract.md) **v0.4**。
 
 ## 一、CLI
 
 | # | 功能 | 档位 | 说明 |
 |---|---|---|---|
-| C1 | `diorama [dir]` | ✅ M0→M1 | 前台单进程直接服务该目录并打印 URL（gateway 化在 M3）|
-| C2 | `diorama ls` | v1 | 列出「目录 → URL → 状态」 |
-| C3 | `diorama gateway start / stop / status / restart` | v1 | 你只提了 stop，另外三个是缺了不好用的配套 |
+| C1 | `diorama [dir]` | ✅ M0→M3 | 短命 CLI：确保 gateway → 挂载 → 打印 URL 并退出；`--foreground` 仍可前台跑（调试/测试）|
+| C2 | `diorama ls` | ✅ M3 | 表格 `MOUNT PORT STATUS DIR URL CONFIG`（含 URL）；`--json`；不做 `--watch` |
+| C3 | `diorama gateway start / stop / status / restart` | ✅ M3 | 后台进程 + pid 文件 + `gateway.log`；另有 `gateway run` 与 `diorama restart <dir>` |
 | C4 | `--port <n>` | ✅ M0→M2 | 显式冲突报错；**未给时落 `diorama.toml`，再默认随机** |
 | C5 | `--host <ip>` | ✅ M0→M2 | 默认 `127.0.0.1`；`diorama.toml` 可设 |
 | C9 | `diorama.toml`（`host`/`port`/`plugins`/`ignore`/`[watch]`） | ✅ M2 | 目录 → `$DIORAMA_HOME` 查找；CLI > toml > 默认；写错 fail loud；`--config`、`--all`、`--dump-config` |
-| C6 | 随机端口自动重试 | v1 | 上限 20 次 |
-| C7 | realpath 挂载键 + 别名提示 | v1 | 符号链接输入时打印 `mounted <real> (from <input>)` |
-| C8 | 单测/集成测试 | ✅ M0→M2 | `apps/web/tests/`：31 条端到端（真实 CLI + Chromium）；`pnpm test:unit`：58 条单测 |
+| C6 | 随机端口自动重试 | ✅ M3 | 随机端口上限 20 次；显式端口冲突直接 `EADDRINUSE`（退出码 1）|
+| C7 | realpath 挂载键 + 别名提示 | ✅ M3 | 挂载键 = realpath（同一真实目录幂等）；打印的目录是 realpath 后的 |
+| C8 | 单测/集成测试 | ✅ M0→M3 | `apps/web/tests/`：49 条端到端（真实 CLI/gateway + Chromium）；`pnpm test:unit`：92 条单测 |
 
 ## 二、Gateway
 
 | # | 功能 | 档位 | 说明 |
 |---|---|---|---|
-| G1 | 单进程常驻，多目录挂载 | v1 | 每目录一个端口 |
-| G2 | Unix socket 控制面 | v1 | `~/.diorama/gateway.sock` |
-| G3 | 目录级故障隔离 | v1 | 一个挂载崩不影响其它 |
-| G4 | 不持久化 | v1（明确） | gateway 停了挂载清空 |
+| G1 | 单进程常驻，多目录挂载 | ✅ M3 | 每目录一个端口；插件图只加载一次（`createPluginHost`）|
+| G2 | Unix socket 控制面 | ✅ M3 | `~/.diorama/diorama.sock`，NDJSON；`ping/mount/unmount/list/status/stop/events` |
+| G3 | 目录级故障隔离 | ✅ M3 | 每 mount 独立 isolate key + fiber；卸载一个不动其它（e2e `2e`）|
+| G4 | 不持久化 | ✅ M3（明确） | gateway 停了挂载清空；`gateway restart` 不保留挂载 |
 | G5 | 启动竞态 | **暂缓** | 用户明确先不考虑 |
 | G6 | supervisor 自拉起 | **未来** | O6 |
-| G7 | degraded 恢复策略 | 🔲 待定 | O7 |
+| G7 | degraded 恢复策略 | ✅ M3 | 自动重启一次（2s，新 mountId）+ `diorama restart <dir>`；不阻断请求；页面横幅 |
 
 ## 三、插件内核
 
@@ -41,14 +41,14 @@
 | K2 | 客户端 Loader + 模块表 | ✅ M0→M1 | 闭合工厂 + 页面模块表（`react` / `react/jsx-runtime`，contract §8）；外部半边推迟 |
 | K3 | 插件 manifest + contract version 检查 | ✅ M1 | `>=0.4 <0.5` 强制；`requires` 进 boot 图 |
 | K4 | 插件来源：内置 + `~/.diorama/plugins` | **未来（最后一个里程碑）** | `PluginSource` 接口与 `BuiltinSource` 就位；外部目录见 contract §9 |
-| K5 | 生命周期：代码全局、数据按目录 | ✅ M1（单目录形态） | `ctx.diorama.mounts` + `onMount`；`ctx.fork()` 随 M3 |
+| K5 | 生命周期：代码全局、数据按目录 | ✅ M3 | `ctx.diorama.mounts` + `onMount`；每 mount 一个 fork 子 ctx（`isolate` + 自有 fiber）|
 | K6 | slot 系统 | ✅ M0→M1 | 冲突三类分开（contract §3.3）、`ctx.slots.declare`、`file.renderer` matcher |
 | K7 | fail loud + 回退链 | ✅ M0→M1 | 加载/契约/slot/渲染/RPC 五层；渲染器抛错→标记失败→下一个→plaintext |
-| K8 | `ctx.fs`（只读） | ✅ M2 | `list`（尊重 ignore）/ `stat` / `readText` / `readBytes` / `watch`（目录、300ms 合并）；`ETOOLARGE` 上限 |
+| K8 | `ctx.fs`（只读） | ✅ M2→M3 | `list`（尊重 ignore）/ `stat` / `readText` / `readBytes` / `watch`（目录、300ms 合并、**mount 内共享**、`maxDirectories` 上限）；`ETOOLARGE` 上限 |
 | K9 | `ctx.git`（只读） | v1 | diff / status / log 🔲 签名待定 |
 | K10 | `ctx.slots` | ✅ M0→M1 | |
 | K11 | `ctx.commands` | ✅ M2 | 内核内置：命令 id fail loud、快捷键字面冲突抛错、`CommandContext` 内核采集、单一 keydown 分发 |
-| K12 | `ctx.diorama.mounts` | v1 | |
+| K12 | `ctx.diorama.mounts` | ✅ M3 | `onMount` 时机、卸载顺序、`MountInfo` 带 `port`/`url`/`configFile`（契约 §2.5/§3.5）|
 | K13 | RPC（client ↔ server） | ✅ M2 | WebSocket 自动代理；**订阅端点 + session**（`fs.watch`、`cancel`、连接关闭即取消）|
 | K14 | `ctx.storage`（`~/.diorama/` 持久化） | 🔲 待定 | 签名未定 |
 | K15 | 插件异步任务托管 API | 🔲 待定 | 见 §12 讨论 |

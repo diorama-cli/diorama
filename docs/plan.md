@@ -70,15 +70,19 @@
 | 文件树 | 隐藏规则（`ignore`，默认 `.git`、`node_modules`；`.gitignore` 不读）、大目录分页 |
 | 配置 | `diorama.toml` 定下 `host` / `port` / `plugins` / `ignore` / `[watch]`，CLI > toml > 默认 |
 
-## M3：gateway 化
+## M3：gateway 化 ✅ 已完成（2026-10-19）
+
+> 实施记录见 [m3/spec.md](m3/spec.md)。契约升到 **v0.4**（contract §14）。顺序
+> S0 契约 → S1 控制面 → S2 gateway 骨架 → S3 `ctx.fork()` → S3b watch 共享 →
+> S4 `ls`/`gateway` 子命令（同时把 CLI 默认迁到 gateway）→ S5 degraded → S6 文档。
 
 | 部分 | 做 |
 |---|---|
-| 进程 | 常驻 gateway、短命 CLI、Unix socket 控制面 |
-| 多目录 | 每目录端口、`ctx.fork()` 生命周期切分 |
-| 命令 | `diorama ls`、`diorama gateway start/stop/status/restart` |
-| 隔离 | 目录级故障隔离 + degraded 状态 |
-| 移除 | 单目录前台模式（或保留为 `--foreground` 调试模式） |
+| 进程 | 常驻 gateway、短命 CLI、Unix socket 控制面（`~/.diorama/diorama.sock`） |
+| 多目录 | 每目录端口、`ctx.fork()` 生命周期切分（插件图一次、服务按目录） |
+| 命令 | `diorama ls`（含 URL）、`diorama gateway start/stop/status/restart`、`diorama restart <dir>` |
+| 隔离 | 目录级故障隔离 + degraded 状态（一次自动重启 + 页面横幅） |
+| 移除 | 前台模式保留为 `--foreground` 调试模式 |
 
 ## M4：补齐特性
 
@@ -101,5 +105,5 @@
 |---|---|---|
 | M0 就把 Cordis + 动态加载全上 | MVP 周期失控 | 静态 import，动态加载推 M1 |
 | `file.renderer` 的匹配在 M0 就做全 | 过早优化 | M0 只做 `ext`，其余 M1 |
-| M2 的 watch 与多目录冲突 | 重复监听 | watch 按 mount 隔离，M3 时验证 |
+| M2 的 watch 与多目录冲突 | 重复监听 | **已处理**：mount 内按 path 共享、跨 mount 不共享、每 mount 上限（契约 §3.1；M3 验证） |
 | gateway 把插件内核的坑掩盖 | 到 M3 才暴露 | M0–M2 保持单目录，问题早暴露 |
