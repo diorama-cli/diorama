@@ -25,6 +25,7 @@ import type { SlotEntry, SlotName } from 'diorama-plugin-slots'
 export interface KernelContextValue {
   /** Read-only view of any seat's entries (not only the ones a component owns). */
   registry?: {
+    readonly version: number
     entriesOf(name: string, key?: string): readonly unknown[]
     all(): readonly unknown[]
   }

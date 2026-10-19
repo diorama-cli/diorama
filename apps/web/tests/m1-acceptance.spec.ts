@@ -124,3 +124,40 @@ test('8. a plugin that requires missing infrastructure is refused', async () => 
     startDiorama(directory.root, ['--plugins', 'layout,file-tree,tabs,renderer-registry']),
   ).rejects.toThrow(/plugin "layout": requires "slots"/)
 })
+
+/**
+ * 9. Clicking through many files keeps the page responsive.
+ *
+ * Regression: the dispatcher re-ran its renderer choice on every render (its
+ * effect depended on freshly-built objects), which re-rendered for ever and
+ * froze the tab after a few clicks. Every file must open promptly and the page
+ * must still answer afterwards.
+ */
+test('9. clicking through files does not freeze the page', async ({ page }) => {
+  directory = fixture()
+  server = await startDiorama(directory.root)
+  await page.goto(server.url)
+  await page.locator('[data-path="docs"]').click()
+  await page.locator('[data-path="src"]').click()
+  const files = [
+    'README.md',
+    'docs/notes.md',
+    'src/app.js',
+    'README.md',
+    'LICENSE',
+    'blob.bin',
+    'README.md',
+    'src/app.js',
+    'docs/notes.md',
+    'blob.bin',
+  ]
+  for (const file of files) {
+    const started = Date.now()
+    await page.locator(`[data-path="${file}"]`).click({ timeout: 5_000 })
+    await expect(page.getByTestId('active-tab')).toHaveText(file.slice(file.lastIndexOf('/') + 1))
+    expect(Date.now() - started, `${file} took too long to open`).toBeLessThan(4_000)
+  }
+  // Still responsive: the page answers and a further file opens.
+  await page.locator('[data-path="src/app.js"]').click({ timeout: 5_000 })
+  await expect(page.getByTestId('active-tab')).toHaveText('app.js')
+})

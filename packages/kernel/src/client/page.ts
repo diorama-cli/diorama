@@ -21,6 +21,8 @@ import type { MountHandle } from './mount.ts'
  * entries of the seat it draws, contract.md §5).
  */
 export interface KernelSlotRegistry {
+  /** Changes on every registration or removal. */
+  readonly version: number
   entriesOf(name: string, key?: string): readonly unknown[]
   /** Every entry of every seat, in total order (dispatcher seats). */
   all(): readonly unknown[]

@@ -112,6 +112,18 @@ pnpm --filter diorama-web exec playwright test   # 11 passed
 6. **markdown 与 code 的扩展名不能重叠**：`.md` 只归 markdown；去掉 markdown 后落到
    plaintext，而不是被 code 当源码高亮。
 
+7. **渲染期读 store 会让页面在几次点击后卡死**（用户反馈，2026-10-19 修复）。
+   `renderer-registry` 的派发器把“读文件”放在 `getSnapshot` 里，并且 effect 的依赖是
+   每次渲染都新建的 `loaded` / `entries` / `file` 对象：一次渲染触发一次
+   `setChoice`，再触发下一次渲染，几万帧后标签页失去响应（实测 36k 次渲染、0 次桥通知）。
+   规则（现在已经是代码结构）：
+   - `getSnapshot` 必须是**纯函数或稳定引用**——`FileCache.snapshot()` 不发起 IO，
+     读文件在 `useEffect` 里由 `cache.ensure()` 启动；
+   - 异步结果以**内容键**（`path:size:mtime|seat ids|mime`）缓存，键不变就不再
+     `setState`；
+   - effect 依赖用原始值（stamp、版本号），不用每次渲染新建的对象；
+   - `slotRegistry` 新增 `version`，座位列表按它记忆化。
+
 ### 6.3 与契约的对应
 
 | 契约 | 实现位置 |

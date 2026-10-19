@@ -70,6 +70,7 @@ export class SlotRegistry {
   private readonly listeners = new Set<() => void>()
   private readonly pending: DeferredEntry[] = []
   private order: SlotOrder = defaultSlotOrder
+  private revision = 0
   private sorted = new Map<string, readonly SlotEntry[]>()
 
   constructor(private readonly options: SlotRegistryOptions = {}) {
@@ -213,6 +214,11 @@ export class SlotRegistry {
     return (this.sorted.get(seatKey(name, key)) ?? []) as unknown as readonly SlotEntry<K>[]
   }
 
+  /** Changes on every registration or removal (memoisation key). */
+  get version(): number {
+    return this.revision
+  }
+
   /** Every registered entry, in registration order (fallback-chain planning). */
   all(): readonly SlotEntry[] {
     return [...this.entries.values()].sort(this.order)
@@ -269,6 +275,7 @@ export class SlotRegistry {
   }
 
   private notify(): void {
+    this.revision++
     const next = new Map<string, SlotEntry[]>()
     for (const entry of this.entries.values()) {
       const seat = seatKey(entry.name, entry.key)
