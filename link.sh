@@ -11,15 +11,19 @@
 #   diorama .             # then use it anywhere
 #
 # Re-run `pnpm build` after changing sources; the PATH entry stays valid.
-set -euo pipefail
-
-repo="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+#
+# **No `set -euo pipefail` here on purpose**: this file is sourced into an
+# interactive shell, and `set -u` poisons it — every keystroke then errors with
+# e.g. `_zsh_autosuggest_highlight_apply:3: POSTDISPLAY: parameter not set`
+# (an unset variable inside a prompt hook). The build keeps its strict flags in
+# its own subshell. Works under both bash (BASH_SOURCE) and zsh ($0).
+repo="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 bin="$repo/packages/cli/bin"
 
 echo "▸ building (kernel → slots → ui → plugins → cli → shell)…"
-(cd "$repo" && pnpm build >/dev/null)
+(cd "$repo" && bash -c 'set -euo pipefail; pnpm build') >/dev/null
 
-test -x "$bin/diorama" || { echo "✗ $bin/diorama is not executable" >&2; exit 1; }
+test -x "$bin/diorama" || { echo "✗ $bin/diorama is not executable" >&2; return 1 2>/dev/null || exit 1; }
 
 case ":$PATH:" in
   *":$bin:"*) ;;
