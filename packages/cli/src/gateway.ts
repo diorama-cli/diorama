@@ -331,11 +331,44 @@ function bootManifest(
 }
 
 /**
- * Attribute failures to the mount they happened in (contract.md §11): a
- * rejected RPC call marks that mount degraded, and a successful call after it
- * marks it recovered. Unattributed process errors are the gateway's own (§11).
+ * The codes an RPC call may reject with as an **answer** — the method worked,
+ * the request (or the file it named) did not. Every code in the kernel's error
+ * table (contract.md §3.1, §3.2, §4) is one of these: `EBINARY` for a binary
+ * file, `ENOENT` for a file deleted under the page, `ETOOLARGE`, `EINVAL`, …
+ * are ordinary outcomes of browsing an arbitrary directory, not mount faults.
  */
-function guardedDispatcher(mountId: string, inner: RpcDispatcher, mounts: Gateway): RpcDispatcher {
+const ANSWER_CODES = new Set<string>([
+  'EINVAL',
+  'EIO',
+  'ENOENT',
+  'ENOTDIR',
+  'EISDIR',
+  'EOUTSIDE',
+  'EBINARY',
+  'ETOOLARGE',
+  'ENOTREPO',
+  'ESERVICE',
+  'EMETHOD',
+  'EBADREQUEST',
+  'EDISCONNECTED',
+])
+
+/**
+ * Attribute failures to the mount they happened in (contract.md §11): a call
+ * that fails **outside** the kernel's answer codes (a thrown bug, a crashed
+ * service) marks that mount degraded, and a successful call after it marks it
+ * recovered. Unattributed process errors are the gateway's own (§11).
+ *
+ * A code is the whole answer, not the mount's health: treating `ENOENT` /
+ * `EBINARY` as a fault put a healthy mount through degraded → automatic
+ * restart → recovered on nothing more than a file disappearing (or a binary
+ * being read once) while the page was open.
+ */
+export function guardedDispatcher(
+  mountId: string,
+  inner: RpcDispatcher,
+  mounts: Pick<Gateway, 'degrade' | 'recover'>,
+): RpcDispatcher {
   return {
     services: () => inner.services(),
     async call(method, args) {
@@ -344,9 +377,9 @@ function guardedDispatcher(mountId: string, inner: RpcDispatcher, mounts: Gatewa
         mounts.recover(mountId)
         return value
       } catch (failure) {
-        // A rejected call is the plugin's own failure, not a protocol error.
+        // An answer (a code) fails the request; anything else is the mount's.
         const code = (failure as { code?: string }).code
-        if (code !== 'EMETHOD' && code !== 'ESERVICE' && code !== 'EBADREQUEST') mounts.degrade(mountId, failure)
+        if (typeof code !== 'string' || !ANSWER_CODES.has(code)) mounts.degrade(mountId, failure)
         throw failure
       }
     },
