@@ -61,13 +61,20 @@ test('4. code highlights source and plaintext takes the rest', async ({ page }) 
   await expect(page.getByTestId('tabs-content').filter({ visible: true }).locator('[data-testid="renderer"]')).toHaveAttribute('data-renderer', 'plaintext:fallback')
 })
 
-/** 5. A binary file says so instead of showing mojibake. */
+/**
+ * 5. A binary file says so instead of showing mojibake. The kernel pre-reads
+ * text only (contract §5.1 v0.6), so the fallback describes the file from the
+ * `stat` it already has: content, size and mime — not an empty placeholder.
+ */
 test('5. binary files are described, not decoded', async ({ page }) => {
   directory = fixture()
   server = await startDiorama(directory.root)
   await page.goto(server.url)
   await page.locator('[data-path="blob.bin"]').click()
-  await expect(page.getByTestId('plaintext-binary')).toContainText('二进制文件')
+  const placeholder = page.getByTestId('plaintext-binary')
+  await expect(placeholder).toContainText('二进制文件')
+  await expect(placeholder).toContainText('application/octet-stream')
+  await expect(placeholder).toContainText('200 字节')
 })
 
 /** 6. The page reaches the mount through RPC: services, errors, bytes. */

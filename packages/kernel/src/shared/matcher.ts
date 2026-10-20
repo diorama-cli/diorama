@@ -11,13 +11,17 @@ export type FileMatcher =
   | { mime: string[] }
   | { probe: (head: Uint8Array, file: FileInfo, mime: string) => boolean; cost?: 'cheap' | 'expensive' }
 
-/** Props every `file.renderer` entry receives. Renderers never do IO. */
+/**
+ * Props every `file.renderer` entry receives (contract.md §5.1).
+ *
+ * The kernel pre-reads **text only** (v0.6): a renderer that needs bytes of
+ * its own (images, PDFs) calls `mountCtx.fs.readBytes` after a `stat`, and
+ * skips the request when the file is larger than `MAX_BINARY_BYTES`.
+ */
 export interface FileRendererProps {
   file: FileInfo
   /** The kernel's pre-read text (absent for binary or oversized files). */
   text?: string
-  /** The kernel's pre-read bytes (present when the file is not text). */
-  bytes?: Uint8Array
   /** MIME type inferred from the path (contract.md §5.1). */
   mime: string
 }

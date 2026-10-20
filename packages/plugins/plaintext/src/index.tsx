@@ -9,17 +9,27 @@
 import type { Context } from 'cordis'
 import type {} from 'diorama-plugin-slots'
 import { provideEntry } from 'diorama-ui'
-import type { FileRendererProps } from 'diorama-kernel'
+import type { FileInfo, FileRendererProps } from 'diorama-kernel'
 
 export const name = 'plaintext'
 export const inject = ['slots']
 
-/** How a binary file is described in the fallback (no mojibake). */
-function describeBinary(bytes: Uint8Array, mime: string): string {
-  return `二进制文件，无法以文本显示（${mime}，${bytes.length} 字节）`
+/**
+ * How a file with no text is described in the fallback (no mojibake). The
+ * kernel pre-reads text only (contract.md §5.1 v0.6), so the size comes from
+ * the `stat` the registry already made — the fallback never reads bytes.
+ */
+function describeBinary(file: FileInfo, mime: string): string {
+  return `二进制文件，无法以文本显示（${mime}，${formatSize(file.size)}）`
 }
 
-function Plaintext({ file, text, bytes, mime }: FileRendererProps) {
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} 字节`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`
+}
+
+function Plaintext({ file, text, mime }: FileRendererProps) {
   return (
     <div className="diorama-plaintext-wrap" data-testid="plaintext">
       <div className="diorama-plaintext__path">{file.path}</div>
@@ -29,7 +39,7 @@ function Plaintext({ file, text, bytes, mime }: FileRendererProps) {
         </pre>
       ) : (
         <div className="diorama-renderer__empty" role="status" data-testid="plaintext-binary">
-          {describeBinary(bytes ?? new Uint8Array(), mime)}
+          {describeBinary(file, mime)}
         </div>
       )}
     </div>

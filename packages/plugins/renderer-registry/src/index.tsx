@@ -3,16 +3,17 @@
  *
  * Registers into each `tabs.content` seat (one per tab), declares the
  * `file.renderer` seat it owns, and dispatches: reads the tab's file once
- * (stat, then text — or bytes for binary content), asks `chooseRenderer` which
- * entry claims it (`ext` → `mime` → `probe`, then the fallback), and renders
- * that entry. An entry that throws is marked failed through `ctx.views` and the
- * next candidate is tried; when nothing can render, the seat says so instead of
- * blanking (M0 acceptance point 2, kept in M1).
+ * (stat, then text), asks `chooseRenderer` which entry claims it (`ext` → `mime`
+ * → `probe`, then the fallback), and renders that entry. An entry that throws
+ * is marked failed through `ctx.views` and the next candidate is tried; when
+ * nothing can render, the seat says so instead of blanking (M0 acceptance
+ * point 2, kept in M1).
  *
- * Renderers never do IO: the file's text (or bytes) is read here, once, and
- * handed down as props (contract.md §5.1). The tab carries a path only
- * (contract.md §3.4), so this is also where a change is noticed: a watched
- * `change`/`unlink` or a `view.refresh` command makes the next pass re-stat.
+ * The kernel pre-reads **text only** (contract.md §5.1, v0.6); a renderer that
+ * needs bytes (image, pdf) fetches them itself through `mountCtx.fs` after a
+ * `stat`. The tab carries a path only (contract.md §3.4), so this is also
+ * where a change is noticed: a watched `change`/`unlink` or a `view.refresh`
+ * command makes the next pass re-stat.
  */
 import type { Context } from 'cordis'
 import { useEffect, useEffectEvent, useMemo, useState, useSyncExternalStore, type ComponentType } from 'react'
@@ -218,6 +219,13 @@ class FileCache {
     await this.read(mount, info)
   }
 
+  /**
+   * Pre-read the file's **text** (contract.md §5.1, v0.6). Bytes are no longer
+   * pre-read: `EBINARY` (binary content) and `ETOOLARGE` (over
+   * `MAX_TEXT_BYTES`) both mean "no text", which is a normal state for a
+   * binary renderer — the entry that claims the file decides what to show, and
+   * one that needs bytes fetches them itself after a `stat`.
+   */
   private async read(mount: MountHandle, file: FileInfo): Promise<void> {
     const stamp = stampOf(file)
     const current = this.contents.get(file.path)
@@ -225,21 +233,16 @@ class FileCache {
     if (this.loads.has(file.path)) return
     this.loads.add(file.path)
     let state: Loaded
+    const mime = mimeOf(file.path)
     try {
-      const mime = mimeOf(file.path)
       const text = await mount.fs.readText(file.path)
       state = { status: 'ready', props: { file, text, mime } }
     } catch (error) {
-      if ((error as { code?: string }).code !== 'EBINARY') {
-        state = { status: 'error', error: describeError(error) }
+      const code = (error as { code?: string }).code
+      if (code === 'EBINARY' || code === 'ETOOLARGE') {
+        state = { status: 'ready', props: { file, mime } }
       } else {
-        try {
-          const mime = mimeOf(file.path)
-          const bytes = await mount.fs.readBytes(file.path)
-          state = { status: 'ready', props: { file, bytes, mime } }
-        } catch (inner) {
-          state = { status: 'error', error: describeError(inner) }
-        }
+        state = { status: 'error', error: describeError(error) }
       }
     } finally {
       this.loads.delete(file.path)
@@ -330,14 +333,11 @@ function RegistryContent({ tab }: RegistryContentProps) {
   const [choice, setChoice] = useState<{ key: string; value: Chosen | 'unresolved' } | undefined>(undefined)
   const choose = useEffectEvent(() => {
     if (file === undefined) return Promise.resolve<RendererChoice>({ kind: 'empty' })
-    const head = async (path: string): Promise<Uint8Array> => {
-      if (readyProps?.bytes !== undefined) return probeHead(readyProps.bytes, PROBE_HEAD_BYTES)
-      try {
-        return probeHead(await mount.fs.readBytes(path), PROBE_HEAD_BYTES)
-      } catch {
-        return new Uint8Array()
-      }
-    }
+    // Probes see the head of the pre-read text and nothing else: the kernel
+    // does not read bytes for a probe (contract.md §5.1 rule 5, v0.6), so a
+    // binary file probes an empty head and must be claimed by ext/mime.
+    const head = async (): Promise<Uint8Array> =>
+      readyProps?.text === undefined ? new Uint8Array() : probeHead(new TextEncoder().encode(readyProps.text), PROBE_HEAD_BYTES)
     return chooseRenderer(candidatesOf(usable), { file, mime }, { head })
   })
 
