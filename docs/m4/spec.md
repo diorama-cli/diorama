@@ -398,3 +398,33 @@ frame 文档。e2e 断言的是 `getComputedStyle` 的颜色，不是「标签�
 说明与 palette 互斥、在 palette 里打 `?` 只过滤不弹说明、去掉 `help` 后 `?` 无反应且 palette 照常。
 单测 5 条（`packages/plugins/help/test/bindings.test.ts`）：两个平台的键帽、命名键与单字符、
 绑定顺序与未知命令丢弃、不可用标记与重复键合并、一条命令多个键。
+
+## 16. 修复：macOS 上带 Option 的快捷键全部透传给浏览器（v0.7 内修 bug，不升契约）
+
+**现象**（用户报告）：「好像很多快捷键没有生效，都透传到浏览器上去了」。
+
+**根因**：macOS 的 **Option 是组合键**。⌘⌥W 在浏览器里报的不是 `key: 'w'`，而是 Option 组合出来的
+字符——`∑`；⌘⌥R 是 `®`；⌘⌥1 是 `¡`；`⌘⌥[` 是 `“`。而 `matchesKeys` 只比
+`event.key.toLowerCase() === keys.key`，于是**所有 `mod+alt+*` 绑定在 Mac 上全是死键**：内核认不出，
+`preventDefault` 没被调用，按键继续冒泡给浏览器。`mod+k`、`ctrl+tab` 不含 Option，所以一直正常——
+这也解释了为什么看起来是「很多」而不是「全部」。
+
+**为什么 e2e 一直是绿的**：Playwright 的 `keyboard.press('Meta+Alt+W')` 走 DevTools 协议，它直接
+合成 `key: 'w'`，**不经过 macOS 的输入法组合**。测试与真实浏览器看到的是两种事件，于是 83 条全绿而
+用户全挂。这是本轮最值得记住的一条：**用 CDP 合成按键测不出输入法/组合键行为**。
+
+**修法**：`matchesKeys` 在 `key` 不中且绑定带 `alt` 时，按物理键 `KeyboardEvent.code` 再比一次
+（`KeyW`→`w`、`Digit1`→`1`、`BracketLeft`→`[`…）。`code` 是布局无关、且不受组合影响的。
+
+- **只对 `alt` 绑定开放**：Windows/Linux 的 `AltGr` 也会改 `key`，但那些绑定没有 `alt`，不该被
+  物理键兜住；把兜底限制在 `alt` 上，普通绑定（`w`、`mod+k`）的行为一字不变。
+- **不是「改用 code」**：契约的键记法仍按 `KeyboardEvent.key` 书写（`w`、`arrowleft`、`[`），`code`
+  只是 `alt` 这一条路径上的兜底，避免把键记法整个翻成布局相关。
+
+**回归**：`commands.test.ts` +3（组合字符命中 `∑`/`®`/`¡`、别的物理键不命中、非 Apple 平台不启用兜底、
+标点 `BracketLeft` 也命中、非 `alt` 绑定不受影响）；e2e `m2-commands` 7e 直接 dispatch
+`{ key: '∑', code: 'KeyW', metaKey, altKey }` 并断言 `dispatchEvent` 返回 `false`（即页面
+`preventDefault` 了）。变异验证：把 `code` 兜底去掉，7e 变红，其余 4 条仍绿。
+
+**已知遗留**：`ctrl+tab` / `ctrl+shift+tab` 在 macOS 上被浏览器/系统先吃掉（契约 §3.7 已记），
+这条不是本次修复的范围。

@@ -524,6 +524,7 @@ interface CommandsService {
 |---|---|
 | 命令 id 重复 | **fail loud：`register` 抛错**（与 §3.3 的 `id` 重复同一条规则） |
 | 键记法 | 修饰键 `mod`（mac = ⌘，其它 = Ctrl）、`ctrl`、`alt`、`shift`；键名小写，取 `KeyboardEvent.key` 的小写名（`w`、`k`、`arrowleft`、`[`、`tab`）；`mod+alt+w` 这种 `+` 分隔、顺序无关；`mod` 与 `ctrl` 同平台重复 → 拒绝并 warn |
+| 带 `alt` 的绑定的匹配（v0.7 修订） | **macOS 上 Option 是组合键**：⌘⌥W 报的 `key` 是 `∑`、⌘⌥R 是 `®`、⌘⌥1 是 `¡`，不是 `w`/`r`/`1`。所以 `alt` 绑定在 `key` 不中时**按物理键 `KeyboardEvent.code` 再比一次**（`KeyW`→`w`、`Digit1`→`1`、`BracketLeft`→`[`）。只对带 `alt` 的绑定开放：`AltGr` 布局下不会让普通绑定被误触发 |
 | **冲突（键相同）** | **字面重复才 fail loud**：同一个按键、且二者 `when` 都可能同时为真 → `bind` **抛错**。`when` 显式互斥的绑定可以共存。 |
 | **冲突（执行时）** | 某一按键在当前上下文命中的绑定 `canRun` 同时为真且来自不同命令 → **warn，只执行第一条**（先注册者优先） |
 | 触发条件 | 页面 mounted；按键命中且非 `repeat`；焦点不在 `input` / `textarea` / `[contenteditable]` 内；命中的绑定 `when` 为真 |
@@ -1236,6 +1237,7 @@ RPC 广播 `{ topic: 'mount.state', payload: MountStatus }`。
 | §3.7 命令表 | 12 条 | 另加 `help.toggle`（`shift+?`）与 `help.close`（`escape`，`when` = 说明开着），由 `help` 注册 |
 | §3.7 列表口径 | palette 只列可执行命令 | 新增一条并列口径：**快捷键说明列全部绑定，不可用的灰显**（两者回答不同的问题，不是矛盾） |
 | §5 内置插件 | 13 个 | 14 个：新增 `help`（`layout.overlay`，`order: 200`），进默认清单（§4.1）与 boot 顺序（`palette` 之后） |
+| §3.7 带 `alt` 绑定的匹配 | 只比 `KeyboardEvent.key` | `key` 不中时按物理键 `code` 再比一次（macOS 上 Option 会把字母组合成 `∑` / `®` / `¡`，此前所有 `mod+alt+*` 在 Mac 上都是死键并透传给浏览器）；只对 `alt` 绑定开放 |
 | contract version | `0.6` / `>=0.6 <0.7` | `0.7` / `>=0.7 <0.8`（全部内置插件 + kernel 包自己的 manifest） |
 
 **没有变的东西**：`ctx.commands` 的签名与注册/绑定规则、键记法本身（仍按 `KeyboardEvent.key` 书写）、

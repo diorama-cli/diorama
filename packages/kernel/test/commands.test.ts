@@ -38,8 +38,9 @@ test('keys: malformed bindings are refused', () => {
 
 test('keys: matching requires exact modifiers and the same key', () => {
   const keys = parseKeys('mod+alt+w', true)!
-  const event = (over: Partial<{ key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }>) => ({
+  const event = (over: Partial<{ key: string; code: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }>) => ({
     key: 'w',
+    code: 'KeyW',
     ctrlKey: false,
     metaKey: true,
     altKey: true,
@@ -50,7 +51,47 @@ test('keys: matching requires exact modifiers and the same key', () => {
   assert.equal(matchesKeys(event({ key: 'W' }), keys), true)
   assert.equal(matchesKeys(event({ altKey: false }), keys), false)
   assert.equal(matchesKeys(event({ shiftKey: true }), keys), false)
-  assert.equal(matchesKeys(event({ key: 'q' }), keys), false)
+  // A different physical key is a different binding, whatever `key` says.
+  assert.equal(matchesKeys(event({ key: 'q', code: 'KeyQ' }), keys), false)
+})
+
+test('keys: an alt binding falls back to the physical key when macOS composes the letter', () => {
+  // Option is a compose key on macOS: ⌘⌥W arrives as key '∑', ⌘⌥R as '®',
+  // ⌘⌥1 as '¡'. Without the `code` fallback every mod+alt shortcut is dead
+  // there and the key reaches the browser instead (the reported bug).
+  const close = parseKeys('mod+alt+w', true)!
+  const composed = (key: string, code: string) => ({
+    key,
+    code,
+    ctrlKey: false,
+    metaKey: true,
+    altKey: true,
+    shiftKey: false,
+  })
+  assert.equal(matchesKeys(composed('∑', 'KeyW'), close), true)
+  assert.equal(matchesKeys(composed('®', 'KeyR'), parseKeys('mod+alt+r', true)!), true)
+  assert.equal(matchesKeys(composed('¡', 'Digit1'), parseKeys('mod+alt+1', true)!), true)
+  // The physical key is what decides: a composed glyph from another key does not.
+  assert.equal(matchesKeys(composed('∑', 'KeyQ'), close), false)
+  // A non-Apple platform has no composition: that event must not match there.
+  assert.equal(matchesKeys(composed('∑', 'KeyW'), parseKeys('mod+alt+w', false)!), false)
+})
+
+test('keys: the code fallback is only for alt bindings', () => {
+  // A plain `w` binding must not fire for some other layout's AltGr character.
+  const plain = parseKeys('w', true)!
+  const altGr = { key: '∑', code: 'KeyW', ctrlKey: false, metaKey: false, altKey: false, shiftKey: false }
+  assert.equal(matchesKeys(altGr, plain), false)
+  // `mod+k` has no alt, so it keeps matching by key only.
+  const palette = parseKeys('mod+k', true)!
+  const plainK = { key: 'k', code: 'KeyK', ctrlKey: false, metaKey: true, altKey: false, shiftKey: false }
+  assert.equal(matchesKeys(plainK, palette), true)
+})
+
+test('keys: punctuation bindings survive composition too', () => {
+  const bracket = parseKeys('mod+alt+[', true)!
+  const composed = { key: '“', code: 'BracketLeft', ctrlKey: false, metaKey: true, altKey: true, shiftKey: false }
+  assert.equal(matchesKeys(composed, bracket), true)
 })
 
 test('commands: duplicate ids throw; registration is reversible', () => {

@@ -105,6 +105,7 @@ docs/                     契约、架构、能力、排期、逐档 spec
 | `node --test` 报 `ERR_UNKNOWN_FILE_EXTENSION: .tsx` | Node 不认 `.tsx` | 单测只导入 `.ts`；把要测的纯函数从组件文件里拆出来（m4/spec §12）|
 | 「找不到成员 `mountCtx`」/ props 里还有 `bytes` | `FileRendererProps` 曾在内核与 slots 各有一份且漂移 | 只有内核一份；slots re-export 它。`export type {X} from` 后同文件不能再用 `X` |
 | e2e 里快捷键不生效（mac 上写 `Control+Alt+x`） | `mod` 在 macOS 上是 Meta | 测试用 `MOD = darwin ? 'Meta' : 'Control'`；别用裸 `Control` |
+| **真实 Mac 上 `mod+alt+*` 全是死键、按键透传给浏览器，而 e2e 全绿** | macOS 的 **Option 是组合键**：⌘⌥W 的 `key` 是 `∑`、⌘⌥R 是 `®`、⌘⌥1 是 `¡`。**Playwright 的 `keyboard.press` 走 CDP 合成 `key:'w'`，不经过组合**，所以测不出 | `matchesKeys` 在 `alt` 绑定上按物理键 `KeyboardEvent.code` 兜底；测这类行为要 `dispatchEvent` 一个带组合字符 + `code` 的真实形状事件（m4/spec §16）|
 | 提交详情不出现在右侧 | 提交不是 tab，不进 `tabs.content` | `tabs` 声明 `seats.git-commit`，hash 里有 `history=<sha>` 时改画它；tab 仍然挂载 |
 | 进过历史视图后点文件，右侧仍是提交详情 | 提交详情没有「离开」的判据：`#history` 只在有人删它时才消失 | 两条判据都要：`ctx.tabs.openCount` 没变（打开文件，**含打开当前那个**）且侧栏 `shown() === 'history'`；判据用到的东西必须进 `useSyncExternalStore` 的快照（m4/spec §6.2 10–13） |
 | 状态已变、画面不变 | 判断用的值不在订阅的快照里（另一个半边的 store、或计数） | 计数与别的 store 的版本都进快照；跨半边用页面 `globalThis`（`__diorama_layout__`、`__diorama_overlay__`），不 `import` |

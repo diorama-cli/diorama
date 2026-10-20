@@ -15,6 +15,11 @@ export interface KeyEventLike {
   metaKey: boolean
   altKey: boolean
   shiftKey: boolean
+  /**
+   * The physical key (`KeyW`, `Digit1`, `Slash`). Only consulted when the
+   * binding has `alt` and `key` did not match — see {@link matchesKeys}.
+   */
+  code?: string
 }
 
 export interface ParsedKeys {
@@ -69,13 +74,55 @@ export function parseKeys(text: string, apple = isApplePlatform()): ParsedKeys |
   return { text: ordered === '' ? key : `${ordered}+${key}`, ctrl, meta, alt, shift, key }
 }
 
-/** Whether an event matches the binding (modifiers exact, key equal). */
+/**
+ * Whether an event matches the binding (modifiers exact, key equal).
+ *
+ * **The `alt` case on macOS** (contract.md §3.7): Option is a *compose* key
+ * there, so the browser reports the character it produced rather than the
+ * letter that was pressed — ⌘⌥W arrives as `key: '∑'`, ⌘⌥R as `'®'`, ⌘⌥1 as
+ * `'¡'`. Comparing `key` alone therefore made every `mod+alt+*` binding dead on
+ * a Mac and let the key through to the browser. For a binding that asks for
+ * `alt`, a miss on `key` falls back to the **physical** key (`code`), which is
+ * layout-independent and unaffected by composition.
+ *
+ * The fallback is deliberately narrow: only `alt` bindings take it, so a
+ * non-Apple layout that types a different character with Alt (AltGr) still
+ * cannot fire a plain binding it did not ask for.
+ */
 export function matchesKeys(event: KeyEventLike, keys: ParsedKeys): boolean {
   if (event.ctrlKey !== keys.ctrl) return false
   if (event.metaKey !== keys.meta) return false
   if (event.altKey !== keys.alt) return false
   if (event.shiftKey !== keys.shift) return false
-  return event.key.toLowerCase() === keys.key
+  if (event.key.toLowerCase() === keys.key) return true
+  if (!keys.alt) return false
+  return codeMatches(event.code, keys.key)
+}
+
+/** `KeyboardEvent.code` names for the punctuation keys a binding may spell. */
+const CODE_NAMES: Record<string, string> = {
+  Slash: '/',
+  Backslash: '\\',
+  BracketLeft: '[',
+  BracketRight: ']',
+  Semicolon: ';',
+  Quote: "'",
+  Comma: ',',
+  Period: '.',
+  Minus: '-',
+  Equal: '=',
+  Backquote: '`',
+}
+
+/** Whether a `KeyboardEvent.code` names the same physical key as `key`. */
+function codeMatches(code: string | undefined, key: string): boolean {
+  if (code === undefined || code === '') return false
+  // `KeyW` → `w`, `Digit1` → `1`; punctuation has its own spelling.
+  if (code.startsWith('Key')) return code.slice(3).toLowerCase() === key
+  if (code.startsWith('Digit')) return code.slice(5) === key
+  const named = CODE_NAMES[code]
+  if (named !== undefined) return named === key
+  return code.toLowerCase() === key
 }
 
 

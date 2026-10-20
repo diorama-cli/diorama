@@ -126,3 +126,42 @@ test('7d. the command registry is kernel-provided and shared', async ({ page }) 
     directory.dispose()
   }
 })
+
+test('7e. shortcuts survive macOS Option composition (composed event.key)', async ({ page }) => {
+  const directory = fixture()
+  const server = await startDiorama(directory.root)
+  try {
+    await page.goto(server.url)
+    await openFiles(page, ['README.md', 'LICENSE'])
+    await expect(page.locator('.diorama-tabs__strip [role="tab"]')).toHaveCount(2)
+
+    // Why this test does not use `page.keyboard.press('Meta+Alt+W')`: Chromium's
+    // DevTools protocol synthesises the letter, so `key` stays 'w' and the bug
+    // hides. A real macOS browser composes Option+W into '∑' (and Option+R into
+    // '®', Option+1 into '¡'), which is the event that used to fall through to
+    // the browser. Dispatch exactly that, with the physical `code` a real
+    // keyboard reports, and require the kernel to consume it.
+    const press = async (key: string, code: string): Promise<boolean> =>
+      await page.evaluate(([k, c]) => {
+        const event = new KeyboardEvent('keydown', {
+          key: k, code: c, metaKey: true, altKey: true, bubbles: true, cancelable: true,
+        })
+        // `dispatchEvent` returns false when a listener called preventDefault:
+        // that is the observable "the page took the key" signal.
+        return !document.dispatchEvent(event)
+      }, [key, code])
+
+    expect(await press('∑', 'KeyW')).toBe(true)
+    await expect(page.locator('.diorama-tabs__strip [role="tab"]')).toHaveCount(1)
+
+    // ⌘⌥1 is composed as '¡' and switches the sidebar to the files view.
+    expect(await press('¡', 'Digit1')).toBe(true)
+    await expect(page.getByTestId('sidebar-view').first()).toBeVisible()
+
+    // ⌘⌥R composes to '®': the refresh command exists only with a tab open.
+    expect(await press('®', 'KeyR')).toBe(true)
+  } finally {
+    await server.stop()
+    directory.dispose()
+  }
+})
