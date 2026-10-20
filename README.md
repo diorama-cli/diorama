@@ -1,62 +1,173 @@
 # Diorama
 
-> A live diorama of your files.
+> A live diorama of your files. —— 把你的目录，摆成一个场景。
 
-在任意目录执行一条命令，这个目录就变成浏览器里一个可以走进去看的场景。代码文件有语法高亮，Markdown 会被渲染，之后还会有 git diff——每一样能力都是场景里的一块景片，装上插件就多一块。
+Diorama 是一个**只读的文件查看器**：在任意目录执行一条命令，这个目录就变成浏览器里一个可以走进去看的场景。文件树、多标签、Markdown、代码高亮、图片、PDF、git 变更与历史、文件搜索——每一样能力都是场景里的一块景片（piece），装上插件就多一块。
 
-**状态**：M0 完成（左树右文、单 tab、5 条验收全绿），见 [M0 实现说明](docs/m0/spec.md)。
+名字来自希腊语 **dia-**（穿过）+ **horama**（所见）："透过一个窗口看到的景象"。1822 年 Daguerre 在巴黎造的同名装置让人坐进暗室，看巨幅画面随光线变化而"活"起来——常被视为电影的前身。这个名字同时说了两件事：**你能看见什么**（一条命令，目录变成可看、可走的场景），以及**它是怎么来的**（场景不是画出来的，是一块块景片搭出来的）。完整的候选与撞名检查见 [docs/naming.md](docs/naming.md)。
 
-## 为什么叫 Diorama
+| 文件树 | 变更 | 搜索 |
+|---|---|---|
+| ![文件树](docs/m7/tree.png) | ![变更](docs/m7/changes.png) | ![搜索](docs/m7/search.png) |
 
-`diorama` 来自希腊语 **dia-**（穿过）+ **horama**（所见），本义是"透过一个窗口看到的景象"。1822 年 Daguerre 在巴黎造的同名装置，让人坐进暗室，看巨幅画面随光线变化而"活"起来——常被视为电影的前身。
+## 功能一览
 
-这个名字同时说了两件事：
+- **文件树**：彩色文件类型图标；默认隐藏 `.git` 与 `node_modules`（可用 `ignore` 规则覆盖）；大目录分页加载。
+- **多标签**：每个文件一个标签页，独立滚动、互不干扰；支持 `mod+alt+←/→` 与 `Ctrl+Shift+Tab` 切换。
+- **渲染器**：Markdown（marked + DOMPurify 消毒）、代码高亮（highlight.js）、图片（含 SVG）、PDF（浏览器原生查看器）、HTML（消毒预览与源码双视图，页面脚本逐文件确认后才执行）、纯文本兜底。渲染器失败时自动回退到下一个，绝不白屏。
+- **git 只读视图**：左栏「变更」实时显示工作区 diff（由文件 watch 驱动重算）；「历史」浏览提交列表，点开看提交详情、文件清单与「改动 / 提交时的内容」对比。
+- **搜索**：按内容（字面量 / 正则、大小写、全字匹配）或按文件名（子序列，VS Code `Ctrl+P` 口径）；点结果直接打开文件并跳到那一行。`mod+p` 随时快速打开文件。不做索引，每次现场扫描，遵守 `ignore` 规则。
+- **命令与快捷键**：命令面板（`mod+k`）与快捷键共用一套命令注册表；按 `?` 查看全部快捷键速查。
+- **实时刷新**：文件变化自动更新树与内容（300ms 合并，可在页面里关闭自动刷新）。
+- **URL 深链**：`/~/<路径>` 直接打开某个文件，刷新后恢复活动标签；git 视图的 `#diff`、`#history=<sha>` 同样可分享。
 
-- **你能看见什么**：一条命令，目录变成一个可看、可走的场景。这是功能。
-- **它是怎么来的**：场景不是画出来的，是一块块景片搭出来的——高亮一块、Markdown 一块、diff 一块。这是扩展。
+**不做的事**：编辑、保存、重命名、删除，git 写操作——Diorama 是只读查看器，被浏览的目录永远不会被写入。
 
-它不是"一个能扩展的文件服务器"，而是"一幅由许多块组成的画面"。功能和扩展在同一个词里，谁也不压过谁。
-
-## 品牌小件
-
-| 项 | 值 |
-|---|---|
-| 命令 | `diorama` |
-| 配置 | `diorama.toml` |
-| 插件 | **piece**（一块景片） |
-| 一组插件 | **scene** |
-| Slogan | A live diorama of your files. / 把你的目录，摆成一个场景。 |
+## 快速开始
 
 ```bash
-# 发布版：从 npm 安装，命令名是 diorama
 npm install -g @diorama-cli/diorama
-diorama .                                   # 目录 → 浏览器里的场景
-
-# 开发版（本仓库）：link 进来后命令名是 diorama-beta，永不覆盖已安装的 diorama
-pnpm install && ./link.sh
-diorama-beta .                              # 目录 → 浏览器里的场景（打开打印出的 URL）
-diorama-beta . --port 8080 --host 127.0.0.1
-diorama-beta ls                             # 目录 → URL → 状态
-diorama-beta gateway start|stop|status|restart
+diorama .
 ```
 
-`link.sh` 用 `npm link` 把本仓库 `packages/cli` 接到 npm 全局 bin（nvm 装 node 时可写）；它
-**只**创建 `diorama-beta`，并移除同一 checkout 产生的 `diorama` 软链——`diorama` 这个名字留给
-registry 安装。
+输出类似：
 
-两个版本默认**互不干扰**：beta 的 gateway 用 `$DIORAMA_HOME/diorama-beta.sock`、
-`gateway-beta.pid`、`gateway-beta.log`；发布版用 `diorama.sock`、`gateway.pid`、`gateway.log`。
-`diorama-beta ls` 看不到发布版的挂载，反之亦然（契约 §7.1/§7.4）。
+```text
+diorama serving /path/to/your/project
+  http://127.0.0.1:54321/
+  config: none (defaults)
+  [mount:78853ab4] plugins: slots, layout, file-tree, tabs, renderer-registry, plaintext, markdown, code, image, pdf, html, palette, help, git-changes, search-view
+  hidden: .git, node_modules
+```
 
-发布版是**一个包**：内核、UI 原语与 15 个内置插件都内联在里面，装完即可用，不需要再装插件
-（见 [docs/m8/spec.md](docs/m8/spec.md)）。`diorama --version` 与 gateway 报的版本取自包自己的
-`package.json`。
+打开打印出的 URL 即可。默认监听 `127.0.0.1` 并随机分配端口；对同一目录重复执行是幂等的，不会重复占用端口。
 
-也可以不 link：`node packages/cli/bin/diorama-beta <dir>`，或 `source ./link.sh` 只给当前
-shell 加 PATH。
+内置 15 个插件，装完即用，不需要再安装任何东西。发布包是一个整体：内核、UI 原语与全部内置插件都内联在内，运行时依赖只有 `cordis`。
 
-## 文档
+## CLI 命令
 
-- [计划](docs/plan.md) / [契约](docs/contract.md) / [架构](docs/architecture.md) / [功能清单](docs/features.md)
-- [M0 实现说明](docs/m0/spec.md)：M0 确认的契约补充、实现记录与验收结果
-- [命名记录](docs/naming.md)：完整候选、排除项与撞名检查
+```bash
+diorama [dir] [options]        # 挂载一个目录（gateway 未运行时自动拉起），打印 URL
+diorama ls [--json]            # 列出所有挂载：目录、URL、状态、配置来源
+diorama restart <mount|dir>    # 卸载后重新挂载（加载新配置或从故障中恢复）
+diorama gateway start|stop|status|restart
+diorama gateway run            # 前台运行 gateway
+diorama --version
+```
+
+`diorama [dir]` 的常用选项：
+
+| 选项 | 说明 |
+|---|---|
+| `--port <n>` | 指定端口；缺省时先看 `diorama.toml`，再随机分配。显式端口被占直接报错，不重试 |
+| `--host <ip>` | 监听网卡；缺省 `127.0.0.1`。需要局域网访问时显式放开 |
+| `--plugins <a,b,…>` | 只加载列出的内置插件（其余自动补齐依赖）；用于裁剪场景或调试 |
+| `--config <path>` | 指定 `diorama.toml`，跳过默认查找 |
+| `--all` | 不隐藏任何条目（等价 `ignore = []`） |
+| `--dump-config` / `--dump-plan` | 打印合成后的配置 / 插件启动计划（JSON），用于排查 |
+| `--foreground` | 在当前进程前台运行 gateway（调试、测试用） |
+
+退出码：成功 `0`；参数错误、目录不存在、配置写错为 `2`；端口被占、插件加载失败、连接超时为 `1`；未运行 gateway 时执行 `stop` 是成功的空操作。
+
+## 配置：`diorama.toml`
+
+唯一的配置文件。查找顺序：被服务的目录 → `$DIORAMA_HOME/diorama.toml`（默认 `~/.diorama`）→ 全默认；只读第一个找到的文件。优先级：**CLI 选项 > `diorama.toml` > 默认值**。配置写错会明确报错退出（退出码 2），绝不静默忽略。
+
+```toml
+# 全部字段可选
+host = "127.0.0.1"          # 监听网卡
+port = 0                    # 0 = 随机空闲端口
+plugins = [/* 内置客户端插件清单 */]
+ignore = [".git", "node_modules"]   # 隐藏规则（gitignore 语法子集；不读 .gitignore）
+
+[watch]
+debounceMs = 300            # 文件事件合并窗口（0–60000）
+enabled = true              # false 时完全关闭 watch
+maxDirectories = 64         # 每个目录同时监听的目录数上限（1–4096）
+```
+
+## 进程模型与安全
+
+- **一个 gateway，多个目录**：整台机器只有一个常驻的 `diorama gateway` 进程；`diorama .` 是短命命令，通过 Unix socket（`~/.diorama/diorama.sock`）通知 gateway 挂载目录并分配端口。gateway 未持久化——重启后挂载清空，重新执行 `diorama .` 即可。
+- **目录级故障隔离**：每个目录是独立的插件子树与 HTTP 端口；一个目录的插件故障只把该目录标记为 degraded（页面显示横幅，自动重启一次，也可 `diorama restart <dir>`），不影响其它目录。
+- **只读边界**：`ctx.fs` / `ctx.git` 不提供任何写接口；插件禁止直接访问 Node 文件系统，必须走 `ctx.fs`。唯一的写盘位置是工具自己的状态目录 `~/.diorama/`。
+- **默认只监听 loopback**：`host` 只能由 `diorama.toml` 或 `--host` 显式放宽。
+
+## 面向开发者
+
+### 仓库结构
+
+```
+packages/kernel/          内核：服务端（HTTP/RPC/fs/git/search/config/plan/gateway）
+                          与客户端（boot/rpc/fs/tabs/tree/commands/router），shared 类型
+packages/plugins/<id>/    内置插件，一包两半边：lib/index.mjs（server）+ lib/client.cjs（页面）
+packages/ui/              页面渲染原语：Slot、useKernel、错误边界、样式、图标
+packages/cli/             命令行：参数、diorama.toml 合成、服务端插件装配、gateway 控制
+apps/web/                 页面壳（Vite）+ Playwright 端到端测试
+docs/                     契约、架构、能力清单、逐里程碑实施说明
+scripts/                  生成器（图标表；pnpm icons 重新生成）
+```
+
+技术栈是 Node/TypeScript 全栈：服务端与客户端各跑一棵 [Cordis](https://github.com/cordisjs/cordis) 插件树，前端用 React（只通过 `useSyncExternalStore` 消费不可变快照），Vite 构建页面壳。**连布局都是插件**——壳只负责持有加载器、按插件图启动、绘制根座位。
+
+### 内置插件
+
+| 插件 | 职责 |
+|---|---|
+| `slots` | 座位（slot）注册表，所有组合的基础设施 |
+| `layout` | 页面骨架：左右分栏、侧栏视图切换器、覆盖层座位 |
+| `file-tree` | 左侧文件树视图 |
+| `tabs` | 多标签：打开、切换、关闭，每个标签一个内容座位（隐藏不卸载） |
+| `renderer-registry` | 按扩展名 → MIME → 内容探测三档派发渲染器，带回退链 |
+| `plaintext` | 纯文本兜底渲染器 |
+| `markdown` / `code` / `image` / `pdf` / `html` | 各文件类型的渲染器 |
+| `palette` | 命令面板（`mod+k`），只列当前可执行的命令 |
+| `help` | 快捷键速查表（`?`），列出全部绑定 |
+| `git-changes` | 左栏「变更」与「历史」视图、diff 与提交详情座位 |
+| `search-view` | 左栏「搜索」视图与 `mod+p` 快速打开 |
+
+### 写插件
+
+一个插件是一个 npm 包，`package.json` 里带 `diorama` 字段声明全局唯一的 `id`、兼容的契约版本范围（当前 `>=0.0.1 <0.1.0`）与依赖（`requires`）。一个包可以同时有 **server 半边**（注册服务，有文件系统权限，通过 RPC 暴露给页面）与 **client 半边**（注册座位条目与渲染组件）；两边不共享内存，只通过 RPC 通信。加载时内核校验契约版本，不匹配就拒绝加载并说明原因；任何失败都是 fail loud——大声报错，但只影响它负责的那一块，渲染器有回退链兜底。
+
+关键约束：**文件访问只能走 `ctx.fs`**（只读），插件里禁止 `import 'node:fs'`；协作只走座位（slot）与 Cordis 服务，不做跨插件的值导入。完整的签名、座位清单与匹配规则见 [docs/contract.md](docs/contract.md)；设计动机与已拍板的取舍见 [docs/architecture.md](docs/architecture.md)；能力档位（✅ / 待定 / 明确不做）见 [docs/features.md](docs/features.md)。
+
+### 开发与验证
+
+```bash
+pnpm install
+pnpm build                 # 全量构建（含各包的类型声明产出）
+pnpm test:unit             # node --test，167 条单测
+pnpm -r --no-sort run typecheck   # 注意：不要用 pnpm typecheck（任务图成环，会失败）
+pnpm --filter diorama-web exec playwright test   # 89 条端到端，真实 CLI + Chromium
+```
+
+端到端测试跑的是构建产物（`packages/*/lib`、`apps/web/dist`），改了源码先 `pnpm build` 再跑；每个用例使用独立的 `DIORAMA_HOME` 与 gateway，不碰真实的 `~/.diorama`。
+
+本地试用本仓库的代码：
+
+```bash
+pnpm install && ./link.sh
+diorama-beta .
+```
+
+`link.sh` 通过 `npm link` 把本仓库接到全局，但命令名是 **`diorama-beta`**，永远不会覆盖已安装的 `diorama`。两条通道互不干扰：beta 的 socket、pid、日志文件都带 `-beta` 后缀，`diorama-beta ls` 看不到发布版的挂载，反之亦然。也可以不 link，直接 `node packages/cli/bin/diorama-beta <dir>`，或 `source ./link.sh` 只给当前 shell 加 PATH。
+
+发布：`pnpm pack:prepare`（= 全量构建 + 组装单包）后在 `packages/cli` 里 `npm publish`，产物是 `@diorama-cli/diorama`。
+
+### 文档索引
+
+| 文档 | 回答什么 |
+|---|---|
+| [docs/contract.md](docs/contract.md) | **能不能**：内核与插件的唯一约定（manifest、`ctx.*` 服务、座位、RPC、控制面） |
+| [docs/architecture.md](docs/architecture.md) | **为什么**：已拍板的决定、放弃项与代价 |
+| [docs/features.md](docs/features.md) | **有什么**：能力清单与档位（✅ / 待定 / 明确不做） |
+| [docs/plan.md](docs/plan.md) | 阶段性排期与各里程碑的验收标准 |
+| [docs/m0…m8/spec.md](docs/) | 每一档的实施说明与踩坑记录 |
+
+## 状态与许可
+
+- 契约版本 `0.0.1`（pre-1.0 线：破坏性变更以 `0.0.x` 递增表达；插件声明 `>=0.0.1 <0.1.0`）。
+- 已实现：文件树、多标签、五类渲染器、git 变更与历史、文件搜索、命令面板与快捷键体系、watch、URL 深链、图标、gateway 多目录挂载、`diorama.toml` 配置。167 条单测 + 89 条端到端全部通过。
+- 尚未做：外部插件加载（`~/.diorama/plugins` 与 npm 来源）、主题、编辑能力（永远不会做——这是只读查看器）。
+- [MIT](LICENSE)
