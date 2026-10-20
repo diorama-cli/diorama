@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { GitService, MAX_LOG_LIMIT, parsePorcelainZ } from '../src/server/git.ts'
+import { detectRepository, GitService, gitEnvironment, MAX_LOG_LIMIT, parsePorcelainZ } from '../src/server/git.ts'
 import { createDispatcher } from '../src/server/rpc.ts'
 
 /**
@@ -334,4 +334,51 @@ test('git: history methods are reachable over the RPC surface only when describe
   const shown = (await dispatcher.call('git.show', [fixture.second, 'src/app.js'])) as { kind: string }
   assert.equal(shown.kind, 'modified')
   await assert.rejects(dispatcher.call('git.commit', []), /EMETHOD/)
+})
+
+/**
+ * The repository is decided by the mount, never by the environment the server
+ * inherited (contract.md §3.2): `GIT_DIR` / `GIT_WORK_TREE` and friends outrank
+ * `-C` in git itself, so a gateway started from a shell that carried them would
+ * have answered with that shell's repository — one mount's files, another
+ * repository's changes (the bug this test guards).
+ */
+test('git: the environment of the server cannot redirect the repository', async () => {
+  const mine = repo()
+  const other = repo()
+  const poisoned = {
+    GIT_DIR: join(other.root, '.git'),
+    GIT_WORK_TREE: other.root,
+    GIT_INDEX_FILE: join(other.root, '.git', 'index'),
+    GIT_CONFIG_PARAMETERS: "'core.worktree'='" + other.root + "'",
+  }
+  const saved = new Map(Object.keys(poisoned).map(name => [name, process.env[name]]))
+  Object.assign(process.env, poisoned)
+  try {
+    // Detection and every read answer for the mount, not for the environment.
+    const detected = await detectRepository(mine.root)
+    assert.deepEqual(detected, { repoRoot: realpathSync(mine.root) })
+    const fixture = new GitService(mine.root, (detected as { repoRoot: string }).repoRoot)
+    const entries = await fixture.status()
+    assert.deepEqual(entries.map(entry => entry.file).sort(), ['gone.txt', 'new.txt', 'src/app.js'])
+    assert.equal((await fixture.log({ limit: 1 }))[0]?.subject, 'first')
+  } finally {
+    for (const [name, value] of saved) {
+      if (value === undefined) delete process.env[name]
+      else process.env[name] = value
+    }
+    mine.dispose()
+    other.dispose()
+  }
+})
+
+test('git: the spawn environment drops every GIT_* variable it inherited', () => {
+  const env = gitEnvironment({ PATH: '/usr/bin', GIT_DIR: '/elsewhere/.git', GIT_WORK_TREE: '/elsewhere', HOME: '/home/u' })
+  assert.equal(env.PATH, '/usr/bin')
+  assert.equal(env.HOME, '/home/u')
+  assert.equal(env.GIT_DIR, undefined)
+  assert.equal(env.GIT_WORK_TREE, undefined)
+  assert.equal(env.GIT_TERMINAL_PROMPT, '0')
+  assert.equal(env.GIT_OPTIONAL_LOCKS, '0')
+  assert.equal(env.LC_ALL, 'C')
 })

@@ -311,6 +311,41 @@ export interface MountTree {
   dispose(): Promise<void>
 }
 
+/**
+ * Services every mount may provide, each isolated per mount (see
+ * {@link mountScope}). A kernel service with a server half that a mount
+ * provides belongs here; today that is `fs` and `git` (contract.md §3.1, §3.2).
+ */
+export const MOUNT_SERVICES = ['fs', 'git'] as const
+
+/**
+ * A context scoped to one mount: every {@link MOUNT_SERVICES} name resolves to
+ * this mount's own key (`<mountId>:<name>`).
+ *
+ * Cordis isolates by **name**, never by fiber — `isolate` only labels the one
+ * name it is given, and anything unlabelled falls back to the root's shared
+ * default key. Label all of them here; a plugin with its own per-mount service
+ * uses {@link isolateMountService}.
+ */
+export function mountScope(root: Context, mountId: string): Context {
+  let scoped: Pick<Context, 'isolate'> = root
+  for (const name of MOUNT_SERVICES) scoped = scoped.isolate(name, Symbol(`${mountId}:${name}`))
+  return scoped as Context
+}
+
+/**
+ * Isolate one more service for the mount a context belongs to (`ctx.mountId`),
+ * for a server half that provides a service outside {@link MOUNT_SERVICES}.
+ * Safe in the middle of a mount fiber: `isolate` only adds a label, so later
+ * `plugin()` fibers inherit it.
+ */
+export function isolateMountService(ctx: Context, name: string): Context {
+  const mountId = (ctx as unknown as { mountId?: string }).mountId
+  if (mountId === undefined) throw new Error(`isolateMountService("${name}") needs a mount context (no ctx.mountId)`)
+  // `isolate` returns `this` (an augmented Context); the cast keeps the signature plain.
+  return (ctx as Pick<Context, 'isolate'>).isolate(name, Symbol(`${mountId}:${name}`)) as unknown as Context
+}
+
 /** Fork a mount context from the host root and fire `onMount` for it. */
 export async function forkMount(host: PluginHost, options: {
   root: string
@@ -323,13 +358,18 @@ export async function forkMount(host: PluginHost, options: {
 }): Promise<MountTree> {
   const log = options.log ?? ((message: string) => console.error(message))
   const bare = host.root as unknown as CordisSurface
-  // Every mount gets its **own isolate key** (`isolate('fs', <unique symbol>)`)
-  // and its **own plugin fiber** under it. Both are load-bearing:
-  // - the key keeps `ctx.fs` out of the root and out of sibling mounts;
+  // Every mount gets its **own isolate key for every mount service** and its
+  // **own plugin fiber** under it. Both are load-bearing:
+  // - the keys keep `ctx.fs` / `ctx.git` out of the root and out of sibling
+  //   mounts. Cordis isolates **per service name**, not per fiber: a name this
+  //   mount does not isolate falls back to the root's default key
+  //   (`Symbol(name)`), which is shared — two mounts of one repository then
+  //   collide (`service "git" has been registered`) and the root can resolve
+  //   the wrong mount's repository (docs/m4/spec.md);
   // - the fiber owns the `provide`, so disposing this mount rolls back only
   //   this mount's services. A bare `ctx.provide` on a shared fiber would
   //   delete every mount's `fs` when one of them is disposed.
-  const ctx = bare.isolate('fs', Symbol(options.mountId)) as unknown as Context & CordisSurface
+  const ctx = mountScope(bare as unknown as Context, options.mountId) as unknown as Context & CordisSurface
   // `mountId` is a record, not a service: nothing injects it, and a plugin
   // reads it to learn which directory it was mounted for.
   Object.defineProperty(ctx as unknown as object, 'mountId', { value: options.mountId, configurable: true })

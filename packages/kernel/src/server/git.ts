@@ -96,6 +96,29 @@ class GitProcessError extends Error {
   }
 }
 
+/**
+ * The environment git runs with: the gateway's, minus every `GIT_*` variable,
+ * plus the three this service sets.
+ *
+ * `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_COMMON_DIR`, `GIT_CONFIG*`
+ * and the rest of git's environment are **stronger than `-C` / `cwd`**: a
+ * gateway started from a shell that carried them would answer every mount
+ * with whichever repository that shell pointed at (one mount's files, another
+ * mount's changes). The directory a mount serves is decided by the mount, so
+ * the repository is too; never by the environment the daemon inherited.
+ */
+export function gitEnvironment(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {}
+  for (const [name, value] of Object.entries(base)) {
+    if (name.startsWith('GIT_')) continue
+    env[name] = value
+  }
+  env.GIT_TERMINAL_PROMPT = '0' // never prompt (credentials)
+  env.GIT_OPTIONAL_LOCKS = '0' // never take a lock we did not ask for
+  env.LC_ALL = 'C'
+  return env
+}
+
 /** Run git in `cwd`; text output for `log`/`rev-parse`, raw for others. Never interactive. */
 function runGit(cwd: string, args: readonly string[], binary = false): Promise<Buffer | string> {
   return new Promise((settle, fail) => {
@@ -106,8 +129,7 @@ function runGit(cwd: string, args: readonly string[], binary = false): Promise<B
         cwd,
         encoding: binary ? 'buffer' : 'utf8',
         maxBuffer: 64 * 1024 * 1024,
-        // Never prompt (credentials, hooks) and never take a lock we did not ask for.
-        env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C' },
+        env: gitEnvironment(),
         timeout: 20_000,
       },
       (error, stdout, stderr) => {

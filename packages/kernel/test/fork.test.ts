@@ -3,12 +3,15 @@
  * one child context per directory, and the ordered unmount.
  */
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
+import type { Context } from 'cordis'
 import { defaultConfig } from '../src/server/config.ts'
 import { FsService, fsHalf } from '../src/server/fs.ts'
+import { gitHalf, GitService } from '../src/server/git.ts'
 import {
   createPluginHost,
   forkMount,
@@ -217,4 +220,54 @@ test('fork: the host keeps its own mounts when a tree is disposed (two hosts wou
   assert.deepEqual(right.mounts.list().map(info => info.mountId), ['r'])
   await l.dispose()
   await r.dispose()
+})
+
+/**
+ * Two directories of the **same** repository (contract.md §2.5, §3.2): each
+ * mount's `git` is its own service. Cordis isolates per service name, so a
+ * mount service that is not in `MOUNT_SERVICES` shares the root's key — the
+ * second mount then collides (`service "git" has been registered`) and the
+ * root can resolve the wrong mount's repository.
+ */
+test('fork: each mount of one repository gets its own git, and the root gets none', async t => {
+  const repo = mkdtempSync(join(tmpdir(), 'di-iso-'))
+  t.after(() => rmSync(repo, { recursive: true, force: true }))
+  const run = (...args: string[]): void => {
+    execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', ...args], { cwd: repo })
+  }
+  mkdirSync(join(repo, 'sub'))
+  writeFileSync(join(repo, 'top.txt'), 'x\n')
+  writeFileSync(join(repo, 'sub', 'inner.txt'), 'y\n')
+  run('init', '-q', '-b', 'main')
+  run('add', '-A')
+  run('commit', '-q', '-m', 'base')
+
+  const logs: string[] = []
+  const host = await createPluginHost(message => logs.push(message))
+  await host.load([fsHalf, gitHalf])
+  const inner = await forkMount(host, { root: join(repo, 'sub'), mountId: 'inner', log: message => logs.push(message) })
+  const outer = await forkMount(host, { root: repo, mountId: 'outer', log: message => logs.push(message) })
+  // `gitHalf` detects on an async fiber: let it answer.
+  await new Promise(resolve => setTimeout(resolve, 500))
+
+  const gitOf = (ctx: Context): GitService | undefined =>
+    (ctx as unknown as { get(name: string): unknown }).get('git') as GitService | undefined
+  const a = gitOf(inner.ctx)
+  const b = gitOf(outer.ctx)
+  assert.ok(a instanceof GitService)
+  assert.ok(b instanceof GitService)
+  assert.notEqual(a, b)
+  // Each service serves its own mount (the same working tree, different mount roots).
+  assert.equal(a.root, realpathSync(join(repo, 'sub')))
+  assert.equal(b.root, realpathSync(repo))
+  // The root sees neither, and nothing collided.
+  assert.equal(gitOf(host.root), undefined)
+  assert.deepEqual(logs.filter(message => /has been registered/.test(message)), [])
+
+  // Disposing one mount takes only its own service away.
+  await inner.dispose()
+  assert.equal(gitOf(inner.ctx), undefined)
+  assert.ok(gitOf(outer.ctx) instanceof GitService)
+  await outer.dispose()
+  await host.dispose()
 })
