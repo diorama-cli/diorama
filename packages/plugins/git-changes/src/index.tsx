@@ -19,11 +19,11 @@
  */
 import type { Context } from 'cordis'
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactElement } from 'react'
-import type { ChangeTreeNode, DiffResult, FileInfo, GitStatusEntry } from 'diorama-kernel'
+import type { ChangeTreeNode, CommitDetail, DiffEntry, DiffResult, FileInfo, GitLogEntry, GitStatusEntry } from 'diorama-kernel'
 import { buildChangeTree, hasGit, type GitClient, type TabsService } from 'diorama-kernel/client'
 import { provideEntry, useKernel } from 'diorama-ui'
 import type {} from 'diorama-plugin-slots'
-import type { TabDiffProps } from 'diorama-plugin-slots'
+import type { CommitSeatProps, TabDiffProps } from 'diorama-plugin-slots'
 
 export const name = 'git-changes'
 export const inject = ['slots']
@@ -39,9 +39,23 @@ export const CHANGES_VIEW = 'changes'
  */
 export const DIFF_HASH_KEY = 'diff'
 
+/** The switcher key of the history view (contract.md §5.2, v0.6). */
+export const HISTORY_VIEW = 'history'
+
+/**
+ * This piece's hash key for the history view (contract.md §3.8): the **value**
+ * is the commit being looked at, or `''` for "the history view is open, no
+ * commit picked yet". The kernel does not know what `history` means.
+ */
+export const HISTORY_HASH_KEY = 'history'
+
 /** The switcher icon (inline SVG; `layout` draws it verbatim). */
 export const CHANGES_ICON =
   '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="5" cy="3.5" r="1.6"/><circle cx="5" cy="12.5" r="1.6"/><circle cx="11" cy="5.5" r="1.6"/><path d="M5 5.1v5.8M11 7.1c0 2-1.5 2.6-3.2 3.4"/></svg>'
+
+/** The history view's icon (a commit graph). */
+export const HISTORY_ICON =
+  '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M3 2v12"/><circle cx="3" cy="5" r="1.7"/><circle cx="3" cy="11" r="1.7"/><path d="M4.7 5h2.3a3 3 0 0 1 3 3v2"/><circle cx="13" cy="11" r="1.7"/></svg>'
 
 /** Kind → the badge shown in the changes list (VS Code's letters). */
 const BADGE: Record<GitStatusEntry['kind'], string> = {
@@ -514,15 +528,413 @@ function DiffBody({
           正在读取文件…
         </div>
       )}
-      {lines.length > 0 && (
-        <pre className="diorama-diff__text" data-testid="git-diff-text">
-          {lines.map((line, index) => (
-            <div key={index} className={`diorama-diff__line diorama-diff__line--${lineTone(line)}`}>
-              {line === '' ? '\u00a0' : line}
-            </div>
-          ))}
-        </pre>
+      {lines.length > 0 && <DiffLines lines={lines} />}
+    </div>
+  )
+}
+
+/**
+ * Unified diff lines, coloured (contract.md §3.2: the text, not a parsed
+ * model). Shared by the working-tree diff and a commit's file list.
+ */
+function DiffLines({ lines, testId = 'git-diff-text' }: { lines: readonly string[]; testId?: string }) {
+  return (
+    <pre className="diorama-diff__text" data-testid={testId}>
+      {lines.map((line, index) => (
+        <div key={index} className={`diorama-diff__line diorama-diff__line--${lineTone(line)}`}>
+          {line === '' ? '\u00a0' : line}
+        </div>
+      ))}
+    </pre>
+  )
+}
+
+/** The lines of a unified diff, without the trailing newline artifact. */
+function diffLines(text: string): string[] {
+  const lines = text.split('\n')
+  if (lines[lines.length - 1] === '') lines.pop()
+  return lines
+}
+
+/**
+ * The history: recent commits in the left column (contract.md §5.2, v0.6).
+ * Picking one shows it in the right column (`seats.git-commit`) and records it
+ * in the hash (`#history=<sha>`), so a refresh comes back to the same commit.
+ * Commits are paged by `log()`'s limit; "more" asks for the next page.
+ */
+const HISTORY_PAGE = 50
+
+function useHistory(git: GitClient): {
+  commits: GitLogEntry[] | undefined
+  error: string | undefined
+  more: boolean
+  loadMore(): void
+  reload(): void
+} {
+  const [limit, setLimit] = useState(HISTORY_PAGE)
+  const [epoch, setEpoch] = useState(0)
+  const [state, setState] = useState<{ commits?: GitLogEntry[]; error?: string }>({})
+  useEffect(() => {
+    let live = true
+    git.log({ limit }).then(
+      commits => {
+        if (live) setState({ commits })
+      },
+      (error: unknown) => {
+        if (live) setState({ error: error instanceof Error ? error.message : String(error) })
+      },
+    )
+    return () => {
+      live = false
+    }
+  }, [git, limit, epoch])
+  const commits = state.commits
+  return {
+    commits,
+    error: state.error,
+    // A full page may or may not have more; the next ask that comes back short ends it.
+    more: commits !== undefined && commits.length === limit && limit < MAX_LOG_LIMIT_PAGE,
+    loadMore: () => setLimit(value => Math.min(value + HISTORY_PAGE, MAX_LOG_LIMIT_PAGE)),
+    reload: () => setEpoch(value => value + 1),
+  }
+}
+
+/** The most commits this view asks for at once (the service caps at 500). */
+const MAX_LOG_LIMIT_PAGE = 500
+
+/** When a commit was made, in the reader's locale (date + time, minute precision). */
+function formatWhen(at: number): string {
+  const date = new Date(at)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleString(undefined, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function HistoryView({ active }: { active: boolean }) {
+  const { mount, ctx } = useKernel()
+  const git = mount.git
+  const history = useHistory(git)
+  const router = ctx.router
+  const selected = useHistorySelection(ctx)
+  void active
+  if (history.error !== undefined) {
+    return (
+      <div className="diorama-changes" data-testid="git-history" role="alert">
+        {history.error}
+      </div>
+    )
+  }
+  if (history.commits === undefined) {
+    return (
+      <div className="diorama-changes" data-testid="git-history">
+        正在读取历史…
+      </div>
+    )
+  }
+  if (history.commits.length === 0) {
+    return (
+      <div className="diorama-changes diorama-changes__empty" data-testid="git-history" role="status">
+        还没有提交
+      </div>
+    )
+  }
+  const pick = (sha: string): void => {
+    // The value carries the commit; `''` would mean "nothing picked".
+    router?.state(HISTORY_HASH_KEY).set(sha)
+  }
+  return (
+    <div className="diorama-changes" data-testid="git-history">
+      <div className="diorama-changes__group">
+        <span>{history.commits.length} 个提交</span>
+        <button type="button" className="diorama-changes__reload" data-testid="git-history-reload" onClick={history.reload}>
+          刷新
+        </button>
+      </div>
+      <div className="diorama-history" role="listbox" aria-label="提交历史">
+        {history.commits.map(commit => {
+          const current = commit.sha === selected
+          return (
+            <button
+              key={commit.sha}
+              type="button"
+              role="option"
+              aria-selected={current}
+              className={`diorama-history__row${current ? ' diorama-changes__row--selected' : ''}`}
+              data-sha={commit.sha}
+              data-testid="git-history-commit"
+              title={`${commit.sha}\n${commit.author} · ${formatWhen(commit.at)}`}
+              onClick={() => pick(commit.sha)}
+            >
+              <span className="diorama-history__subject">{commit.subject || '(无提交说明)'}</span>
+              <span className="diorama-history__meta">
+                <code>{commit.shortSha}</code>
+                <span className="diorama-history__author">{commit.author}</span>
+                <time dateTime={new Date(commit.at).toISOString()}>{formatWhen(commit.at)}</time>
+              </span>
+            </button>
+          )
+        })}
+      </div>
+      {history.more && (
+        <button type="button" className="diorama-changes__reload" data-testid="git-history-more" onClick={history.loadMore}>
+          加载更多
+        </button>
       )}
+    </div>
+  )
+}
+
+/**
+ * The commit the history view has picked: the hash value, kept in step with
+ * the seat. One writer (this view) and one reader (the seat) share the slot.
+ */
+function useHistorySelection(ctx: unknown): string | undefined {
+  const [selected, setSelected] = useState<string | undefined>(() => readHistoryHash(ctx))
+  useEffect(() => {
+    const slot = historySlot(ctx)
+    if (slot === undefined) return
+    const sync = (): void => {
+      const value = slot.get()
+      setSelected(value === undefined || value === '' ? undefined : value)
+    }
+    sync()
+    return slot.onChange(sync)
+  }, [ctx])
+  return selected
+}
+
+/** Read and write `#history` through the router (absent outside a page). */
+function historySlot(ctx: unknown): { get(): string | undefined; set(value: string | undefined): void; onChange(fn: () => void): () => void } | undefined {
+  try {
+    const router = (ctx as { router?: { state(key: string): { get(): string | undefined; set(value: string | undefined): void; onChange(fn: () => void): () => void } } }).router
+    return router?.state(HISTORY_HASH_KEY)
+  } catch {
+    return undefined
+  }
+}
+
+function readHistoryHash(ctx: unknown): string | undefined {
+  const value = historySlot(ctx)?.get()
+  return value === undefined || value === '' ? undefined : value
+}
+
+/**
+ * The commit seat (contract.md §5, v0.6): message, author and the files the
+ * commit touched. Picking a file shows its change in that commit, with a
+ * toggle for the file's content at that commit (`blob()`).
+ */
+function CommitSeat({ commit }: CommitSeatProps) {
+  const { mount } = useKernel()
+  const git = mount.git
+  const [state, setState] = useState<{ status: string; detail?: CommitDetail; error?: string }>({ status: 'loading' })
+  const [picked, setPicked] = useState<string | undefined>(undefined)
+  const [mode, setMode] = useState<'diff' | 'content'>('diff')
+  useEffect(() => {
+    let live = true
+    setState({ status: 'loading' })
+    setPicked(undefined)
+    git.showCommit(commit).then(
+      detail => {
+        if (!live) return
+        setState({ status: 'ready', detail })
+        // No pick yet: the first changed file is the natural one to show.
+        setPicked(detail.files[0]?.file)
+      },
+      (error: unknown) => {
+        if (live) setState({ status: 'error', error: error instanceof Error ? error.message : String(error) })
+      },
+    )
+    return () => {
+      live = false
+    }
+  }, [git, commit])
+  if (state.status === 'loading') {
+    return (
+      <div className="diorama-diff" data-testid="git-commit-loading">
+        正在读取提交…
+      </div>
+    )
+  }
+  if (state.status === 'error') {
+    return (
+      <div className="diorama-diff diorama-renderer__error" role="alert" data-testid="git-commit-error">
+        {state.error}
+      </div>
+    )
+  }
+  const detail = state.detail as CommitDetail
+  const file = picked === undefined ? undefined : detail.files.find(item => item.file === picked)
+  return (
+    <div className="diorama-diff" data-testid="git-commit" data-sha={detail.sha}>
+      <div className="diorama-diff__header">
+        <code className="diorama-git-commit__sha">{detail.shortSha}</code>
+        <span className="diorama-diff__path">{detail.subject || detail.sha}</span>
+      </div>
+      <div className="diorama-git-commit__meta">
+        {detail.author} · {formatWhen(detail.at)}
+      </div>
+      <pre className="diorama-git-commit__message" data-testid="git-commit-message">
+        {detail.message.replace(/\n+$/, '')}
+      </pre>
+      {detail.truncated === true && (
+        <div className="diorama-diff__notes" role="status">
+          改动的文件过多，只列出了一部分
+        </div>
+      )}
+      <div className="diorama-git-commit__body">
+        <div className="diorama-git-commit__files">
+          <div className="diorama-changes__group">
+            <span>{detail.files.length} 个文件</span>
+          </div>
+          {detail.files.map(item => (
+            <button
+              key={item.file}
+              type="button"
+              className={`diorama-changes__row${item.file === picked ? ' diorama-changes__row--selected' : ''}`}
+              data-file={item.file}
+              data-testid="git-commit-file"
+              onClick={() => setPicked(item.file)}
+            >
+              <span className={`diorama-changes__badge diorama-changes__badge--${TONE[item.kind]}`} aria-hidden="true">
+                {BADGE[item.kind]}
+              </span>
+              <span className="diorama-changes__name">{item.file}</span>
+            </button>
+          ))}
+        </div>
+        <div className="diorama-git-commit__panel">
+          {file !== undefined && (
+            <div className="diorama-git-commit__modes" role="group" aria-label="显示方式">
+              <button type="button" aria-pressed={mode === 'diff'} data-testid="git-commit-mode-diff" onClick={() => setMode('diff')}>
+                改动
+              </button>
+              <button type="button" aria-pressed={mode === 'content'} data-testid="git-commit-mode-content" onClick={() => setMode('content')}>
+                提交时的内容
+              </button>
+            </div>
+          )}
+          {file === undefined && (
+            <div className="diorama-renderer__empty" role="status" data-testid="git-commit-empty">
+              这个提交没有改动
+            </div>
+          )}
+          {file !== undefined && mode === 'diff' && <CommitFileDiff commit={detail.sha} file={file} />}
+          {file !== undefined && mode === 'content' && <CommitFileContent commit={detail.sha} path={file.file} />}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** One file's change in the commit (`show()`), as diff lines. */
+function CommitFileDiff({ commit, file }: { commit: string; file: DiffEntry }) {
+  const { mount } = useKernel()
+  const [state, setState] = useState<{ status: string; entry?: DiffEntry; error?: string }>({
+    status: file.text === undefined && file.binary !== true ? 'loading' : 'ready',
+    entry: file,
+  })
+  useEffect(() => {
+    // `showCommit()` already carries the text; only a text-less entry (a
+    // binary, or a file the commit did not change) asks again.
+    if (file.text !== undefined || file.binary === true) {
+      setState({ status: 'ready', entry: file })
+      return
+    }
+    let live = true
+    mount.git.show(commit, file.file).then(
+      entry => {
+        if (live) setState({ status: 'ready', entry })
+      },
+      (error: unknown) => {
+        if (live) setState({ status: 'error', error: error instanceof Error ? error.message : String(error) })
+      },
+    )
+    return () => {
+      live = false
+    }
+  }, [mount, commit, file])
+  if (state.status === 'loading') {
+    return <div className="diorama-renderer" data-testid="git-commit-diff-loading">正在读取改动…</div>
+  }
+  if (state.status === 'error') {
+    return (
+      <div className="diorama-renderer__error" role="alert" data-testid="git-commit-diff-error">
+        {state.error}
+      </div>
+    )
+  }
+  const entry = state.entry as DiffEntry
+  if (entry.binary === true) {
+    return (
+      <div className="diorama-renderer__empty" role="status" data-testid="git-commit-diff-binary">
+        二进制文件：git 不提供文本 diff
+      </div>
+    )
+  }
+  return (
+    <div data-testid="git-commit-diff" data-kind={entry.kind}>
+      {entry.truncated === true && (
+        <div className="diorama-diff__notes" role="status">
+          这个文件的 diff 过大，已截断
+        </div>
+      )}
+      <DiffLines lines={diffLines(entry.text ?? '')} testId="git-commit-diff-text" />
+    </div>
+  )
+}
+
+/** One file's content at the commit (`blob()`). */
+function CommitFileContent({ commit, path }: { commit: string; path: string }) {
+  const { mount } = useKernel()
+  const [state, setState] = useState<{ status: string; text?: string; binary?: boolean; size?: number; truncated?: boolean; error?: string }>({
+    status: 'loading',
+  })
+  useEffect(() => {
+    let live = true
+    mount.git.blob(commit, path).then(
+      result => {
+        if (live) setState({ status: 'ready', text: result.text, binary: result.binary === true, size: result.size, truncated: result.truncated === true })
+      },
+      (error: unknown) => {
+        if (live) setState({ status: 'error', error: error instanceof Error ? error.message : String(error) })
+      },
+    )
+    return () => {
+      live = false
+    }
+  }, [mount, commit, path])
+  if (state.status === 'loading') {
+    return <div className="diorama-renderer" data-testid="git-commit-blob-loading">正在读取文件…</div>
+  }
+  if (state.status === 'error') {
+    return (
+      <div className="diorama-renderer__error" role="alert" data-testid="git-commit-blob-error">
+        {state.error}
+      </div>
+    )
+  }
+  if (state.binary === true) {
+    return (
+      <div className="diorama-renderer__empty" role="status" data-testid="git-commit-blob-binary">
+        二进制文件（{formatBytes(state.size ?? 0)}）
+      </div>
+    )
+  }
+  return (
+    <div data-testid="git-commit-blob">
+      {state.truncated === true && (
+        <div className="diorama-diff__notes" role="status">
+          文件过大（{formatBytes(state.size ?? 0)}），已截断
+        </div>
+      )}
+      <pre className="diorama-diff__text" data-testid="git-commit-blob-text">
+        {(state.text ?? '').replace(/\n$/, '')}
+      </pre>
     </div>
   )
 }
@@ -545,13 +957,21 @@ export function apply(ctx: Context) {
   // longer true: the active tab is not that diff (the user switched to the
   // content tab, opened another file from the tree) or the diff tab is gone.
   trackDiffHash(ctx)
-  // The changes view exists only where there is a repository (contract.md §3.2).
+  // The commit seat is declared by `tabs`, like the diff seat (contract.md §5,
+  // v0.6); this piece fills it. A commit is shown without being a tab.
+  provideEntry(ctx, { id: 'git-changes:commit', name: 'seats.git-commit', order: 100 }, CommitSeat)
+  // Both views exist only where there is a repository (contract.md §3.2).
   void hasGit(mount.git).then(present => {
     if (!present) return
     provideEntry(
       ctx,
       { id: 'git-changes:view', name: 'sidebar.views', key: CHANGES_VIEW, order: 20, title: '变更', icon: CHANGES_ICON },
       ChangesView,
+    )
+    provideEntry(
+      ctx,
+      { id: 'git-changes:history', name: 'sidebar.views', key: HISTORY_VIEW, order: 30, title: '历史', icon: HISTORY_ICON },
+      HistoryView,
     )
   })
 }

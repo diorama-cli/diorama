@@ -17,7 +17,8 @@
  */
 import type { Context } from 'cordis'
 import type { MountHandle } from 'diorama-kernel'
-import { useState, type ReactElement } from 'react'
+import type { CommandsService } from 'diorama-kernel/client'
+import { useSyncExternalStore, type ReactElement } from 'react'
 import { provideEntry, Slot, useKeyedSeat } from 'diorama-ui'
 import type {} from 'diorama-plugin-slots'
 import type { SidebarViewProps, SlotEntry } from 'diorama-plugin-slots'
@@ -32,6 +33,73 @@ export interface LayoutRootProps {
 
 /** The view shown when the page has not chosen one (contract.md §5.2). */
 export const DEFAULT_VIEW = 'files'
+
+/**
+ * Which view the column shows. Page-level state, not a component's: the
+ * switcher, the `sidebar.show*` commands (contract.md §3.7) and the view's
+ * hash flag (§3.8) all name the same choice, and only one of them may hold it.
+ */
+class ViewChoice {
+  private chosen: string | undefined
+  private version = 0
+  private readonly listeners = new Set<() => void>()
+  private known = new Set<string>()
+
+  /** The chosen view, or `undefined` for "whatever comes first". */
+  get(): string | undefined {
+    return this.chosen
+  }
+
+  /**
+   * Record which views exist right now. The switcher calls this as it
+   * renders; the commands ask `available()` so that "show the history" is not
+   * executable on a directory with no repository (the piece never registered
+   * the view there). No notify: the switcher's own render is the update.
+   */
+  register(keys: readonly string[]): void {
+    this.known = new Set(keys)
+  }
+
+  /** Whether a view id is currently registered (a command's `when`). */
+  available(key: string): boolean {
+    return this.known.has(key)
+  }
+
+  show(view: string): void {
+    if (this.chosen === view) return
+    this.chosen = view
+    this.notify()
+  }
+
+  subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener)
+    return () => {
+      this.listeners.delete(listener)
+    }
+  }
+
+  getVersion = (): number => this.version
+
+  private notify(): void {
+    this.version++
+    for (const listener of [...this.listeners]) listener()
+  }
+}
+
+const viewChoice = new ViewChoice()
+
+/**
+ * The side column's views, keyed by id, are `files` / `changes` / `history`
+ * (contract.md §3.7): the commands below are fixed, not one per registered view.
+ */
+const SIDEBAR_COMMANDS = [
+  { id: 'sidebar.showFiles', key: 'files', title: '侧栏：文件', keys: 'mod+alt+1' },
+  { id: 'sidebar.showChanges', key: 'changes', title: '侧栏：变更', keys: 'mod+alt+2' },
+  { id: 'sidebar.showHistory', key: 'history', title: '侧栏：历史', keys: 'mod+alt+3' },
+] as const
+
+/** The view ids whose hash flags `layout` honours on boot (contract.md §3.8). */
+const SIDEBAR_KEYS = SIDEBAR_COMMANDS.map(command => command.key)
 
 function SeatError({ label, message, testId }: { label: string; message: string; testId: string }) {
   return (
@@ -118,8 +186,15 @@ function SidebarView({ view, active }: { view: SlotEntry<'sidebar.views'>; activ
  * first view, so removing a piece never leaves the column blank.
  */
 function Sidebar({ views }: { views: readonly SlotEntry<'sidebar.views'>[] }) {
-  const [chosen, setChosen] = useState<string | undefined>(undefined)
+  // The store's version is the snapshot: the chosen id itself is read separately,
+  // so the snapshot is a number and never a fresh object (React #185).
+  useSyncExternalStore(viewChoice.subscribe, viewChoice.getVersion)
+  const chosen = viewChoice.get()
   const keys = views.map(view => view.key ?? '')
+  viewChoice.register(keys)
+  // `active` drives the views' `props.active`; it is computed on every render
+  // from the store, so a command's change reaches the views in the same pass.
+  const setChosen = (view: string): void => viewChoice.show(view)
   const active = chosen !== undefined && keys.includes(chosen) ? chosen : (keys.includes(DEFAULT_VIEW) ? DEFAULT_VIEW : keys[0])
   if (views.length === 0) return null
   return (
@@ -210,4 +285,60 @@ function LayoutRoot(_props: LayoutRootProps) {
 
 export function apply(ctx: Context) {
   provideEntry(ctx, { id: 'layout:root', name: 'root', order: 0, declare: DECLARE }, LayoutRoot)
+
+  // The switcher's keyboard entry points (contract.md §3.7, v0.6). `layout`
+  // registers them because it is the one that holds the choice; a view without
+  // a command (a third-party one) simply has no shortcut.
+  // A view named in the URL's hash (`#history=<sha>`, contract.md §3.8) is the
+  // one to show after a refresh: the piece wrote it because the user was there.
+  // `layout` only sees keys it knows; the writer is the view's own piece.
+  trackViewInHash(ctx)
+
+  const commands = clientCommands(ctx)
+  if (commands === undefined) return
+  for (const command of SIDEBAR_COMMANDS) {
+    commands.register({
+      id: command.id,
+      title: command.title,
+      // A view that is not registered cannot be shown: the command is then not
+      // executable (absent from the palette, and its keys do nothing, §3.7).
+      when: () => viewChoice.available(command.key),
+      run: () => viewChoice.show(command.key),
+    })
+    commands.bind({ keys: command.keys, command: command.id })
+  }
+}
+
+/**
+ * Show the view whose key a hash entry names, when one is registered. The keys
+ * are this column's well-known ones (contract.md §3.7); a piece's own extra
+ * hash keys are its business and are not looked at here.
+ */
+function trackViewInHash(ctx: Context): void {
+  let router: { state(key: string): { get(): string | undefined } } | undefined
+  try {
+    router = (ctx as unknown as { router?: typeof router }).router
+  } catch {
+    return
+  }
+  if (router === undefined) return
+  for (const key of SIDEBAR_KEYS) {
+    const slot = router.state(key)
+    if (slot.get() !== undefined) {
+      viewChoice.show(key)
+      return
+    }
+  }
+}
+
+/** `ctx.commands` when this context is a page (client kernel), else `undefined`.
+ * One module serves both halves, and Cordis throws on reading a service that is
+ * neither provided nor injected.
+ */
+function clientCommands(ctx: Context): CommandsService | undefined {
+  try {
+    return (ctx as unknown as { commands?: CommandsService }).commands
+  } catch {
+    return undefined
+  }
 }

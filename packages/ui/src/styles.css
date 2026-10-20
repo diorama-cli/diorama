@@ -742,3 +742,121 @@ code {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
+
+/* History view and the commit seat (contract.md §5, §5.2, v0.6) */
+.diorama-history {
+  display: flex;
+  flex-direction: column;
+}
+
+.diorama-history__row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 5px 10px;
+  border: 0;
+  border-left: 2px solid transparent;
+  background: none;
+  color: var(--dio-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.diorama-history__row:hover {
+  background: var(--dio-hover);
+}
+
+.diorama-history__row.diorama-changes__row--selected {
+  border-left-color: var(--dio-accent);
+  background: var(--dio-selected);
+}
+
+.diorama-history__subject {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diorama-history__meta {
+  display: flex;
+  gap: 8px;
+  color: var(--dio-muted);
+  font-size: 11px;
+}
+
+.diorama-history__meta code {
+  font-family: var(--dio-mono);
+}
+
+.diorama-history__author {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diorama-git-commit__sha {
+  font-family: var(--dio-mono);
+  color: var(--dio-muted);
+}
+
+.diorama-git-commit__meta {
+  padding: 2px 12px 0;
+  color: var(--dio-muted);
+  font-size: 12px;
+}
+
+.diorama-git-commit__message {
+  margin: 8px 12px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--dio-surface-alt, #f6f7f9);
+  font-family: var(--dio-mono);
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.diorama-git-commit__body {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) 1fr;
+  min-height: 0;
+  flex: 1;
+  border-top: 1px solid var(--dio-border);
+}
+
+.diorama-git-commit__files {
+  overflow: auto;
+  border-right: 1px solid var(--dio-border);
+  padding: 6px 0;
+}
+
+.diorama-git-commit__panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: auto;
+}
+
+.diorama-git-commit__modes {
+  display: flex;
+  gap: 4px;
+  padding: 6px 12px;
+}
+
+.diorama-git-commit__modes button {
+  border: 1px solid var(--dio-border);
+  border-radius: 4px;
+  background: none;
+  color: var(--dio-text);
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.diorama-git-commit__modes button[aria-pressed='true'] {
+  border-color: var(--dio-accent);
+  color: var(--dio-accent);
+}

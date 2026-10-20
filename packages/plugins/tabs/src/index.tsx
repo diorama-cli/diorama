@@ -11,7 +11,7 @@
  * file.
  */
 import type { Context } from 'cordis'
-import type { ReactElement } from 'react'
+import { useCallback, useSyncExternalStore, type ReactElement } from 'react'
 import type {} from 'diorama-plugin-slots'
 import { bindMethods, provideEntry, Slot, useKernel, useStore } from 'diorama-ui'
 import { createTabsService, type CommandsService, type TabInfo } from 'diorama-kernel/client'
@@ -27,11 +27,63 @@ export const inject = ['slots']
 const DECLARE = {
   'tabs.content': { kind: 'keyed' },
   'seats.git-diff': { kind: 'single' },
+  // A commit picked in the history view (contract.md §5, v0.6). What is being
+  // shown is a commit, not a tab, so the piece that picks it fills this seat and
+  // the right column draws it in place of the tabs while it is picked.
+  'seats.git-commit': { kind: 'single' },
 } as const
 
 /** Props of one `tabs.content` entry. */
 interface ContentProps {
   tab: TabInfo
+}
+
+/**
+ * The commit the history view has picked, from the URL hash (contract.md §3.8,
+ * §5: v0.6). `tabs` does not know what `history` means beyond "a value means
+ * the reader is looking at a commit"; the piece that writes it fills the seat.
+ * Subscribed, so picking a commit switches the right column and closing the
+ * history view (value gone) brings the tabs back.
+ */
+function usePickedCommit(): string | undefined {
+  const { ctx } = useKernel()
+  const router = ctx.router as
+    | { state(key: string): { get(): string | undefined; onChange(fn: () => void): () => void } }
+    | undefined
+  const slot = router?.state('history')
+  const commit = useSyncExternalStore(
+    useCallback((listener: () => void) => slot?.onChange(listener) ?? (() => {}), [slot]),
+    useCallback(() => {
+      const value = slot?.get()
+      return value === undefined || value === '' ? undefined : value
+    }, [slot]),
+  )
+  return commit
+}
+
+/** The picked commit, drawn in `seats.git-commit` in place of the tabs (v0.6). */
+function CommitColumn({ commit }: { commit: string }) {
+  const { registry } = useKernel()
+  if (registry?.owned?.('seats.git-commit') !== true) return null
+  return (
+    <section className="diorama-tabs diorama-tabs--commit" data-testid="tabs-commit">
+      <Slot
+        name="seats.git-commit"
+        props={{ commit }}
+        empty={null}
+        exhausted={errors => (
+          <div className="diorama-renderer__error" role="alert">
+            {errors.join('\n')}
+          </div>
+        )}
+        fallback={null}
+        render={entry => {
+          const Commit = entry.component as unknown as (props: { commit: string }) => ReactElement | null
+          return <Commit commit={commit} />
+        }}
+      />
+    </section>
+  )
 }
 
 /** One tab's seat: the diff seat for `view: 'diff'`, else `tabs.content`. */
@@ -107,6 +159,10 @@ function TabsView() {
   const { ctx } = useKernel()
   const tabs = ctx.tabs
   const snapshot = useStore(tabs)
+  // A commit being looked at takes the right column; the tabs (and their
+  // per-tab state) stay mounted underneath the whole time.
+  const commit = usePickedCommit()
+  if (commit !== undefined) return <CommitColumn commit={commit} />
   if (snapshot.tabs.length === 0) {
     return (
       <section className="diorama-tabs" data-testid="tabs">

@@ -110,7 +110,7 @@ export function provideSlots(ctx: Context, registry: SlotRegistry): void {
 }
 
 export { defaultSlotOrder, SlotConflictError, SlotRegistry, type SlotOrder } from './registry.ts'
-export { BUILTIN_SLOTS, type FileRendererProps, type SlotKind, type SlotSpec } from './types.ts'
+export { BUILTIN_SLOTS, type CommitSeatProps, type FileRendererProps, type SlotKind, type SlotSpec } from './types.ts'
 export type {
   MatchedSlotSpec,
   SidebarViewMeta,

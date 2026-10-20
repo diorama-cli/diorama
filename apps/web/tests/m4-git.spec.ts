@@ -75,9 +75,9 @@ test('git: the changes view switches with the tree and opens a file as a diff', 
   const server = await startDiorama(repo.root)
   try {
     await page.goto(server.url)
-    // Two views, `files` first (contract.md §5.2).
+    // Three views on a repository, `files` first (contract.md §5.2; `history` since v0.6).
     const switcher = page.getByTestId('sidebar-switcher')
-    await expect(switcher.getByTestId('sidebar-view')).toHaveCount(2)
+    await expect(switcher.getByTestId('sidebar-view')).toHaveCount(3)
     await expect(switcher.locator('[data-view="files"]')).toHaveAttribute('aria-selected', 'true')
     await expect(page.getByTestId('file-tree')).toBeVisible()
 
@@ -124,7 +124,7 @@ test('git: content and diff of one file are two tabs; the hash restores the diff
   const server = await startDiorama(repo.root)
   try {
     await page.goto(server.url)
-    await expect(page.getByTestId('sidebar-switcher').getByTestId('sidebar-view')).toHaveCount(2)
+    await expect(page.getByTestId('sidebar-switcher').getByTestId('sidebar-view')).toHaveCount(3)
     // Content tab first, from the tree.
     await page.getByTestId('file-tree').locator('[data-path="LICENSE"]').click()
     await expect(page).toHaveURL(/\/~\/LICENSE$/)

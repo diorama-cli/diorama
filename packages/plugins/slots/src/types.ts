@@ -11,7 +11,7 @@
  *   renders the seat already holds `mountCtx`.
  */
 import type { ComponentType } from 'react'
-import type { FileInfo, FileMatcher, MountHandle, TabInfo } from 'diorama-kernel'
+import type { FileMatcher, FileRendererProps, MountHandle, TabInfo } from 'diorama-kernel'
 
 /** How the entries of one slot combine. */
 export type SlotKind = 'single' | 'keyed' | 'list'
@@ -50,16 +50,18 @@ export interface TabDiffProps {
   tab: TabInfo
 }
 
-/** Props one `file.renderer` entry receives (contract.md §5.1). */
-export interface FileRendererProps {
-  file: FileInfo
-  /** The kernel's pre-read text (absent for binary or oversized files). */
-  text?: string
-  /** The kernel's pre-read bytes (present when the file is not text). */
-  bytes?: Uint8Array
-  /** MIME type inferred from the path (contract.md §5.1). */
-  mime: string
+/** Props one `seats.git-commit` entry receives (contract.md §5, v0.6). */
+export interface CommitSeatProps {
+  /** The commit being shown: full sha, short sha or a revision. */
+  commit: string
 }
+
+/**
+ * Props one `file.renderer` entry receives (contract.md §5.1). One definition,
+ * in the kernel: a second copy here drifted (it kept the removed `bytes` and
+ * never gained `mountCtx`).
+ */
+export type { FileRendererProps } from 'diorama-kernel'
 
 /** Slot names of contract.md §5, typed by their entry props. */
 export interface SlotMap {
@@ -82,6 +84,12 @@ export interface SlotMap {
    * never see diff tabs.
    */
   'seats.git-diff': TabDiffProps
+  /**
+   * The submit the history view picked (contract.md §5, v0.6). Declared and
+   * filled by `git-changes`; a commit is not a file, so it is not a tab and
+   * has no `(path, view)` key.
+   */
+  'seats.git-commit': CommitSeatProps
   /** Overlay above the frame, declared by `layout` (palette, command panels). */
   'layout.overlay': Record<string, never>
 }
