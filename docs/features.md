@@ -19,7 +19,7 @@
 | C9 | `diorama.toml`（`host`/`port`/`plugins`/`ignore`/`[watch]`） | ✅ M2 | 目录 → `$DIORAMA_HOME` 查找；CLI > toml > 默认；写错 fail loud；`--config`、`--all`、`--dump-config` |
 | C6 | 随机端口自动重试 | ✅ M3 | 随机端口上限 20 次；显式端口冲突直接 `EADDRINUSE`（退出码 1）|
 | C7 | realpath 挂载键 + 别名提示 | ✅ M3 | 挂载键 = realpath（同一真实目录幂等）；打印的目录是 realpath 后的 |
-| C8 | 单测/集成测试 | ✅ M0→M3 | `apps/web/tests/`：49 条端到端（真实 CLI/gateway + Chromium）；`pnpm test:unit`：92 条单测 |
+| C8 | 单测/集成测试 | ✅ M0→M3 | `apps/web/tests/`：55 条端到端（真实 CLI/gateway + Chromium）；`pnpm test:unit`：122 条单测 |
 
 ## 二、Gateway
 

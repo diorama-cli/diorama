@@ -186,8 +186,8 @@ diorama 是**只读查看器**：只浏览，不修改。这缩小了 API 面，
 
 | 能力 | 提供 | 不提供 |
 |---|---|---|
-| `ctx.fs` | `list` / `stat` / `readText` / `readBinary` / `watch` | 写入、重命名、删除、mkdir |
-| `ctx.git` | `diff` / `status` / `log` | `commit` / `stage` / `checkout` |
+| `ctx.fs` | `list` / `stat` / `readText` / `readBytes` / `watch` | 写入、重命名、删除、mkdir |
+| `ctx.git` | `status` / `diff` / `log` / `show` / `showCommit` / `blob` | `commit` / `stage` / `checkout`（`showCommit` 是**读**一个提交，不是建提交）|
 | `tabs` | 打开文件、切换、关闭 | 编辑、保存 |
 
 写盘的唯一去处是**工具自己的状态目录** `~/.diorama/`：

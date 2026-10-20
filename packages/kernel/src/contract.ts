@@ -11,11 +11,15 @@ export const KERNEL_NAME = 'diorama'
  * contract §7, `watch` sharing with a per-mount cap, and `mount.state` /
  * `degraded` (contract §14). `0.5` adds the read-only git view (`ctx.git`,
  * contract §3.2), the URL router (`ctx.router`, §3.8) and `sidebar.views`
- * (replacing `sidebar.tree`, §5.2). Every plugin declares
- * `contract: ">=0.5 <0.6"`, enforced while reading manifests
+ * (replacing `sidebar.tree`, §5.2). `0.6` adds the git history view: `show` /
+ * `showCommit` / `blob` on `ctx.git`, `DiffScope.base` widened to `'index'`
+ * or a commit, the `history` sidebar view with `seats.git-commit`, the image
+ * and PDF renderers, the `image/*` mime wildcard, and a renderer registry
+ * that only pre-reads text (§16). Every plugin declares
+ * `contract: ">=0.6 <0.7"`, enforced while reading manifests
  * (`server/manifest.ts`).
  */
-export const CONTRACT_VERSION = '0.5'
+export const CONTRACT_VERSION = '0.6'
 
 /** What every plugin built against this kernel declares. */
-export const CONTRACT_RANGE = '>=0.5 <0.6'
+export const CONTRACT_RANGE = '>=0.6 <0.7'

@@ -1,12 +1,13 @@
-# 插件契约 v0.5
+# 插件契约 v0.6
 
-> 记录于 2026-10-18；v0.3 记录于 2026-10-19；v0.4 记录于 2026-10-19；v0.5 记录于 2026-10-19
-> （v0.1 草案已归档为 [contract-v0.1.md](contract-v0.1.md)）。
+> 记录于 2026-10-18；v0.3 记录于 2026-10-19；v0.4 记录于 2026-10-19；v0.5 记录于 2026-10-19；
+> v0.6 记录于 2026-10-20（v0.1 草案已归档为 [contract-v0.1.md](contract-v0.1.md)）。
 > 契约先行：这份文档是内核与插件之间的唯一约定，改它 = 破环变更。
 >
-> **状态：v0.5 已定稿。** v0.1 → v0.2 的差异是 M1 决策（§12），v0.2 → v0.3 是 M2 决策（§13），
-> v0.3 → v0.4 是 M3 决策（§14），v0.4 → v0.5 是最近一次补齐特性的决策（§15）。
-> 内核契约版本 `0.5`，所有插件声明 `contract: ">=0.5 <0.6"`；内核**已启用**范围检查（§6）。
+> **状态：v0.6 已定稿。** v0.1 → v0.2 的差异是 M1 决策（§12），v0.2 → v0.3 是 M2 决策（§13），
+> v0.3 → v0.4 是 M3 决策（§14），v0.4 → v0.5 是最近一次补齐特性的决策（§15），
+> v0.5 → v0.6 是 git 历史视图与字节渲染器的决策（§16）。
+> 内核契约版本 `0.6`，所有插件声明 `contract: ">=0.6 <0.7"`；内核**已启用**范围检查（§6）。
 
 ## 0. 术语
 
@@ -28,7 +29,7 @@
   "name": "diorama-plugin-markdown",
   "version": "0.1.0",
   "diorama": {
-    "contract": ">=0.5 <0.6",                     // 必须：兼容的内核契约范围（§6）
+    "contract": ">=0.6 <0.7",                     // 必须：兼容的内核契约范围（§6）
     "id": "markdown",                              // 必须：全局唯一，短名；外部插件建议带前缀
     "displayName": "Markdown",
     "server": { "entry": "./lib/server.mjs" },     // 可选
@@ -195,10 +196,11 @@ interface FsService {
   `stat` 不受影响（直接按路径取信息）：已被打开的文件即使被隐藏，也照样能读。
 - client 半边：`mountCtx.fs` 与上面**同名同签名**，底层走 RPC（§4），调用形状与本地服务一致。
 
-### 3.2 `ctx.git`（server）✅ v0.5 定
+### 3.2 `ctx.git`（server）✅ v0.5 定 / v0.6 补历史视图
 
 git 的**只读**视图。**只在目录是 git 仓库时才存在**（在 `onMount` 里探测），其它插件必须
-`inject: { optional: ['git'] }` 或做能力检测。**不提供任何写操作**（无 commit / stage / checkout）。
+`inject: { optional: ['git'] }` 或做能力检测。**不提供任何写操作**（无 commit / stage / checkout；
+`showCommit` 是**读**一个提交，不是建提交）。
 
 ```ts
 type RepoRelPath = string   // 相对挂载根，`/` 分隔，无前导 `/`；'' 表示挂载根（与 §3.1 的 RelPath 同义）
@@ -217,8 +219,15 @@ interface DiffScope {
   path?: RelPath
   /** 只看这个目录（相对挂载根，'`' 表示挂载根）。左侧列表按子树过滤时用。 */
   scope?: RelPath
-  /** 比较基准。v0.5 **只接受 `'HEAD'`**（工作区 vs HEAD）；缺省 = `'HEAD'`。 */
-  base?: 'HEAD'
+  /**
+   * 比较基准。缺省 = `'HEAD'`（工作区 vs HEAD）。
+   * - `'HEAD'`：工作区 vs HEAD（含未暂存与未跟踪）
+   * - `'index'`：**暂存区** vs HEAD（只列已 `git add` 的改动）
+   * - `<commit>`：工作区 vs 该提交（完整或短 sha，必要时带 `^` / `~N`；解析失败 `EINVAL`）
+   *
+   * v0.5 只接受 `'HEAD'`；v0.6 扩展到这三个分支。
+   */
+  base?: 'HEAD' | 'index' | string
 }
 
 interface DiffEntry {
@@ -249,12 +258,46 @@ interface GitLogEntry {
   at: number
 }
 
+/** 一个提交的详情（v0.6）。 */
+interface CommitDetail {
+  sha: string
+  shortSha: string
+  subject: string
+  author: string
+  /** ms since epoch。 */
+  at: number
+  /** 完整提交说明（含 subject 与正文），原样。 */
+  message: string
+  /** 该提交改动的文件，形状与 `diff()` 的条目相同（相对挂载根）。 */
+  files: DiffEntry[]
+  /** 文件清单超过上限（4 MiB / 2000 行）：`files` 只是前缀。 */
+  truncated?: true
+}
+
+/** 一个提交下的一个文件（v0.6）。 */
+interface BlobResult {
+  /** 文本文件的内容；二进制文件没有 `text`，而有 `binary: true`。 */
+  text?: string
+  binary?: true
+  /** 内容超过上限（8 MiB）：`text` 只是前缀。 */
+  truncated?: true
+  /** 字节数（UTF-8 文件为准）。 */
+  size: number
+}
+
 interface GitService {
   /** 工作区根的**绝对路径**（realpath 后）；挂载目录可能是仓库的子目录。 */
   readonly root: string
   status(): Promise<GitStatusEntry[]>                     // 扁平、不排序
   diff(scope?: DiffScope): Promise<DiffResult>
   log(options?: { limit?: number; path?: RelPath }): Promise<GitLogEntry[]>   // 新的在前
+  // —— v0.6：历史视图 ——
+  /** 该提交里这个文件的改动（相对**父提交**；root commit 相对空树），形状同 `DiffEntry`。 */
+  show(commit: string, path: RelPath): Promise<DiffEntry>
+  /** 提交详情：提交说明 + 改动的文件清单。 */
+  showCommit(commit: string): Promise<CommitDetail>
+  /** 该提交下这个文件的**内容**（不是 diff）；`size` 超过 8 MiB 时 `truncated`。 */
+  blob(commit: string, path: RelPath): Promise<BlobResult>
 }
 ```
 
@@ -265,8 +308,8 @@ interface GitService {
   日志一条原因（`[mount:<id>] git: …`）。
 - **路径基准**一律是**相对挂载根**的 `RelPath`，与 §3.1 相同：绝对路径、`..` 越界、NUL →
   `EINVAL` / `EOUTSIDE`；路径不在仓库内 → `EOUTSIDE`。服务端自行换算成仓库内路径。
-- **只读**：只运行只读的子命令（`status` / `diff` / `log` / `rev-parse`），带 `--no-color`、
-  不写 index、不碰工作区。
+- **只读**：只运行只读的子命令（`status` / `diff` / `log` / `show` / `cat-file` / `rev-parse`），
+  带 `--no-color`、不写 index、不碰工作区。
 - **上限**（单次调用的累计量，超限检查在返回前）：`diff()` 4 MiB / 2000 行，超出部分不进
   `entries`，`truncated: true`；单个文件的 diff 超限时那一项 `truncated: true`。`log().limit`
   默认 50、上限 500（`EINVAL`）。超限**不**报 `ETOOLARGE`——列表场景要的是前缀而不是失败。
@@ -274,14 +317,27 @@ interface GitService {
 
   | 码 | 含义 |
   |---|---|
-  | `EINVAL` | 路径非法、`base` 不是 `'HEAD'`、`limit` 越界 |
-  | `ENOENT` | 文件不存在且不在任何变更里 |
+  | `EINVAL` | 路径非法、`base` 不是 `'HEAD'` / `'index'` / 可解析的提交、提交号非法、`limit` 越界 |
+  | `ENOENT` | 文件不存在且不在任何变更里；`show` / `blob` / `showCommit` 的提交或路径在该提交下不存在 |
   | `EOUTSIDE` | 路径越出挂载根或不在仓库内 |
   | `ENOTREPO` | 服务在，但工作区根已经不可用（目录被移走） |
   | `EIO` | `git` 进程失败（stderr 摘要进 `message`） |
 
 - **形状**：`diff()` 按文件给，不给整次 patch 拼接——左右两栏各按自己的粒度用（左侧只要
   `status` 的 kind，右侧要单个文件的 `text`）。
+- **历史视图的三方法（v0.6）**：
+  - `show(commit, path)` 是**单文件**的 diff，一次一个文件、一个提交；列表场景要的是
+    `showCommit(commit).files`（形状与 `diff()` 的条目一致，左侧可以直接复用目录树的折叠）。
+  - `showCommit` 的 `files` 与 `diff()` 共用**同一次上限账**（4 MiB / 2000 行），超限只回前缀、
+    `truncated: true`；`message` 不受该上限影响（git 对提交说明本身有长度上限）。
+  - `blob(commit, path)` 给该提交下的**文件正文**，不跟任何东西比较；文本上限 **8 MiB**（与
+    `fs.readText` 同一阈值），超限回前缀 + `truncated: true`；含 NUL 的文件回 `binary: true` 且
+    **没有** `text`（与 `fs.readText` 的 `EBINARY` 同一判定）。
+  - **提交号的解析**：`commit` 参数接受完整 sha、短 sha 与 `HEAD~1` 这类 revision 语法，由 git 解析；
+    解析不出的按 `EINVAL`（格式不对）或 `ENOENT`（形状对但不存在）报，服务端不自己实现解析。
+  - 三个方法都不看工作区：`show` / `showCommit` / `blob` 的结果只由提交对象决定，工作区被改不影响。
+- **`base: 'index'` 与未跟踪文件**：暂存区里没有未跟踪文件的位置，`diff({ base: 'index' })`
+  **不列**未跟踪文件（它们不是「暂存了什么」的一部分）；`base: 'HEAD'` 才列。
 - **未纳入版本库的文件没有 diff**：git 不拿它跟任何东西比较。`diff()` 对它只回
   `{ file, kind: 'untracked' | 'added', status }` 与**无 `text`**；要显示内容的一方自己
   用 `ctx.fs.readText` 读整个文件（§5.1 的同一条约定），不要指望 `ctx.git` 回文件正文。
@@ -483,9 +539,17 @@ interface CommandsService {
 | `palette.toggle` | 打开命令面板 | `mod+k` | 焦点不在输入框 |
 | `view.refresh` | 重新读取当前文件 | `mod+alt+r` | 有活动 tab |
 | `view.toggleAutoRefresh` | 自动刷新：开 / 关 | 无（palette） | 有活动 tab |
+| `sidebar.showFiles` | 侧栏：文件 | `mod+alt+1` | 侧栏有视图 |
+| `sidebar.showChanges` | 侧栏：变更 | `mod+alt+2` | 侧栏有该视图 |
+| `sidebar.showHistory` | 侧栏：历史 | `mod+alt+3` | 侧栏有该视图 |
 
 命令的**来源插件**决定注册点：`tabs.*` 由 tabs 插件注册、`tree.*` 由 file-tree 注册、
-`palette.toggle` 由 palette 注册、`view.*` 由 renderer-registry 注册（它持有文件内容缓存）。
+`palette.toggle` 由 palette 注册、`view.*` 由 renderer-registry 注册（它持有文件内容缓存）、
+`sidebar.*` 由 layout 注册（它持有切换器的当前视图，§5.2）。
+
+`sidebar.show*` 是**固定三条**命令，不是“每个视图自动一条”：`layout` 只认识 `files` / `changes` /
+`history` 三个 id（与它画切换器时用的顺序一致）。新增视图**不自动获得快捷键**；要给它一条命令，
+就在注册视图的那个插件里注册（命令 id 用 `<插件id>:<命令>`，开头一条规则）。
 
 ### 3.8 `ctx.router`（client）✅ v0.5 定
 
@@ -658,11 +722,14 @@ maxDirectories = 64         # 每个目录同时监听的目录数上限（§3.1
 | `file.renderer` | keyed（内部排序） | `renderer-registry` | N | 按文件类型派发；M1 起带 matcher（§5.1） |
 | `layout.overlay` | 单 | `layout` | 1 | 覆盖层（v0.3 新增：palette 等命令面板；M2 只给 `palette` 用） |
 | `seats.git-diff` | 单 | `tabs` | 1 | `view: 'diff'` 的 tab 画在这里（v0.5）；没填时该 tab 显示「没有 diff 渲染器」 |
+| `seats.git-commit` | 单 | `git-changes` | 1 | 历史视图选中的提交的详情（v0.6）；**不是 tab**，由 `git-changes` 自己声明、自己填；没填时右侧不显示提交详情 |
 
 - **`tabs.content` 的 key**：v0.3 起是 **tab id**；`tabs` 为**每个 tab**（而不只是活动 tab）渲染一个
   `tabs.content` 座位，非活动座位隐藏而非卸载（每个 tab 的滚动位置与渲染状态彼此独立）。
 - **`sidebar.tree`（v0.4 及以前）已被 `sidebar.views` 取代**（v0.5）：侧栏不再是“文件树专用的一栏”，
   而是“一栏多视图”，file-tree 只是其中一个视图。
+- **`seats.git-commit`（v0.6）与 `tabs` 无关**：提交不是文件，没有 `(path, view)` 键，不进 tab 集合；
+  历史视图选中哪个提交由视图自己持有，`layout` 只负责把单座位画出来。
 - **`statusbar`：v1 不做**，从 slot 表移除（需要时再议）。
 - **没有 toolbar**：只读工具没有“要对文件做的事”，v1 不提供 `file.toolbar` / `tabs.actions`（O8）。
 - **回退链**：`file.renderer` 的条目按 §5.1 排序，命中者渲染；渲染抛错 → 标记失败 → **尝试下一个**；matcher 全不命中 → 兜底条目（plaintext）；一个条目都没有 → 「无可用渲染器」。
@@ -678,7 +745,7 @@ interface SidebarViewProps {
 }
 
 interface SidebarViewSpec {
-  /** 视图 id，即座椅的 key：`files`、`changes`…（不含 `:`）。 */
+  /** 视图 id，即座椅的 key：`files`、`changes`、`history`…（不含 `:`）。 */
   key: string
   title: string            // 切换器上的文字（tooltip / 无障碍名）
   icon?: string            // 可选：内联 SVG 字符串；缺省用 title 首字
@@ -692,9 +759,13 @@ interface SidebarViewSpec {
   视图之间**互不知道对方存在**，新增视图不改 `layout` 以外的包。
 - **切换器由 `layout` 画**（竖排图标条，VS Code 的 activity bar 形态）；切换状态由 `layout` 持有，
   条目通过 `props.active` 得知。
+- **切换器有快捷键**（v0.6）：`layout` 注册 `sidebar.showFiles` / `sidebar.showChanges` /
+  `sidebar.showHistory`（`mod+alt+1/2/3`，§3.7）；按到没有注册的视图时命令不可执行（`when` 为假），
+  不报错。
 - **非活动视图隐藏不卸载**（与 `tabs.content` 同一做法）：展开、滚动、选择各自保留。
 - **没有视图被注册时，侧栏整栏不画**（M0 验收点 3 的语义，从 `sidebar.tree` 继承）。
-- `file-tree` 在最前（`order: 10`），git 的「变更」视图 `order: 20`。
+- `file-tree` 在最前（`order: 10`），git 的「变更」视图 `order: 20`，「历史」视图 `order: 30`
+  （v0.6）。三个视图都由 `git-changes` / `file-tree` 各自注册，`layout` 不知道它们的含义。
 - **视图内部怎么画是视图自己的事**：git 的「变更」把 `status()` 的扁平行折成**目录树**
   （目录优先、单一子目录链合并成一行、展开状态属于该视图，不与文件树共享）。`ctx.git.status()`
   保持扁平（§3.2），折叠由视图完成。
@@ -704,7 +775,7 @@ interface SidebarViewSpec {
 ```ts
 type FileMatcher =
   | { ext: string[] }                      // 不带点，小写比较
-  | { mime: string[] }
+  | { mime: string[] }                     // 精确 mime，或末尾通配 `image/*`（v0.6）
   | { probe: (head: Uint8Array, file: FileInfo, mime: string) => boolean, cost: 'cheap' | 'expensive' }
 
 interface RendererEntry {
@@ -719,38 +790,51 @@ interface RendererEntry {
 1. 候选集 = 该 key 下所有**未失败**的条目。
 2. 分三档：`ext` → `mime` → `probe`。**按档位先后**逐档扫描：先看所有 `ext` 条目（order 升序、同 order 按 id），命中即选；`ext` 全不中再看 `mime`，最后 `probe`。这样避免“每个文件都跑一遍 probe”，并让 `ext` 永远优先于 `mime` / `probe`。
 3. 同一档内 order 升序、同 order 按插件 `id` 字典序（并 warn）。
+3b. **`mime` 的通配（v0.6）**：一项允许**只有末尾**一个 `*`（`image/*` 匹配 `image/png`、
+   `image/svg+xml`…；`*/*` 等价“任意 mime”）。中间的通配（`image/*+xml`）不支持，注册时按字面
+   对待（不报错，只是不命中）——保留“要么精确、要么一个前缀”这一档，避免写出一套 glob。
 4. `probe`：`cost: 'cheap'` 总是可用；`cost: 'expensive'` 仅在 ext/mime 全部未命中时执行，结果按 `(path, mtime, size)` 缓存。
 5. `probe` 只能读内核给的前 N 字节（`PROBE_HEAD_BYTES = 4096`），**不得自己发文件请求**。
+   注：内核目前没有“按偏移读”的 `ctx.fs` 方法，内核为 probe 取的头部是**从预读的文本里截**；
+   文本取不到（二进制 / `EBINARY`）时内核**不**为此读字节（v0.6 起），`probe` 拿到空头。
 6. 全部不命中或无 matcher → **兜底条目**（`plaintext`，`matcher` 缺省）。没有兜底条目 → 「无可派发的渲染器」。
 7. 命中条目渲染抛错 → 标记失败，回到 2 继续（下一个候选），最终落到兜底；兜底也失败 → 显示失败原因。
 
-**渲染器 props**：**文本**由内核预读、经 props 下发；需要字节的渲染器自己走 `mountCtx.fs.readBytes`（见下方 v0.5 的约定）。
+**渲染器 props**：内核**只预读文本**；需要字节的渲染器自己走 `mountCtx.fs.readBytes`。
 
 ```ts
 interface FileRendererProps {
   file: FileInfo
-  /** 内核预读的文本（非二进制、未超上限时）。 */
+  /** 内核预读的文本（非二进制、未超 8 MiB 时）。二进制文件没有它。 */
   text?: string
-  /** 内核预读的原始字节（readText 报 EBINARY 时回退用）。 */
-  bytes?: Uint8Array
   mime: string
   mountCtx: MountHandle
 }
 ```
 
-- `text` 与 `bytes` 至少有一个；二进制文件只有 `bytes`。
-- **需要字节的渲染器自己取**（v0.5）：内核只保证**文本**预读；一个需要在 matcher 命中后读
-  原始字节的渲染器（图片等）**用 `props.mountCtx.fs.readBytes(path)`**，先 `fs.stat` 看 `size`，
-  超 `MAX_BINARY_BYTES`（32 MiB）**不请求**、直接显示「文件过大（大小）」。`ctx.fs` 的
-  `ETOOLARGE` 语义不变（§3.1）——渲染器**不得**因此白屏，仍然落进回退链（§5“回退链”、§11）。
-- `mime` 由内核按扩展名推断（M1 是小表：text/*、application/json、image/* 等；未知为 `application/octet-stream`）。
+- **`text` 可能缺**：二进制文件（`readText` 报 `EBINARY`）与超过 `MAX_TEXT_BYTES`（8 MiB）的文件
+  都**没有** `text`。**`bytes` 字段在 v0.6 删除**：内核不再预读字节（`Uint8Array` 过 RPC 的
+  成本是 `text` 的数倍，而需要字节的渲染器只有图片 / PDF 两类）。
+- **需要字节的渲染器自己取**（v0.5 定、v0.6 起内核真的这么做）：在 matcher 命中后
+  **用 `props.mountCtx.fs.readBytes(path)`**；先 `fs.stat` 看 `size`，超 `MAX_BINARY_BYTES`（32 MiB）
+  **不请求**、直接显示「文件过大（大小）」。`ctx.fs` 的 `ETOOLARGE` 语义不变（§3.1）——渲染器
+  **不得**因此白屏，仍然落进回退链（§5“回退链”、§11）。
+- **`probe` 不因此读字节**：`head` 从 `text` 截（见上一条），二进制文件拿到空头。要按魔数识别
+  **二进制**格式的渲染器，用 `ext` / `mime` 档，不要指望 `probe`。
+- **没有渲染器认领的二进制文件**：落到兜底 `plaintext`，它显示「二进制文件 · <size> · <mime>」，
+  **不**读字节、不白屏（v0.6）。
+- `mime` 由内核按扩展名推断（小表：text/*、application/json、image/*、application/pdf 等；未知为
+  `application/octet-stream`）。
+- **内置字节渲染器（v0.6）**：`image`（`mime: ['image/*']`）与 `pdf`（`ext: ['pdf']`），两者都先
+  `stat` 再 `readBytes`，从 bytes 建 Blob URL 交给浏览器原生的 `<img>` / `<iframe>`；内核**
+  不**内联 SVG 的 DOM（`<img>` 渲染 SVG，脚本不执行）。
 
 ## 6. contract version 规则 ✅ v0.2 起强制
 
-- 内核版本 `0.x` 期间：**minor 改动即破环**，插件写窄范围（`>=0.5 <0.6`）。
+- 内核版本 `0.x` 期间：**minor 改动即破环**，插件写窄范围（`>=0.6 <0.7`）。
 - **检查时间**：读 manifest 时（加载前）。不满足 → 拒绝加载该插件，并解释原因（终端 + 浏览器控制台）。
 - 内置插件同样检查：旧范围的 manifest 会被新内核拒绝，所以每次升版都把全部内置插件一起升到
-  当前范围（v0.5 起为 `>=0.5 <0.6`）。**内核与半边必须一起重新构建**（builtin manifest 与 kernel
+  当前范围（v0.6 起为 `>=0.6 <0.7`）。**内核与半边必须一起重新构建**（builtin manifest 与 kernel
   的 `CONTRACT_VERSION` 来自同一份构建）。
 - M2 起**没有**外部插件（§9），因此"UI 显示「插件 X 因契约不兼容未加载」"的展示面随外部插件一起推迟；
   拒绝本身仍然 fail loud（CLI 退出码非 0 / boot 图里不出现）。
@@ -1071,10 +1155,33 @@ RPC 广播 `{ topic: 'mount.state', payload: MountStatus }`。
 | §3.6 `ctx.storage` | 🔲 | 🔲（本次不做主题，签名仍未定） |
 | contract version | `0.4` / `>=0.4 <0.5` | `0.5` / `>=0.5 <0.6`（全部内置插件） |
 
+## 16. v0.5 → v0.6 变更清单（破环，故升 minor）
+
+> 2026-10-20，用户逐条拍板：范围 = **git 历史视图 + 图片 / PDF 渲染器**（Notebook 不做、主题不做、
+> `ctx.storage` 仍 🔲）；git 新增 **`show` / `showCommit` / `blob`** 三个方法（不改已有方法），
+> `DiffScope.base` 扩展到 `'index'` 与任意提交；渲染器改为**只预读文本**、字节自己取；
+> `mime` 档接受末尾通配；侧栏切换器加三条命令与快捷键。
+
+| 条款 | v0.5 | v0.6 |
+|---|---|---|
+| §3.2 `ctx.git` 历史 | 只有 `status` / `diff` / `log` | 新增 `show(commit, path)`（单文件 diff）、`showCommit(commit)`（`CommitDetail`：说明 + 文件清单）、`blob(commit, path)`（`BlobResult`：该提交下的文件正文）；**已有三个方法签名不变** |
+| §3.2 `DiffScope.base` | 只接受 `'HEAD'` | `'HEAD'`（缺省）/ `'index'`（暂存区）/ `<commit>`（工作区 vs 该提交）；`base: 'index'` 不列未跟踪文件 |
+| §3.2 只读子命令 | `status` / `diff` / `log` / `rev-parse` | 另加 `show` / `cat-file`（仍只读；`showCommit` 是**读**提交，不是 git 的 `commit`） |
+| §3.2 上限 | `diff()` 4 MiB / 2000 行 | `showCommit().files` 共用同一账；`blob()` 文本 8 MiB（同 `fs.readText`）、超限前缀 + `truncated` |
+| §5.1 渲染器 props | `text?` 与 `bytes?` 至少有一个 | **`bytes` 删除**；内核只预读文本，`EBINARY` 后不再读字节；文本超 8 MiB 也无 `text` |
+| §5.1 无认领的二进制 | 落到 plaintext（只有字节，没有可显示的东西） | plaintext 显示「二进制文件 · size · mime」 |
+| §5.1 `mime` matcher | 精确 mime | 允许**末尾**一个 `*`（`image/*`）；中间通配不支持 |
+| §5.1 内置渲染器 | 无字节渲染器 | `image`（`image/*`）与 `pdf`（`.pdf`），先 `stat`、超 32 MiB 不请求，Blob URL + 原生 `<img>` / `<iframe>` |
+| §5 `seats.git-commit` | 无 | 新增单座位（声明者 `git-changes`）；提交详情**不是 tab**、不进 `(path, view)` 键 |
+| §5.2 `history` 视图 | 侧栏两个视图（`files` / `changes`） | 第三个视图 `history`（`order: 30`），由 `git-changes` 注册；选中提交写 `#history=<sha>`（router 的 hash 面，内核不解释） |
+| §3.7 命令表 | 9 条 | 另加 `sidebar.showFiles` / `sidebar.showChanges` / `sidebar.showHistory`（`mod+alt+1/2/3`），由 layout 注册 |
+| §3.6 `ctx.storage` | 🔲 | 🔲（仍不做主题；签名仍未定） |
+| contract version | `0.5` / `>=0.5 <0.6` | `0.6` / `>=0.6 <0.7`（全部内置插件 + kernel 包自己的 manifest） |
+
 ## 待定清单（v0.4 后仍 🔲）
 
 - [x] `ctx.git` 具体签名（只读：diff / status / log）— v0.5 定（§3.2）
-- [ ] git history 视图（`show` / 提交列表在左栏的落点）— 签名将新增方法，不改已有方法
+- [x] git history 视图（`show` / 提交列表在左栏的落点）— v0.6 定（§3.2、§5、§5.2）
 - [ ] `ctx.layout` 的服务面（overlay 走 slot）
 - [ ] `ctx.storage` 签名（主题 / 偏好持久化）— 待定
 - [ ] 插件异步任务托管 API — 待定
