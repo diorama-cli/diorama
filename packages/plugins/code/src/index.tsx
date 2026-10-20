@@ -53,12 +53,12 @@ export const CODE_LANGUAGES: Readonly<Record<string, string>> = {
   jsonc: 'json',
   map: 'json',
   css: 'css',
-  html: 'xml',
-  htm: 'xml',
   xml: 'xml',
   // No `svg`: an SVG is a picture. The image piece claims it through the
   // `image/*` mime tier, and an ext entry here would beat that tier (contract
   // §5.1 rule 2). Seeing SVG source needs the source/preview switch (O8, not v1).
+  // No `html` / `htm` either: the html piece owns them (contract §5.1 rule 2)
+  // and shows the source itself when the preview is switched off.
   py: 'python',
   go: 'go',
   rs: 'rust',

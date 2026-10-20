@@ -924,3 +924,80 @@ code {
   width: 100%;
   border: 0;
 }
+
+/* HTML renderer (contract.md §5.1): sanitised preview in a sandboxed frame,
+   with the file's own source one button away */
+.diorama-html {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.diorama-html__bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--dio-border);
+  color: var(--dio-muted);
+  font-size: 12px;
+}
+
+.diorama-html__path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diorama-html__meta {
+  flex: 1;
+  white-space: nowrap;
+}
+
+.diorama-html[data-mode='preview'] .diorama-html__meta {
+  flex: 0 0 auto;
+}
+
+.diorama-html__modes {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.diorama-html__modes button {
+  border: 1px solid var(--dio-border);
+  border-radius: 4px;
+  background: none;
+  color: var(--dio-text);
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.diorama-html__modes button[aria-pressed='true'] {
+  border-color: var(--dio-accent);
+  color: var(--dio-accent);
+}
+
+.diorama-html__frame {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+  background: #fff;
+}
+
+.diorama-html__source {
+  flex: 1;
+  margin: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 16px 48px;
+  font-family: var(--dio-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  tab-size: 4;
+  white-space: pre;
+}

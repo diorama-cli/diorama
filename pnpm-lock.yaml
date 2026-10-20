@@ -285,6 +285,9 @@ importers:
       diorama-plugin-git:
         specifier: workspace:*
         version: link:../plugins/git-changes
+      diorama-plugin-html:
+        specifier: workspace:*
+        version: link:../plugins/html
       diorama-plugin-image:
         specifier: workspace:*
         version: link:../plugins/image
@@ -446,6 +449,52 @@ importers:
       '@vitejs/plugin-react':
         specifier: ^6.1.2
         version: 6.1.2(vite@8.3.4(@types/node@26.6.5))
+      diorama-plugin-slots:
+        specifier: workspace:*
+        version: link:../slots
+      diorama-plugin-tabs:
+        specifier: workspace:*
+        version: link:../tabs
+      diorama-ui:
+        specifier: workspace:*
+        version: link:../../ui
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vite:
+        specifier: ^8.3.4
+        version: 8.3.4(@types/node@26.6.5)
+
+  packages/plugins/html:
+    dependencies:
+      cordis:
+        specifier: 4.0.0-rc.11
+        version: 4.0.0-rc.11
+      diorama-kernel:
+        specifier: workspace:*
+        version: link:../../kernel
+      dompurify:
+        specifier: ^3.4.17
+        version: 3.4.17
+      react:
+        specifier: ^19.3.1
+        version: 19.3.1
+    devDependencies:
+      '@types/react':
+        specifier: ^19.3.0
+        version: 19.3.0
+      '@vitejs/plugin-react':
+        specifier: ^6.1.2
+        version: 6.1.2(vite@8.3.4(@types/node@26.6.5))
+      diorama-plugin-file-tree:
+        specifier: workspace:*
+        version: link:../file-tree
+      diorama-plugin-layout:
+        specifier: workspace:*
+        version: link:../layout
+      diorama-plugin-renderer-registry:
+        specifier: workspace:*
+        version: link:../renderer-registry
       diorama-plugin-slots:
         specifier: workspace:*
         version: link:../slots

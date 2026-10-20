@@ -29,6 +29,7 @@ test('config: defaults match contract §4.1', () => {
     'code',
     'image',
     'pdf',
+    'html',
     'palette',
     'git-changes',
   ])

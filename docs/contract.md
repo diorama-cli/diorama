@@ -5,8 +5,8 @@
 > 契约先行：这份文档是内核与插件之间的唯一约定，改它 = 破环变更。
 >
 > **状态：v0.6 已定稿。** v0.1 → v0.2 的差异是 M1 决策（§12），v0.2 → v0.3 是 M2 决策（§13），
-> v0.3 → v0.4 是 M3 决策（§14），v0.4 → v0.5 是最近一次补齐特性的决策（§15），
-> v0.5 → v0.6 是 git 历史视图与字节渲染器的决策（§16）。
+> v0.3 → v0.4 是 M3 决策（§14），v0.4 → v0.5 是补齐特性的决策（§15），
+> v0.5 → v0.6 是 git 历史视图、字节渲染器与 HTML 渲染器的决策（§16）。
 > 内核契约版本 `0.6`，所有插件声明 `contract: ">=0.6 <0.7"`；内核**已启用**范围检查（§6）。
 
 ## 0. 术语
@@ -77,7 +77,7 @@ export function apply(ctx: Context) {
 
 ## 2.5 生命周期：全局插件图，按目录服务实例 ✅ v0.4 定
 
-一个常驻 gateway 进程服务多个目录。插件**只加载一次**，但服务**每个目录一份**：每个挂载目录是一个 **fork 出的子 ctx**（`ctx.fork()`；内核实现为 `root.isolate(<mountId>)`）。
+一个常驻 gateway 进程服务多个目录。插件**只加载一次**，但服务**每个目录一份**：每个挂载目录是一个 **fork 出的子 ctx**（`ctx.fork()`；内核实现为 `mountScope(root, mountId)` = 对 `MOUNT_SERVICES` 里**每个**服务名各 `isolate(name, <mountId>:<name>)`）。
 
 ```ts
 export const name = 'fs'
@@ -100,6 +100,7 @@ export function apply(root: Context) {
 | 插件 `apply` 只在 root ctx 执行一次 | 插件代码全局一份，bundle 只加载一次 |
 | 服务实例通过 mount ctx（fork 出的子 ctx）绑定 | 服务实例按目录隔离 |
 | `ctx.fs` / `ctx.git` 等 scope 服务**只在子 ctx 可访问**，root 访问抛错 | 防止插件拿错目录 |
+| **Cordis 按服务名隔离，不按 fiber**：`isolate` 只命名它拿到的那个名字，其余名字落回 root 的默认键（`Symbol(name)`），而 store 在 root 上——两个 mount 提供同名服务就会撞（`service "git" has been registered`），root 甚至会解析到某一个 mount 的实例。所以每个 mount 提供的服务名都必须在 `MOUNT_SERVICES` 里（`packages/kernel/src/server/plugins.ts`）；插件自带的按目录服务用 `isolateMountService(mountCtx, name)` | 挂载隔离是逐名字的，不是逐 fiber 的（v0.6 修复，m4/spec §12） |
 | 子 ctx **可读** `ctx.diorama`（只读面），但自己的身份从 **`mountId`** 取，不从 `mounts.list()` 里挑 | 子 ctx 是 root 的后代，读父级服务是 Cordis 原语义；靠 list 认领目录是错误来源 |
 | 重新挂同一个目录 = **新 `mountId`、新子 ctx**（不复用、不复活旧 ctx） | 故障隔离：旧 ctx 可能已 degraded |
 | 组件不得从全局 `ctx` 取数据，用 props 传来的 `tabCtx` / `mountId` | 组件会渲染在某个具体目录的页面里 |
@@ -671,7 +672,7 @@ interface RouterService {
 # diorama.toml —— 全部字段可选
 host = "127.0.0.1"          # 监听网卡；默认 127.0.0.1（architecture §8）
 port = 0                    # 0 = 随机空闲端口（默认）
-plugins = ["slots", "layout", "file-tree", "tabs", "renderer-registry", "plaintext", "markdown", "code", "image", "pdf", "palette", "git-changes"]
+plugins = ["slots", "layout", "file-tree", "tabs", "renderer-registry", "plaintext", "markdown", "code", "image", "pdf", "html", "palette", "git-changes"]
 ignore = [".git", "node_modules"]   # 隐藏规则（覆盖内置默认）
 
 [watch]
@@ -828,6 +829,19 @@ interface FileRendererProps {
 - **内置字节渲染器（v0.6）**：`image`（`mime: ['image/*']`）与 `pdf`（`ext: ['pdf']`），两者都先
   `stat` 再 `readBytes`，从 bytes 建 Blob URL 交给浏览器原生的 `<img>` / `<iframe>`；内核**
   不**内联 SVG 的 DOM（`<img>` 渲染 SVG，脚本不执行）。
+- **HTML 渲染器（v0.6，`html`）**：`ext: ['html', 'htm']` 的**唯一 owner**（`code` 的 ext 表里
+  **没有** `.html` / `.htm`，§5.1 rule 2）。只用预读的 `text`，不发任何请求。**两种显示方式**，
+  切换按钮在渲染器自己的头部（不是工具栏，O8），状态属于渲染器实例（一个 tab 座位一个）：
+  1. **预览**（缺省）：DOMPurify 消毒（markdown 的策略加上：无 `style`，无 `form` / `iframe` /
+     `object` / `embed`，无事件处理器与 `javascript:` URL），消毒结果放进
+     `<iframe srcdoc sandbox="allow-same-origin">`——**没有 `allow-scripts`**，因此即使有脚本漏过消毒
+     也不会执行；frame 的 `Content-Security-Policy: default-src 'none'; img-src data:; style-src 'none'`
+     禁止一切外部请求与任何样式（页面的 `<style>` 在消毒时已被去掉；wrapper 不带自己的样式，nonce
+     在沙箱 frame 里不传播——预览是「消毒后的内容 + 浏览器默认排版」，不是「页面的样子」）。
+  2. **源码**：文件的原文用 `<pre>` 显示（转义为文本，不解释）。没有 `html` 插件时 `.html` 落到兜底
+     `plaintext`（普通文本），**不**回到 `code`。
+  同一 tab 换成另一个文件时回到**预览**（深链、刷新恢复都是“打开一个页面”）。
+  **不使用 blob URL**：`srcdoc` 是内联文档，不需要在本站 origin 上开一个 URL。
 
 ## 6. contract version 规则 ✅ v0.2 起强制
 
@@ -1175,6 +1189,7 @@ RPC 广播 `{ topic: 'mount.state', payload: MountStatus }`。
 | §5 `seats.git-commit` | 无 | 新增单座位（声明者 `git-changes`）；提交详情**不是 tab**、不进 `(path, view)` 键 |
 | §5.2 `history` 视图 | 侧栏两个视图（`files` / `changes`） | 第三个视图 `history`（`order: 30`），由 `git-changes` 注册；选中提交写 `#history=<sha>`（router 的 hash 面，内核不解释） |
 | §3.7 命令表 | 9 条 | 另加 `sidebar.showFiles` / `sidebar.showChanges` / `sidebar.showHistory`（`mod+alt+1/2/3`），由 layout 注册 |
+| §5.1 内置渲染器（HTML） | 无（`.html` 归 `code` 当源码看） | `html`（`ext: ['html', 'htm']`，`code` 不再认领）：预览 = DOMPurify 消毒 + `srcdoc` 沙箱 frame（无 `allow-scripts`），源码 = 转义文本；切换在渲染器头部，缺省预览 |
 | §3.6 `ctx.storage` | 🔲 | 🔲（仍不做主题；签名仍未定） |
 | contract version | `0.5` / `>=0.5 <0.6` | `0.6` / `>=0.6 <0.7`（全部内置插件 + kernel 包自己的 manifest） |
 

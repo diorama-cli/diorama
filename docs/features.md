@@ -20,7 +20,7 @@
 | C9 | `diorama.toml`（`host`/`port`/`plugins`/`ignore`/`[watch]`） | ✅ M2 | 目录 → `$DIORAMA_HOME` 查找；CLI > toml > 默认；写错 fail loud；`--config`、`--all`、`--dump-config` |
 | C6 | 随机端口自动重试 | ✅ M3 | 随机端口上限 20 次；显式端口冲突直接 `EADDRINUSE`（退出码 1）|
 | C7 | realpath 挂载键 + 别名提示 | ✅ M3 | 挂载键 = realpath（同一真实目录幂等）；打印的目录是 realpath 后的 |
-| C8 | 单测/集成测试 | ✅ M0→本轮 | `apps/web/tests/`：69 条端到端（17 个 spec，真实 CLI/gateway + Chromium）；`pnpm test:unit`：128 条单测 |
+| C8 | 单测/集成测试 | ✅ M0→本轮 | `apps/web/tests/`：73 条端到端（18 个 spec，真实 CLI/gateway + Chromium）；`pnpm test:unit`：130 条单测 |
 
 ## 二、Gateway
 
@@ -66,13 +66,14 @@
 | P3 | `tabs` | ✅ M2 | 多 tab：每文件一个 tab、keyed 座位、关闭回退、每 tab 独立滚动；**不提供编辑** |
 | P4 | `renderer-registry` | ✅ M0→M1 | matcher 三档（ext → mime → probe）+ 兜底 + 失败回退（contract §5.1）|
 | P5 | `markdown` | ✅ M1 | `.md` → HTML（marked + DOMPurify 消毒）|
-| P6 | `code` | ✅ M1 | highlight.js 按语言注册；`.md` 不在其中（归 markdown）|
+| P6 | `code` | ✅ M1 | highlight.js 按语言注册；`.md` 不在其中（归 markdown），`.html` / `.htm` 也不在其中（归 html）|
 | P7 | `plaintext` | ✅ M0 | 兜底渲染器 |
 | P8 | `palette` | ✅ M2 | 插件，`layout.overlay` 条目，`mod+k`；只列可执行命令 |
 | P9 | `theme` / `i18n` | 🔲 待定 | 主题明确不做（两轮都拍板不做）；`ctx.storage` 签名仍未定 |
 | P15 | `fs`（server 半边） | ✅ M1 | 内核自带；`--plugins` 不影响服务端 |
 | P10 | `image` 渲染器 | ✅ 本轮 | `mime: ['image/*']`；先 `stat`、超 32 MiB 不请求；bytes → Blob URL → 原生 `<img>`（SVG 也走 `<img>`，不内联 DOM）|
 | P11 | `pdf` 渲染器 | ✅ 本轮 | `ext: ['pdf']`；bytes → Blob URL → `<iframe>`（浏览器 viewers），另给 blob 链接；不引 PDF 引擎 |
+| P17 | `html` 渲染器 | ✅ | `ext: ['html', 'htm']` 的唯一 owner；**预览**（DOMPurify 消毒 → `<iframe srcdoc sandbox>` 无脚本）+ **源码**，切换在渲染器头部，缺省预览；只用预读文本（contract §5.1）|
 | P12 | `git-changes`（变更视图 + diff 座位） | ✅ | 左栏「变更」（`sidebar.views` 的 `changes` 视图，`order: 20`）；该 tab 以 `view: 'diff'` 渲染 unified diff；**v0.6：由 `fs.watch` 驱动重算**（不再 5 秒轮询）；不是仓库时两个 git 视图都不出现 |
 | P16 | `git-changes`（历史视图 + 提交座位） | ✅ 本轮 | 左栏「历史」（`history`，`order: 30`）：提交列表（每页 50，上限 500）；点提交写 `#history=<sha>`，右侧 `seats.git-commit` 显示**标题行**（正文展开/收起）、作者、文件清单与「改动 / 提交时的内容」|
 | P13 | `search`（全文检索） | **未来** | 没讨论过 |
@@ -87,7 +88,7 @@
 | U3 | 快捷键 | ✅ M2 | 全局唯一绑定 + `when`；`mod` = ⌘/Ctrl；v0.6 加 `mod+alt+1/2/3` 切侧栏视图 |
 | U4 | command palette | ✅ M2 | 只列可执行命令（不灰显），`Esc` 关、`Enter` 跑 |
 | U5 | 工具栏 | **不做** | 明确移除；开关型交互改由命令承担（O8 缓解；本轮「改动/内容」是提交座位里的两个按钮，不是工具栏）|
-| U6 | 渲染模式切换（`md` 源码/预览） | 🔲 待定 | O8 |
+| U6 | 渲染模式切换 | 部分 ✅ | `html` 在自己的头部给了「预览 / 源码」两个按钮（O8：开关归渲染器，不开工具栏）；`md` 的源码/预览仍未定 |
 | U7 | 图片缩放 / 适配窗口 | 🔲 待定 | O8 |
 | U8 | diff 并排 / 行内切换 | 🔲 待定 | O8 |
 | U9 | 状态栏 | **v1 不做** | 已从契约 slot 表移除 |

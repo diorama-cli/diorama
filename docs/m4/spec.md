@@ -252,3 +252,65 @@ pnpm --filter diorama-web exec playwright test   # 69 passed（17 个 spec 文�
 - Notebook（`.ipynb`）渲染器：本轮明确不做。
 - 变更视图的订阅端点（`git.change` 进 §4）：现在是 `fs.watch` 驱动的重算，不是 git 的推送。
 - 历史视图的搜索 / 按作者过滤 / 图形化提交图：只做了线性列表与分页（每页 50，上限 500）。
+
+## 12. 补记：HTML 渲染器（v0.6，不改契约版本）
+
+> 2026-10-20。用户拍板：`.html` / `.htm` 要**源码 + 预览双视图**，并且进**默认插件清单**。
+> 不升契约版本：§5.1 的“只预读文本 / 渲染器自己取字节 / 一个扩展名一个 owner”已足够承载，
+> 新增的是**内置渲染器的清单与行为**，记在 contract §5.1 与 §16 的表格里。
+
+| 项 | 选择 | 理由 |
+|---|---|---|
+| 归属 | 新插件 `packages/plugins/html`，`ext: ['html', 'htm']`，`order: 90` | `code` 的 ext 表删掉这两个扩展名（§9 的坑 2：一个扩展名一个 owner） |
+| 预览 | DOMPurify 消毒 → `<iframe srcdoc sandbox="allow-same-origin">` | 消毒去掉脚本 / 事件处理器 / `style` / 表单 / 嵌套 frame；frame **没有** `allow-scripts`，漏网的脚本也不执行；`srcdoc` 不产生本站 origin 上的 URL（与 PDF 的 blob 做法不同） |
+| frame 的 CSP | `default-src 'none'; img-src data:; style-src 'none'`，wrapper 不带自己的 `<style>` | 页面自己的 CSS 在消毒时就被拿掉了（预览是「消毒后的内容 + 浏览器默认排版」，不是「页面的样子」）；nonce 不可行——实测沙箱 frame 不把 nonce 传给它的 style/script，`<style nonce>` 连 wrapper 自己的都保不住（chromium） |
+| 切换 | 渲染器自己的头部两个按钮（`aria-pressed`） | O8：开关归渲染器，不开工具栏；`md` 的同类切换（U6）仍未定 |
+| 状态 | 渲染器实例（一个 tab 座位一个）；同一 tab 换文件回到预览 | 同文件换 tab 各自保留；深链 / 刷新恢复总是“打开一个页面” |
+| 缺 `html` 插件 | `.html` 落到 `plaintext` | 不回到 `code`：owner 只有一个 |
+| 单测 | `packages/plugins/html/test/frame.test.ts`（新目录进 `test:unit`） | 只测纯函数（frame 文档、CSP/nonce、行数/大小）；DOMPurify 需要 window，交给 e2e |
+
+**坑**
+1. **`node --test` 不认识 `.tsx`**（`ERR_UNKNOWN_FILE_EXTENSION`）。纯函数放 `src/frame.ts`，
+   组件在 `src/index.tsx` 里引它——单测只导入前者。
+2. **`export type { X } from './x.ts'` 之后同文件再用 `X` 会“没有导出成员”**：要 `import type { X }` +
+   单独 `export type { X }`（m4 §9 坑 1 的同一条，这次在 `.tsx` 上再犯了一次）。
+3. **nonce 在沙箱 frame 里不传播**：`<style nonce>` + `style-src 'nonce-…'` 在直接开页面时有效，
+   在 `srcdoc` + `sandbox` 的 frame 里 Chromium 不把 nonce 品牌传下去，wrapper 自己的 `<style>` 也被
+   挡掉（页面内创建的带 nonce `<style>` 同样不生效）。所以 wrapper 不带样式：预览用浏览器默认排版，
+   `style-src 'none'` 把页面塞进来的样式全挡住——反正消毒已经拿掉了 `<style>`。
+4. **`--plugins` 写死的 e2e 夹具**：用例点名一组插件时，`.html` 不在 `code` 里的变化会立刻显示出来
+   （`m5-html` 的“去掉 `html` 插件”用例就是靠这一点落到 `plaintext`）；要在**默认**清单里测，就
+   不要传 `--plugins`。
+
+**验收**（`apps/web/tests/m5-html.spec.ts`，4 条）：预览默认开、frame 无 `allow-scripts`、脚本没跑、
+内联事件没触发、页面自己的 `<style>` 生效；源码视图显示转义后的原文、无 frame；同 tab 换文件回到
+预览；去掉 `html` 插件后落到 `plaintext`。
+
+## 13. 修复：git 读错仓库（2026-10-20，v0.6 内修 bug，不升契约）
+
+**现象**：挂载 `meli-erp`，文件树是 meli-erp 的，但「变更」「历史」显示 `diorama` 的改动与提交。
+
+**三个独立原因，逐个复现后修掉：**
+
+1. **继承的 `GIT_*` 环境变量劫持了目录（直接原因）**。`runGit` 用 `env: { ...process.env, … }`，
+   而 `GIT_DIR` / `GIT_WORK_TREE` / `GIT_INDEX_FILE` / `GIT_CONFIG*` 在 git 里**优先于 `-C`**。
+   gateway 从带着这些变量的 shell 启动，于是每个 mount 的 git 都指向那个 shell 的仓库。
+   修法：`gitEnvironment()` 丢掉所有 `GIT_*`，只留服务自己设的三项（`GIT_TERMINAL_PROMPT=0`、
+   `GIT_OPTIONAL_LOCKS=0`、`LC_ALL=C`）。复现：同一进程里带 `GIT_DIR=<other>/.git`，
+   `detectRepository` 返回 other、`status()` 列 other 的文件；修后返回目标仓库。
+2. **Cordis 按服务名隔离，`forkMount` 只命名了 `fs`**。日志 `[mount:92a8d493] git: service "git" has
+   been registered at <git:8b69f512>`：同一仓库的两个目录挂在一起时，第二个 mount 的 `git` 撞上第一个的
+   默认键，root 也能解析到某个 mount 的 `GitService`（比报告的更糟）。修法：`mountScope()` 对
+   `MOUNT_SERVICES = ['fs', 'git']` 逐个 `isolate(name, Symbol('<mountId>:<name>'))`；插件自带的按目录
+   服务用 `isolateMountService(ctx, name)`。新增后台插件要把服务名加进 `MOUNT_SERVICES`。
+3. **服务的「回答」被当成 mount 故障**。`guardedDispatcher` 只要错误码不是
+   `EMETHOD`/`ESERVICE`/`EBADREQUEST` 就 `degrade`，于是 `ENOENT`（文件被删）、`EBINARY`（读了一次二进制）
+   都会让健康 mount 走 degraded → 自动重启 → recovered，日志里刷出 `degraded: ENOENT`。
+   修法：内核错误表里的**所有**码（§3.1/§3.2/§4）都是「回答」，只让请求失败；没有码或未知码才算故障。
+
+**回归**：`git.test.ts` +2（环境劫持、`gitEnvironment` 过滤）、`fork.test.ts` +1（同仓库两个目录各拿
+自己的 git、root 没有 git、无注册冲突、拆一个不动另一个）、新 `packages/cli/test/guarded-dispatcher.test.ts`
+（3 条）。三个都有变异验证：把修复去掉，对应的用例会红。
+
+**已知遗留**：`GIT_*` 作为进程级环境是在 gateway 启动时定下的；已经跑起来的 gateway 要
+`diorama-beta gateway restart` 才会带上修复。

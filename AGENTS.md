@@ -65,7 +65,7 @@ docs/                     契约、架构、能力、排期、逐档 spec
 | `diorama.toml` | `kernel/src/server/config.ts` |
 | 契约版本 | `kernel/src/contract.ts`（**只在这里改**） |
 
-### 加一个内置插件：6 处要一起改
+### 加一个内置插件：7 处要一起改
 
 1. `packages/plugins/<id>/` 新包：`package.json`（`diorama.id` / `contract: ">=0.6 <0.7"` / `client.entry` / `requires`）、`vite.config.ts`、`tsconfig.json`、`tsconfig.emit.json`（从任意现有插件复制）。
 2. `packages/kernel/src/server/plan.ts` 的 `BUILTIN_PLUGIN_IDS`（顺序 = boot 顺序）。
@@ -73,8 +73,9 @@ docs/                     契约、架构、能力、排期、逐档 spec
 4. `packages/cli/package.json` 的 `dependencies` 加 `workspace:*`。
 5. 根 `package.json` 的 `build` 脚本加一条 `pnpm --filter diorama-plugin-<id> run build`（放在依赖它的包之前）。
 6. 需要新座位时：`packages/plugins/slots/src/types.ts` 的 `SlotMap`；左侧栏的新视图注册进 `sidebar.views`（key = 视图 id），不要新开侧栏座位。
+7. 默认清单 / 计数：`kernel/test/config.test.ts` 的默认插件断言要加这个 id；有 `node --test` 单测的新包，记得把 `test/<name>.test.ts` 加进根 `package.json` 的 `test:unit`（`node --test` 不认 `.tsx`，纯函数单独放一个 `.ts`）。
 
-`pnpm-workspace.yaml` 已覆盖 `packages/plugins/*`，无需改。
+`pnpm-workspace.yaml` 已覆盖 `packages/plugins/*`，无需改；新包第一次要跑一次 `pnpm install` 建链接。
 
 ## 5. 陷阱（M2/M3 实测，按症状查）
 
@@ -97,6 +98,10 @@ docs/                     契约、架构、能力、排期、逐档 spec
 | 左栏视图「注册了但不显示」 | `layout` 只画它知道的座位 | 视图用 `sidebar.views`（keyed，key = 视图 id）；非活动视图隐藏不卸载 |
 | URL 深链不生效 / 刷新丢文件 | 路由与 tabs 的写回方向搞反 | URL 只记活动 tab 的路径；`ctx.router` 订阅 tabs 回写，`popstate` 只反向打开 |
 | 新的字节渲染器（图片/PDF）永远不被选中 | `ext` 档永远赢 `mime` 档（§5.1 rule 2），别的渲染器按扩展名认领了它 | 一个扩展名只有一个 owner：把 `.svg` 之类从别的 `ext` 表里拿掉（m4/spec §9.2）|
+| 两个 mount 的 `git` 串了（`service "git" has been registered at <git:…>`，或 root 解析到某个 mount 的 git） | **Cordis 按服务名隔离，不按 fiber**：`isolate` 只命名一个名字，其余落回 root 的默认键 | 每个 mount 提供的服务名都要进 `MOUNT_SERVICES`（`kernel/src/server/plugins.ts`）；插件自己的按目录服务用 `isolateMountService(ctx, name)`（m4/spec §13）|
+| git 读到别的仓库 / 历史与文件树不是同一个目录 | 进程环境里的 `GIT_DIR` / `GIT_WORK_TREE` 优先于 `-C` | `runGit` 用 `gitEnvironment()`（丢掉所有 `GIT_*`）；别把 `process.env` 直接交给 git（m4/spec §13）|
+| 日志里健康 mount 反复 `degraded: ENOENT` / `EBINARY` → `recovered` | RPC 调用报的**回答码**被当成 mount 故障 | 内核错误表里的码都不 degrade；只有无码/未知码才算故障（`cli/src/gateway.ts` 的 `ANSWER_CODES`）|
+| `node --test` 报 `ERR_UNKNOWN_FILE_EXTENSION: .tsx` | Node 不认 `.tsx` | 单测只导入 `.ts`；把要测的纯函数从组件文件里拆出来（m4/spec §12）|
 | 「找不到成员 `mountCtx`」/ props 里还有 `bytes` | `FileRendererProps` 曾在内核与 slots 各有一份且漂移 | 只有内核一份；slots re-export 它。`export type {X} from` 后同文件不能再用 `X` |
 | e2e 里快捷键不生效（mac 上写 `Control+Alt+x`） | `mod` 在 macOS 上是 Meta | 测试用 `MOD = darwin ? 'Meta' : 'Control'`；别用裸 `Control` |
 | 提交详情不出现在右侧 | 提交不是 tab，不进 `tabs.content` | `tabs` 声明 `seats.git-commit`，hash 里有 `history=<sha>` 时改画它；tab 仍然挂载 |
