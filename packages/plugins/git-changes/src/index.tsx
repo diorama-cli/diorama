@@ -77,36 +77,96 @@ export const TONE: Record<GitStatusEntry['kind'], string> = {
   conflicted: 'conflicted',
 }
 
-/** Changed files of the working tree: fetched on mount, refreshed on demand. */
-function useChanges(git: GitClient): {
+/** Directory events that mean "the working tree may have changed". */
+type ChangeEvent = { type: 'change' | 'add' | 'unlink'; path: string }
+
+/** A file-system event → a `git status` re-read, at most this often (ms). */
+const RECHECK_MS = 400
+
+/**
+ * Changed files of the working tree: fetched on mount, then re-fetched when
+ * the directory changes.
+ *
+ * `ctx.git` has no subscription endpoint (contract.md §3.2), so the signal
+ * comes from `ctx.fs.watch` (§3.1): every directory the file tree shows is
+ * watched one level deep, and any event schedules one `status()` after a
+ * short quiet period — a burst of saves is one re-read, not one each. A
+ * directory appears/disappears on its own event, so the watch set follows the
+ * tree. The list also has its own button for when a watch was refused (the
+ * per-mount `maxDirectories` cap) or unavailable.
+ */
+function useChanges(mount: { git: GitClient; fs: { list(path?: string): Promise<{ path: string; kind: string }[]>; watch(path: string, listener: (event: ChangeEvent) => void): () => void } }): {
   entries: GitStatusEntry[] | undefined
   error: string | undefined
   reload(): void
 } {
   const [state, setState] = useState<{ entries?: GitStatusEntry[]; error?: string }>({})
   const [epoch, setEpoch] = useState(0)
+  const git = mount.git
   useEffect(() => {
     let live = true
-    git.status().then(
-      entries => {
-        if (live) setState({ entries })
-      },
-      (error: unknown) => {
-        if (live) setState({ error: error instanceof Error ? error.message : String(error) })
-      },
-    )
-    // `ctx.git` has no subscription endpoint (contract.md §3.2): a slow poll is
-    // enough for a read-only list, and expands on demand like the file tree.
-    const timer = setInterval(() => {
-      git.status().then(entries => {
-        if (live) setState({ entries })
-      }, () => {})
-    }, 5_000)
+    const load = (): void => {
+      git.status().then(
+        entries => {
+          if (live) setState({ entries })
+        },
+        (error: unknown) => {
+          if (live) setState({ error: error instanceof Error ? error.message : String(error) })
+        },
+      )
+    }
+    load()
+
+    // One timer per burst: the next event restarts it, so a save storm from an
+    // editor is a single `status()` once the tree stops moving.
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const schedule = (): void => {
+      if (timer !== undefined) clearTimeout(timer)
+      timer = setTimeout(() => {
+        timer = undefined
+        load()
+      }, RECHECK_MS)
+    }
+    const watchers = new Map<string, () => void>()
+    const watched = new Set<string>()
+    const refreshWatches = (): void => {
+      mount.fs.list('').then(
+        entries => {
+          if (!live) return
+          const dirs = new Set(['', ...entries.filter(entry => entry.kind === 'dir').map(entry => entry.path)])
+          for (const [dir, dispose] of watchers) {
+            if (dirs.has(dir)) continue
+            dispose()
+            watchers.delete(dir)
+            watched.delete(dir)
+          }
+          for (const dir of dirs) {
+            if (watchers.has(dir)) continue
+            watched.add(dir)
+            watchers.set(
+              dir,
+              mount.fs.watch(dir, event => {
+                // `type` is a hint, not the truth (contract.md §3.1): an added
+                // path may be a directory that needs its own watch, and only
+                // `list` can tell. The rescan is idempotent and only adds
+                // watchers for directory names it did not see before.
+                if (event.type === 'add') refreshWatches()
+                schedule()
+              }),
+            )
+          }
+        },
+        () => {},
+      )
+    }
+    refreshWatches()
     return () => {
       live = false
-      clearInterval(timer)
+      if (timer !== undefined) clearTimeout(timer)
+      for (const dispose of watchers.values()) dispose()
+      watchers.clear()
     }
-  }, [git, epoch])
+  }, [git, mount, epoch])
   return {
     entries: state.entries,
     error: state.error,
@@ -165,9 +225,8 @@ function useTabPath(tabs: TabsService | undefined): string | undefined {
 /** The changes view (contract.md §5.2). */
 function ChangesView({ active }: { active: boolean }) {
   const { mount, ctx } = useKernel()
-  const git = mount.git
   const tabs = ctx.tabs as TabsService | undefined
-  const changes = useChanges(git)
+  const changes = useChanges(mount)
   const activeTab = useTabPath(tabs)
   const router = ctx.router
   void active

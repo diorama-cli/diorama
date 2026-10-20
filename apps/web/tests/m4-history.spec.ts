@@ -160,3 +160,20 @@ test('history: a plain directory has neither git view', async ({ page }) => {
     }),
   ).toBe(false)
 })
+
+test('history: the changes view re-reads on file-system events, without polling', async ({ page }) => {
+  repository()
+  server = await startDiorama(directory.root)
+  await page.goto(server.url)
+  await page.getByTestId('sidebar-switcher').getByRole('tab', { name: '变更' }).click()
+  const changes = page.getByTestId('git-changes')
+  await expect(changes).toContainText('工作区没有改动')
+
+  // A new file in the working tree shows up because fs.watch fired, not
+  // because a timer did (contract.md §3.1 driven by the changes view).
+  const { writeFileSync } = await import('node:fs')
+  const { join } = await import('node:path')
+  writeFileSync(join(directory.root, 'src/added.js'), 'added\n')
+  await expect(changes.locator('[data-path="src"]')).toBeVisible()
+  await expect(changes.getByText('added.js')).toBeVisible()
+})
