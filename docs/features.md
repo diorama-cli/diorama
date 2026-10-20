@@ -4,8 +4,9 @@
 > 分三档：**v1 必做**、**定过但不做/deliberately 不做**、**未来**。
 > 与 [architecture.md](architecture.md) 的决定、[contract.md](contract.md) 的契约对照看。
 >
-> **档位标注（2026-10-19）**：标 ✅ 的已落地；本轮的 git 只读视图与 URL 路由见
-> [实施说明](m4/spec.md)。其余仍是 v1 目标。契约见 [contract.md](contract.md) **v0.5**。
+> **档位标注（2026-10-19，2026-10-20 更新）**：标 ✅ 的已落地；git 只读视图、URL 路由、git 历史视图、
+> 图片与 PDF 渲染器见 [实施说明](m4/spec.md)（§1–§6 是第一轮，§7–§11 是第二轮）。其余仍是 v1 目标。
+> 契约见 [contract.md](contract.md) **v0.6**。
 
 ## 一、CLI
 
@@ -19,7 +20,7 @@
 | C9 | `diorama.toml`（`host`/`port`/`plugins`/`ignore`/`[watch]`） | ✅ M2 | 目录 → `$DIORAMA_HOME` 查找；CLI > toml > 默认；写错 fail loud；`--config`、`--all`、`--dump-config` |
 | C6 | 随机端口自动重试 | ✅ M3 | 随机端口上限 20 次；显式端口冲突直接 `EADDRINUSE`（退出码 1）|
 | C7 | realpath 挂载键 + 别名提示 | ✅ M3 | 挂载键 = realpath（同一真实目录幂等）；打印的目录是 realpath 后的 |
-| C8 | 单测/集成测试 | ✅ M0→M3 | `apps/web/tests/`：55 条端到端（真实 CLI/gateway + Chromium）；`pnpm test:unit`：122 条单测 |
+| C8 | 单测/集成测试 | ✅ M0→本轮 | `apps/web/tests/`：68 条端到端（17 个 spec，真实 CLI/gateway + Chromium）；`pnpm test:unit`：128 条单测 |
 
 ## 二、Gateway
 
@@ -39,13 +40,13 @@
 |---|---|---|---|
 | K1 | Cordis 插件树（双端） | ✅ M0→M1 | `cordis@4.0.0-rc.11`；`fs` 是真正的 server 半边（`mounts.onMount`）|
 | K2 | 客户端 Loader + 模块表 | ✅ M0→M1 | 闭合工厂 + 页面模块表（`react` / `react/jsx-runtime`，contract §8）；外部半边推迟 |
-| K3 | 插件 manifest + contract version 检查 | ✅ M0→M1 | `>=0.5 <0.6` 强制；`requires` 进 boot 图 |
+| K3 | 插件 manifest + contract version 检查 | ✅ M0→本轮 | `>=0.6 <0.7` 强制（含 kernel 包自己的 manifest）；`requires` 进 boot 图 |
 | K4 | 插件来源：内置 + `~/.diorama/plugins` | **未来（最后一个里程碑）** | `PluginSource` 接口与 `BuiltinSource` 就位；外部目录见 contract §9 |
 | K5 | 生命周期：代码全局、数据按目录 | ✅ M3 | `ctx.diorama.mounts` + `onMount`；每 mount 一个 fork 子 ctx（`isolate` + 自有 fiber）|
 | K6 | slot 系统 | ✅ M0→M1 | 冲突三类分开（contract §3.3）、`ctx.slots.declare`、`file.renderer` matcher |
 | K7 | fail loud + 回退链 | ✅ M0→M1 | 加载/契约/slot/渲染/RPC 五层；渲染器抛错→标记失败→下一个→plaintext |
 | K8 | `ctx.fs`（只读） | ✅ M2→M3 | `list`（尊重 ignore）/ `stat` / `readText` / `readBytes` / `watch`（目录、300ms 合并、**mount 内共享**、`maxDirectories` 上限）；`ETOOLARGE` 上限 |
-| K9 | `ctx.git`（只读） | ✅ 本轮 | `status` / `diff(scope)` / `log`；仓库探测、上限、错误码（contract §3.2）|
+| K9 | `ctx.git`（只读） | ✅ | `status` / `diff(scope)` / `log`（v0.5）；`show` / `showCommit` / `blob`、`base: 'index' \| <commit>`（v0.6）；仓库探测、上限、错误码（contract §3.2）|
 | K10 | `ctx.slots` | ✅ M0→M1 | |
 | K11 | `ctx.commands` | ✅ M2 | 内核内置：命令 id fail loud、快捷键字面冲突抛错、`CommandContext` 内核采集、单一 keydown 分发 |
 | K12 | `ctx.diorama.mounts` | ✅ M3 | `onMount` 时机、卸载顺序、`MountInfo` 带 `port`/`url`/`configFile`（契约 §2.5/§3.5）|
@@ -68,13 +69,14 @@
 | P6 | `code` | ✅ M1 | highlight.js 按语言注册；`.md` 不在其中（归 markdown）|
 | P7 | `plaintext` | ✅ M0 | 兜底渲染器 |
 | P8 | `palette` | ✅ M2 | 插件，`layout.overlay` 条目，`mod+k`；只列可执行命令 |
-| P9 | `theme` / `i18n` | 🔲 待定 | 主题本轮明确不做；`ctx.storage` 签名仍未定 |
+| P9 | `theme` / `i18n` | 🔲 待定 | 主题明确不做（两轮都拍板不做）；`ctx.storage` 签名仍未定 |
 | P15 | `fs`（server 半边） | ✅ M1 | 内核自带；`--plugins` 不影响服务端 |
-| P10 | `image` 渲染器 | **未来** | 没讨论过 |
-| P11 | `pdf` 渲染器 | **未来** | 没讨论过 |
-| P12 | `git-changes`（变更视图 + diff 座位） | ✅ 本轮 | 左栏「变更」是 `sidebar.views` 的一个视图；点开后该 tab 以 `view: 'diff'` 渲染 unified diff；不是仓库时整个视图不出现 |
+| P10 | `image` 渲染器 | ✅ 本轮 | `mime: ['image/*']`；先 `stat`、超 32 MiB 不请求；bytes → Blob URL → 原生 `<img>`（SVG 也走 `<img>`，不内联 DOM）|
+| P11 | `pdf` 渲染器 | ✅ 本轮 | `ext: ['pdf']`；bytes → Blob URL → `<iframe>`（浏览器 viewers），另给 blob 链接；不引 PDF 引擎 |
+| P12 | `git-changes`（变更视图 + diff 座位） | ✅ | 左栏「变更」（`sidebar.views` 的 `changes` 视图，`order: 20`）；该 tab 以 `view: 'diff'` 渲染 unified diff；**v0.6：由 `fs.watch` 驱动重算**（不再 5 秒轮询）；不是仓库时两个 git 视图都不出现 |
+| P16 | `git-changes`（历史视图 + 提交座位） | ✅ 本轮 | 左栏「历史」（`history`，`order: 30`）：提交列表（每页 50，上限 500）；点提交写 `#history=<sha>`，右侧 `seats.git-commit` 显示说明、作者、文件清单与「改动 / 提交时的内容」|
 | P13 | `search`（全文检索） | **未来** | 没讨论过 |
-| P14 | `jupyter` / `.ipynb` | **未来** | 没讨论过 |
+| P14 | `jupyter` / `.ipynb` | **未来** | 第二轮明确不做（只要文本，但渲染形式未定）|
 
 ## 五、UI 交互
 
@@ -82,16 +84,16 @@
 |---|---|---|---|
 | U1 | 左侧栏 + 右侧多 tab | ✅ M0→本轮 | 左栏是 `sidebar.views`（文件树 / 变更 …，VS Code 式切换）；每个 tab 一个内容座位（隐藏不卸载）|
 | U2 | 文件变化自动刷新（watch） | ✅ M2 | 内容与树；`view.toggleAutoRefresh` 可关 |
-| U3 | 快捷键 | ✅ M2 | 全局唯一绑定 + `when`；`mod` = ⌘/Ctrl |
+| U3 | 快捷键 | ✅ M2 | 全局唯一绑定 + `when`；`mod` = ⌘/Ctrl；v0.6 加 `mod+alt+1/2/3` 切侧栏视图 |
 | U4 | command palette | ✅ M2 | 只列可执行命令（不灰显），`Esc` 关、`Enter` 跑 |
-| U5 | 工具栏 | **不做** | 明确移除；开关型交互改由命令承担（O8 缓解）|
+| U5 | 工具栏 | **不做** | 明确移除；开关型交互改由命令承担（O8 缓解；本轮「改动/内容」是提交座位里的两个按钮，不是工具栏）|
 | U6 | 渲染模式切换（`md` 源码/预览） | 🔲 待定 | O8 |
 | U7 | 图片缩放 / 适配窗口 | 🔲 待定 | O8 |
 | U8 | diff 并排 / 行内切换 | 🔲 待定 | O8 |
 | U9 | 状态栏 | **v1 不做** | 已从契约 slot 表移除 |
-| U10 | 多 tab 状态持久化（刷新后恢复整组 tab） | 🔲 待定 | O5；本轮刷新只恢复**活动文件**（URL）|
+| U10 | 多 tab 状态持久化（刷新后恢复整组 tab） | 🔲 待定 | O5；刷新只恢复**活动文件**（URL）与 hash 里的视图（`#diff`、`#history=<sha>`）|
 | U11 | URL 路由（可直接分享某个文件） | ✅ 本轮 | `/~/<RelPath>`（path 形态，`/~/` 为保留前缀）；`ctx.router` 内核内置；刷新恢复单 tab（contract §3.8）|
-| U12 | 深色/浅色主题 | 🔲 待定 | 没讨论过 |
+| U12 | 深色/浅色主题 | **不做（当前）** | 两轮都明确不做；`ctx.storage` 签名未定，跟随系统主题也未做 |
 
 ## 六、明确不做（v1 及以后）
 
@@ -108,9 +110,9 @@
 这些是我认为「一个文件查看器通常会想要、但你没提过」的，列出来供你取舍：
 
 1. **全文搜索（命令面板附带文件搜索）** —— 需要额外服务与索引策略。
-2. **主题 / 外观配置** —— 至少要不要支持跟随系统深色模式。
+2. **主题 / 外观配置** —— 至少要不要支持跟随系统深色模式。（**两轮都明确不做**；等 `ctx.storage` 定签名）
 3. **URL 可分享** —— `#/path/to/file`，打开链接直达某文件。
-4. **多 tab 记忆** —— 刷新后恢复上次打开的 tab。
+4. **多 tab 记忆** —— 刷新后恢复上次打开的 tab。（**待定**：现在只恢复活动文件与 hash 里的视图）
 5. **隐藏文件与 `.gitignore`** —— 文件树默认是否隐藏 `.git`、`node_modules`。（**已定**：默认隐藏这两项，可用 `ignore` 覆盖；`.gitignore` 不读）
 6. **大文件/大目录策略** —— 目录上万文件时树怎么加载；文件超大时是否截断。（**M2 已做**：每目录 500 条分页 +「加载更多」）
 7. **二进制文件处理** —— 不认识的文件显示大小/类型信息，还是“不支持”。

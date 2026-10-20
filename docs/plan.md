@@ -84,17 +84,22 @@
 | 隔离 | 目录级故障隔离 + degraded 状态（一次自动重启 + 页面横幅） |
 | 移除 | 前台模式保留为 `--foreground` 调试模式 |
 
-## M4：补齐特性 ✅ 已完成（2026-10-19）
+## M4：补齐特性 ✅ 已完成（2026-10-19，第二轮 2026-10-20）
 
-> 实施说明见 [m4/spec.md](m4/spec.md)。契约升到 **v0.5**（contract §15）。
+> 实施说明见 [m4/spec.md](m4/spec.md)（§1–§6 第一轮，§7–§11 第二轮）。契约两轮分别升到 **v0.5**
+> （contract §15）与 **v0.6**（contract §16）。
 
 | 部分 | 做 | 状态 |
 |---|---|---|
 | git 只读视图 | `ctx.git`（status / diff / log）+ 左栏「变更」视图 + 单个文件的 diff 渲染 | ✅ |
 | URL 路由 | `ctx.router` + `/~/<path>` 深链；刷新恢复单 tab | ✅ |
-| 侧栏视图切换 | `sidebar.views` 取代 `sidebar.tree`（VS Code 式） | ✅ |
-| 图片 / PDF / Notebook 渲染器 | | **不做**（仍是「未来」） |
-| 主题 | | **本次不做**（`ctx.storage` 仍 🔲） |
+| 侧栏视图切换 | `sidebar.views` 取代 `sidebar.tree`（VS Code 式）；v0.6 加 `mod+alt+1/2/3` | ✅ |
+| git 历史视图 | `show` / `showCommit` / `blob`；左栏「历史」+ `seats.git-commit`；`#history=<sha>` | ✅ 第二轮 |
+| 图片渲染器 | `image/*` 通配；字节自己取；Blob URL + `<img>` | ✅ 第二轮 |
+| PDF 渲染器 | `.pdf`；Blob URL + `<iframe>`（浏览器 viewers） | ✅ 第二轮 |
+| 变更视图实时 | `fs.watch` 驱动重算（去掉 5 秒轮询） | ✅ 第二轮 |
+| Notebook 渲染器（`.ipynb`） | | **不做**（仍是「未来」） |
+| 主题 | | **不做**（`ctx.storage` 仍 🔲） |
 
 ## 里程碑之外、但必须同时做的
 
