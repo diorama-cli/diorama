@@ -107,6 +107,31 @@ test('tabs: open on a directory is a no-op (or re-activates)', () => {
   assert.equal(tabs.open({ path: 'dir', name: 'dir', kind: 'dir', size: 0, mtime: 0 }).id, a.id)
 })
 
+test('tabs: every open is announced, even when it changes no tab', () => {
+  // A piece showing something other than a tab (a picked commit, v0.6) learns
+  // "the reader went back to browsing" from this: reopening the file that is
+  // already active leaves the snapshot untouched, so the snapshot alone cannot
+  // tell that apart from staying put (docs/m4/spec.md §6.2).
+  const tabs = createTabsService()
+  const opened = tabs.open(file('src/app.js'))
+  let calls = 0
+  const off = tabs.subscribe(() => calls++)
+  const before = tabs.getSnapshot()
+
+  tabs.open(file('src/app.js'))
+  assert.equal(calls, 1)
+  assert.equal(tabs.openCount, 2)
+  // The snapshot is the same object: nothing about the tab set changed.
+  assert.equal(tabs.getSnapshot(), before)
+  assert.equal(tabs.active?.id, opened.id)
+
+  // A different file is a change as well, and still one notification.
+  tabs.open(file('src/b.js'))
+  assert.equal(calls, 2)
+  assert.equal(tabs.openCount, 3)
+  off()
+})
+
 test('tabs: the key is (path, view) — content and diff tabs coexist', () => {
   const tabs = createTabsService()
   const content = tabs.open(file('src/app.js'))

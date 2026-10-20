@@ -404,6 +404,7 @@ ctx.slots.register({
     prev(): void                       // 循环
     readonly active: TabInfo | undefined
     readonly count: number             // 命令的 when 用
+    readonly openCount: number         // open() 被调用的次数（单调，v0.6）
     getSnapshot(): TabsSnapshot        // 不可变，仅变化时替换
     subscribe(listener: () => void): () => void
   }
@@ -419,6 +420,10 @@ ctx.slots.register({
   - **标签栏由 `tabs` 自己画**（不开新 seat）；每个 tab 的内容画进 `tabs.content`（§5，
     key = tab id）。
   - `open` 从 v0.2 的 `void` 改为返回 `TabInfo`：源码层面兼容（`void` 用法照旧编译）。
+  - **`openCount`（v0.6）**：`open()` **被调用**的次数，单调递增；**每次调用都通知订阅者**，
+    包括"打开的就是当前活动文件"这种不改快照的情况。它存在的理由是"阅读者又去浏览文件了"这个
+    事件本身：提交详情这类**不是 tab** 的东西要靠它知道该收起（§3.8、§5）。`getSnapshot()` 仍是
+    不可变快照，`open` 同一文件时**同一个对象**（快照没变）——所以只听快照听不到这件事。
 
 ### 3.5 `ctx.diorama.mounts`（server）✅ v0.4 定
 
@@ -731,6 +736,10 @@ maxDirectories = 64         # 每个目录同时监听的目录数上限（§3.1
   而是“一栏多视图”，file-tree 只是其中一个视图。
 - **`seats.git-commit`（v0.6）与 `tabs` 无关**：提交不是文件，没有 `(path, view)` 键，不进 tab 集合；
   历史视图选中哪个提交由视图自己持有，`layout` 只负责把单座位画出来。
+  - **它什么时候收起**：`tabs` 只在两件事同时成立时把 `#history` 画成提交详情——**选中的侧栏视图仍是
+    `history`**，且**选中之后没有 `open()` 过任何文件**（`ctx.tabs.openCount` 没变，§3.4）。任一不成立就
+    删掉 `#history` 并回到 tab 列表：打开文件（哪怕打开的是当前活动的那一个）、切到别的侧栏视图，都是
+    “阅读者离开这个提交”。反过来，刷新时 hash 与 URL 上的文件一起恢复，仍算同一个提交（v0.6）。
 - **`statusbar`：v1 不做**，从 slot 表移除（需要时再议）。
 - **没有 toolbar**：只读工具没有“要对文件做的事”，v1 不提供 `file.toolbar` / `tabs.actions`（O8）。
 - **回退链**：`file.renderer` 的条目按 §5.1 排序，命中者渲染；渲染抛错 → 标记失败 → **尝试下一个**；matcher 全不命中 → 兜底条目（plaintext）；一个条目都没有 → 「无可用渲染器」。
@@ -1197,7 +1206,8 @@ RPC 广播 `{ topic: 'mount.state', payload: MountStatus }`。
 | §5.1 无认领的二进制 | 落到 plaintext（只有字节，没有可显示的东西） | plaintext 显示「二进制文件 · size · mime」 |
 | §5.1 `mime` matcher | 精确 mime | 允许**末尾**一个 `*`（`image/*`）；中间通配不支持 |
 | §5.1 内置渲染器 | 无字节渲染器 | `image`（`image/*`）与 `pdf`（`.pdf`），先 `stat`、超 32 MiB 不请求，Blob URL + 原生 `<img>` / `<iframe>` |
-| §5 `seats.git-commit` | 无 | 新增单座位（声明者 `git-changes`）；提交详情**不是 tab**、不进 `(path, view)` 键 |
+| §5 `seats.git-commit` | 无 | 新增单座位（声明者 `git-changes`）；提交详情**不是 tab**、不进 `(path, view)` 键；`#history` 只在“仍在 `history` 视图且之后没 `open()` 过文件”时画详情（§5） |
+| §3.4 `ctx.tabs.openCount` | 无 | 新增只读计数：`open()` 被调用几次；**每次调用都通知**（打开当前文件也算），供“阅读者又去浏览了”这类事件用（§3.4） |
 | §5.2 `history` 视图 | 侧栏两个视图（`files` / `changes`） | 第三个视图 `history`（`order: 30`），由 `git-changes` 注册；选中提交写 `#history=<sha>`（router 的 hash 面，内核不解释） |
 | §3.7 命令表 | 9 条 | 另加 `sidebar.showFiles` / `sidebar.showChanges` / `sidebar.showHistory`（`mod+alt+1/2/3`），由 layout 注册 |
 | §5.1 内置渲染器（HTML） | 无（`.html` 归 `code` 当源码看） | `html`（`ext: ['html', 'htm']`，`code` 不再认领）：预览 = DOMPurify 消毒 + `srcdoc` 沙箱 frame（无 `allow-scripts`），源码 = 转义文本；切换在渲染器头部，缺省预览 |

@@ -234,6 +234,22 @@ pnpm --filter diorama-web exec playwright test   # 69 passed（17 个 spec 文�
 9. **`pnpm --filter <pkg> run build` 只重建那一个包。** 改了内核**导出**（新增/改类型）必须重建内核，
    再由下游重新 typecheck；改了 shell 依赖的包要 `pnpm --filter diorama-web run build`（AGENTS §3）。
    本轮多次出现「类型找不到成员」都是声明陈旧，不是代码错。
+10. **提交详情只有「被看见」这一条路，没有「怎么离开」。** `#history=<sha>` 一写上去，`tabs` 就把右侧
+    换成 `seats.git-commit`；而**关掉它的条件当时根本没写**，于是进了历史视图、点过提交之后，再点文件
+    只是把 tab 打开在提交详情背后（画面不变）。修法见契约 §5「它什么时候收起」：两条判据缺一不可——
+    - **`openCount`**：打开文件（含**打开当前那个文件**）才算离开。只看「活动 tab id 变了」不够：
+      再点同一个文件 tab 集合与 URL 路径都不变，看上去像没动过。这就是 `ctx.tabs.openCount` 的由来。
+    - **`viewChoice.shown()`**：切侧栏视图不是 tab 变化；一个 tab 都没开时更没有任何变化可听。而且判据
+      必须是**选中的就是 `history`**，不是「`history` 已注册」——`available()` 在切走之后仍为 true。
+11. **`useSyncExternalStore` 的快照要包含「你判断时用到的一切」。** 判据里的 `openCount` 与侧栏选择
+    都不在 `tabs.getSnapshot()` 里：前者是**计数**（快照同一个对象），后者在**另一个半边的 store**。
+    只订 `tabs` 的快照，判断用的值变了也不会重渲染（表现为「状态已经对了，画面没变」）。
+12. **两个半边各有自己的 store，不能 `import` 共享。** `layout` 的视图选择要能被 `tabs` 读到，
+    走页面 `globalThis`（`__diorama_layout__`，与 `__diorama_page__` 同一个理由）；读的时候一律
+    **懒读**，`layout` 还没 apply 时返回 `undefined` 而不是抛。
+13. **`layout` 的 store 快照函数必须是绑定过的。** 那个对象会被当作 entry 的 props 传给同一次渲染，
+    读 `this.version` 的普通方法在那里会抛，React 把 `useSyncExternalStore` 的抛错当成「没有服务端快照」，
+    静默丢掉服务端渲染的结果。
 
 ## 10. 与契约的对应（第二轮）
 

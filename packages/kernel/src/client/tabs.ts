@@ -41,6 +41,14 @@ export class TabsService {
   private store: TabsSnapshot = EMPTY
   private readonly listeners = new Set<() => void>()
   private counter = 0
+  /**
+   * How many times `open()` was asked for a file (contract.md §3.4). It counts
+   * **asks**, not changes: reopening the file that is already active changes
+   * nothing in the snapshot, yet it is the reader choosing that file — a piece
+   * showing something other than a tab (a picked commit) watches this to know
+   * the reader went back to browsing. Nothing else in the service depends on it.
+   */
+  private opens = 0
 
   /**
    * Open a file in a view, or activate its tab when one with the same
@@ -54,9 +62,14 @@ export class TabsService {
       if (active !== undefined) return active
       throw new TypeError('ctx.tabs.open: nothing to activate for a non-file')
     }
+    // Every ask is counted, and announced even when it changes no tab: opening
+    // the file that is already active is still the reader choosing that file
+    // (see `openCount`). One notification per call, whichever branch below runs.
+    this.opens++
     const existing = this.store.tabs.find(tab => tab.path === file.path && (tab.view ?? 'content') === view)
     if (existing !== undefined) {
       if (this.store.activeId !== existing.id) this.publish({ ...this.store, activeId: existing.id })
+      else this.notify()
       return existing
     }
     const tab: TabInfo = { id: `tab-${++this.counter}`, path: file.path, ...(view === 'content' ? {} : { view }) }
@@ -113,6 +126,11 @@ export class TabsService {
     this.step(-1)
   }
 
+  /** Opens asked for so far (a monotonic count; see `open`). */
+  get openCount(): number {
+    return this.opens
+  }
+
   /** The active tab, if any. */
   get active(): TabInfo | undefined {
     const { tabs, activeId } = this.store
@@ -146,6 +164,10 @@ export class TabsService {
 
   private publish(next: TabsSnapshot): void {
     this.store = next
+    this.notify()
+  }
+
+  private notify(): void {
     for (const listener of [...this.listeners]) listener()
   }
 }

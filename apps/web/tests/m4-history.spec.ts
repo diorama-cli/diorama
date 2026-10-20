@@ -112,6 +112,62 @@ test('history: #history=<sha> survives a refresh and comes back to the view', as
   await expect(page.getByTestId('git-commit')).toHaveAttribute('data-sha', shas.first)
 })
 
+/**
+ * Leaving a commit. A commit is not a tab: it takes the right column while
+ * `#history=<sha>` is set, so every way of going back to browsing has to end it
+ * — otherwise the file opens behind a commit nobody left (the reported bug:
+ * "go into the history view, then clicking a file does not come back").
+ */
+test('history: opening a file after a commit brings the tabs back', async ({ page }) => {
+  repository()
+  server = await startDiorama(directory.root)
+  await page.goto(server.url)
+  await openHistory(page)
+  await page.getByTestId('git-history-commit').first().click()
+  await expect(page.getByTestId('git-commit')).toBeVisible()
+
+  await page.getByTestId('sidebar-switcher').getByRole('tab', { name: '文件' }).click()
+  await page.getByTestId('file-tree').locator('[data-path="src"]').click()
+  await page.getByTestId('file-tree').locator('[data-path="src/app.js"]').click()
+  await expect(page.getByTestId('git-commit')).toHaveCount(0)
+  await expect(page.getByTestId('tabs-content').filter({ visible: true }).locator('[data-testid="renderer"]')).toBeVisible()
+  // The hash says what is on screen, so a refresh does not come back to the commit.
+  expect(new URL(page.url()).hash).toBe('')
+})
+
+test('history: reopening the file that is already active also leaves the commit', async ({ page }) => {
+  repository()
+  server = await startDiorama(directory.root)
+  await page.goto(server.url)
+  await page.getByTestId('file-tree').locator('[data-path="README.md"]').click()
+  await expect(page.getByTestId('tabs-content').filter({ visible: true }).locator('[data-testid="renderer"]')).toBeVisible()
+  await openHistory(page)
+  await page.getByTestId('git-history-commit').first().click()
+  await expect(page.getByTestId('git-commit')).toBeVisible()
+
+  // The same file: the tab set does not change, and neither does the path, so
+  // only "the reader opened a file" can tell this apart from staying on the commit.
+  await page.getByTestId('sidebar-switcher').getByRole('tab', { name: '文件' }).click()
+  await page.getByTestId('file-tree').locator('[data-path="README.md"]').click()
+  await expect(page.getByTestId('git-commit')).toHaveCount(0)
+  expect(new URL(page.url()).hash).toBe('')
+})
+
+test('history: leaving the history view alone also brings the tabs back', async ({ page }) => {
+  repository()
+  server = await startDiorama(directory.root)
+  await page.goto(server.url)
+  // A commit picked with no tab open: there is no tab change to observe, only
+  // the column switching away from the history.
+  await openHistory(page)
+  await page.getByTestId('git-history-commit').first().click()
+  await expect(page.getByTestId('git-commit')).toBeVisible()
+  await page.getByTestId('sidebar-switcher').getByRole('tab', { name: '变更' }).click()
+  await expect(page.getByTestId('git-commit')).toHaveCount(0)
+  await expect(page.getByTestId('tabs-empty')).toBeVisible()
+  expect(new URL(page.url()).hash).toBe('')
+})
+
 test('history: the switcher has shortcuts, and a view that is not there is not runnable', async ({ page }) => {
   repository()
   server = await startDiorama(directory.root)

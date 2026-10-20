@@ -11,7 +11,7 @@
  * file.
  */
 import type { Context } from 'cordis'
-import { useCallback, useSyncExternalStore, type ReactElement } from 'react'
+import { useCallback, useEffect, useRef, useSyncExternalStore, type ReactElement } from 'react'
 import type {} from 'diorama-plugin-slots'
 import { bindMethods, provideEntry, Slot, useKernel, useStore } from 'diorama-ui'
 import { createTabsService, type CommandsService, type TabInfo } from 'diorama-kernel/client'
@@ -39,16 +39,118 @@ interface ContentProps {
 }
 
 /**
+ * The history view's id in `sidebar.views` (contract.md §5.2, v0.6). The
+ * `git-changes` piece registers it under that key; this piece only needs to
+ * recognise it to know whether the picked commit is still on screen.
+ */
+const HISTORY_VIEW = 'history'
+
+/**
+ * The page's layout face (the sidebar's chosen view). `layout` publishes it on
+ * the page (`globalThis`) because each half is its own build: the store lives
+ * in that build, so importing it here would not be the same object. Absent
+ * before `layout` applies.
+ */
+interface LayoutFace {
+  viewChoice?: {
+    get(): string | undefined
+    available(view: string): boolean
+    /** Bumped whenever the choice changes (`ViewChoice.getVersion`). */
+    getVersion(): number
+    /** Notified after every change (`ViewChoice.onChange`). */
+    onChange(listener: () => void): () => void
+    /** The view the column is showing (`ViewChoice.shown`). */
+    shown(): string | undefined
+  }
+}
+
+function pageViewChoice(): LayoutFace['viewChoice'] {
+  try {
+    return (globalThis as unknown as { __diorama_layout__?: LayoutFace }).__diorama_layout__?.viewChoice
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Whether the reader is still looking at the picked commit (contract.md §3.8,
+ * §5; v0.6). A commit takes the right column without being a tab, so nothing
+ * about it changes the URL's path — the two things that end it are:
+ *
+ * - **a file was opened** after the pick, even the file that is already active
+ *   (a reopen changes no tab and no path, so the URL alone would keep the commit
+ *   on screen forever). `tabs.openCount` is that signal; the active tab alone is
+ *   not enough;
+ * - **the sidebar left the history view.** Which view the column shows is page
+ *   state `layout` owns, not a tab change, so with no tab open there is nothing
+ *   else to observe. A page without `layout` never leaves the view.
+ *
+ * The pick's own state is recorded during the render that first sees the
+ * commit: an effect would run after it, and a check in between would read
+ * "nothing picked" and clear the value.
+ */
+function useCommitHeld(commit: string | undefined, tabs: TabsLike): boolean {
+  const id = tabs.activeTab !== undefined ? tabs.activeTab()?.id : tabs.active?.id
+  const opens = tabs.openCount ?? 0
+  const choice = pageViewChoice()
+  const picking = useRef<{ commit: string | undefined; tab: string | undefined; opens: number } | undefined>(undefined)
+  if (picking.current === undefined || picking.current.commit !== commit) picking.current = { commit, tab: id, opens }
+  // Re-render on every tab change **and** every open ask. `TabsView` renders off
+  // `tabs.getSnapshot()`, which an open of the already-active file leaves
+  // unchanged; this subscription is what makes that open observable here.
+  const tabState = `${id ?? ''}\u0000${opens}`
+  useSyncExternalStore(
+    useCallback((listener: () => void) => tabs.subscribe?.(listener) ?? (() => {}), [tabs]),
+    useCallback(() => tabState, [tabState]),
+    useCallback(() => tabState, [tabState]),
+  )
+  // The sidebar's choice changes without touching the tab set, so it needs its
+  // own subscription: "history → files" has to be seen even with no tab open.
+  useSyncExternalStore(
+    useCallback((listener: () => void) => (choice === undefined ? () => {} : choice.onChange(listener)), [choice]),
+    useCallback(() => choice?.getVersion() ?? 0, [choice]),
+    useCallback(() => choice?.getVersion() ?? 0, [choice]),
+  )
+  if (commit === undefined) return false
+  // The **chosen** view, not "history is registered": the column falls back to
+  // the first view when the chosen one is gone, so a choice naming a missing
+  // view is not the history either.
+  if (choice !== undefined && choice.shown() !== HISTORY_VIEW) return false
+  const held = picking.current
+  return held.opens === opens && held.tab === id
+}
+
+/** The narrow face of `ctx.tabs` this piece reads (the service itself). */
+interface TabsLike {
+  activeTab?(): { id: string } | undefined
+  active?: { id: string } | undefined
+  /** Opens asked for so far (`TabsService.openCount`); absent on an old build. */
+  openCount?: number
+  subscribe?(listener: () => void): () => void
+}
+
+/**
  * The commit the history view has picked, from the URL hash (contract.md §3.8,
  * §5: v0.6). `tabs` does not know what `history` means beyond "a value means
  * the reader is looking at a commit"; the piece that writes it fills the seat.
  * Subscribed, so picking a commit switches the right column and closing the
  * history view (value gone) brings the tabs back.
+ *
+ * A picked commit lasts while {@link useCommitHeld} holds. Once the reader has
+ * left — another file opened, another sidebar view shown — the value goes with
+ * it: the hash must say what is on screen, or a refresh would come back to a
+ * commit the reader has already left (contract.md §3.8).
  */
-function usePickedCommit(): string | undefined {
+function usePickedCommit(tabs: TabsLike): string | undefined {
   const { ctx } = useKernel()
   const router = ctx.router as
-    | { state(key: string): { get(): string | undefined; onChange(fn: () => void): () => void } }
+    | {
+        state(key: string): {
+          get(): string | undefined
+          set(value: string | undefined): void
+          onChange(listener: () => void): () => void
+        }
+      }
     | undefined
   const slot = router?.state('history')
   const commit = useSyncExternalStore(
@@ -58,7 +160,11 @@ function usePickedCommit(): string | undefined {
       return value === undefined || value === '' ? undefined : value
     }, [slot]),
   )
-  return commit
+  const held = useCommitHeld(commit, tabs)
+  useEffect(() => {
+    if (commit !== undefined && !held) slot?.set(undefined)
+  }, [commit, held, slot])
+  return held ? commit : undefined
 }
 
 /** The picked commit, drawn in `seats.git-commit` in place of the tabs (v0.6). */
@@ -161,7 +267,7 @@ function TabsView() {
   const snapshot = useStore(tabs)
   // A commit being looked at takes the right column; the tabs (and their
   // per-tab state) stay mounted underneath the whole time.
-  const commit = usePickedCommit()
+  const commit = usePickedCommit(tabs)
   if (commit !== undefined) return <CommitColumn commit={commit} />
   if (snapshot.tabs.length === 0) {
     return (

@@ -18,7 +18,7 @@
 import type { Context } from 'cordis'
 import type { MountHandle } from 'diorama-kernel'
 import type { CommandsService } from 'diorama-kernel/client'
-import { useSyncExternalStore, type ReactElement } from 'react'
+import { useLayoutEffect, useSyncExternalStore, type ReactElement } from 'react'
 import { provideEntry, Slot, useKeyedSeat } from 'diorama-ui'
 import type {} from 'diorama-plugin-slots'
 import type { SidebarViewProps, SlotEntry } from 'diorama-plugin-slots'
@@ -45,9 +45,51 @@ class ViewChoice {
   private readonly listeners = new Set<() => void>()
   private known = new Set<string>()
 
+  /**
+   * The store's snapshot, as a bound function: this object is handed to other
+   * pieces as the page's layout face, and a method read off it detached would
+   * lose `this` (a field arrow keeps it).
+   */
+  getSnapshot = (): number => this.version
+
+  subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener)
+    return () => {
+      this.listeners.delete(listener)
+    }
+  }
+
   /** The chosen view, or `undefined` for "whatever comes first". */
   get(): string | undefined {
     return this.chosen
+  }
+
+  /**
+   * A number that changes whenever the choice does: the snapshot other pieces
+   * subscribe to. `get()` alone is not enough — a piece reading it re-renders
+   * only when something it *snapshots* changes, and "history → changes" leaves
+   * the tab set untouched.
+   */
+  getVersion(): number {
+    return this.version
+  }
+
+  /** Called after every change (the face other pieces subscribe through). */
+  onChange(listener: () => void): () => void {
+    return this.subscribe(listener)
+  }
+
+  /**
+   * The view the column is **showing**: the choice while it is registered, else
+   * the fallback the column itself uses (`DEFAULT_VIEW` when present, else the
+   * first registered view). Pieces that have to know "is the reader still on
+   * the history?" ask this, not `get()` (which may name a gone view) and not
+   * `available()` (which stays true while the column shows something else).
+   */
+  shown(fallback = DEFAULT_VIEW): string | undefined {
+    const chosen = this.chosen
+    if (chosen !== undefined && this.known.has(chosen)) return chosen
+    return this.known.has(fallback) ? fallback : this.known.values().next().value
   }
 
   /**
@@ -71,15 +113,6 @@ class ViewChoice {
     this.notify()
   }
 
-  subscribe = (listener: () => void): (() => void) => {
-    this.listeners.add(listener)
-    return () => {
-      this.listeners.delete(listener)
-    }
-  }
-
-  getVersion = (): number => this.version
-
   private notify(): void {
     this.version++
     for (const listener of [...this.listeners]) listener()
@@ -87,6 +120,21 @@ class ViewChoice {
 }
 
 const viewChoice = new ViewChoice()
+
+/** The store's snapshot, as a stable function (see `ViewChoice.getSnapshot`). */
+const viewVersion = (): number => viewChoice.getSnapshot()
+
+/**
+ * Publish the column's choice on the page. Each half is its own build, so a
+ * piece in another half (one that has to know "is the reader still on the
+ * history view?", say) cannot share this module's object by importing it; the
+ * page's `globalThis` is the one place both halves see the same thing. Read
+ * lazily by those pieces — this is page state, not a kernel service.
+ */
+function publishViewChoice(): void {
+  const page = globalThis as unknown as { __diorama_layout__?: { viewChoice: ViewChoice } }
+  page.__diorama_layout__ = { viewChoice }
+}
 
 /**
  * The side column's views, keyed by id, are `files` / `changes` / `history`
@@ -188,7 +236,12 @@ function SidebarView({ view, active }: { view: SlotEntry<'sidebar.views'>; activ
 function Sidebar({ views }: { views: readonly SlotEntry<'sidebar.views'>[] }) {
   // The store's version is the snapshot: the chosen id itself is read separately,
   // so the snapshot is a number and never a fresh object (React #185).
-  useSyncExternalStore(viewChoice.subscribe, viewChoice.getVersion)
+  // The third argument (the server snapshot) is the same number: the shell
+  // server-renders the page first, and React requires one to do it.
+  useSyncExternalStore(viewChoice.subscribe, viewVersion, viewVersion)
+  // Publish the store as the page's layout face once this column exists: pieces
+  // in other halves read it (never import it — each half is its own build).
+  useLayoutEffect(publishViewChoice, [])
   const chosen = viewChoice.get()
   const keys = views.map(view => view.key ?? '')
   viewChoice.register(keys)
