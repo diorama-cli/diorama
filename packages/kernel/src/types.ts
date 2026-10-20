@@ -9,7 +9,9 @@
  * that provides them; a plugin gets those by importing that module.
  */
 export type {
+  BlobResult,
   ChangeTreeNode,
+  CommitDetail,
   DiffEntry,
   DiffResult,
   DiffScope,

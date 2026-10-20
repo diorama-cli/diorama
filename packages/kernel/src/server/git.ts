@@ -19,7 +19,16 @@ import { realpath, stat } from 'node:fs/promises'
 import { relative, resolve, sep } from 'node:path'
 import { gitError } from '../shared/errors.ts'
 import type { MethodDescriptor } from '../shared/rpc.ts'
-import type { DiffEntry, DiffResult, DiffScope, GitLogEntry, GitStatusEntry, RelPath } from '../shared/types.ts'
+import type {
+  BlobResult,
+  CommitDetail,
+  DiffEntry,
+  DiffResult,
+  DiffScope,
+  GitLogEntry,
+  GitStatusEntry,
+  RelPath,
+} from '../shared/types.ts'
 import { resolveInside } from './fs.ts'
 import type { Mounts } from './plugins.ts'
 
@@ -40,11 +49,29 @@ export const MAX_DIFF_LINES = 2000
 export const DEFAULT_LOG_LIMIT = 50
 export const MAX_LOG_LIMIT = 500
 
+/** Bytes of one file's content `blob()` may return (same threshold as `readText`). */
+export const MAX_BLOB_BYTES = 8 * 1024 * 1024
+
 const METHODS: MethodDescriptor[] = [
   { name: 'status', arity: 0 },
   { name: 'diff', arity: 1 },
   { name: 'log', arity: 1 },
+  { name: 'show', arity: 2 },
+  { name: 'showCommit', arity: 1 },
+  { name: 'blob', arity: 2 },
 ]
+
+/** A commit argument as callers pass it (full sha, short sha, `HEAD~1`). */
+function normalizeCommit(commit: unknown): string {
+  if (typeof commit !== 'string' || commit === '' || commit.length > 256) {
+    throw gitError('EINVAL', `a commit must be a non-empty string, got ${JSON.stringify(commit)}`)
+  }
+  // Revision syntax git understands; anything else is a malformed argument.
+  if (!/^[A-Za-z0-9_./^~@{}:-]+$/.test(commit) || commit.includes('..')) {
+    throw gitError('EINVAL', `not a commit or revision: ${JSON.stringify(commit)}`)
+  }
+  return commit
+}
 
 /** Whether `path` is `root` or below it (both absolute). */
 function isInside(path: string, root: string): boolean {
@@ -238,9 +265,10 @@ export class GitService {
    * one entry per changed file under `scope`, or just `path`.
    */
   async diff(scope: DiffScope = {}): Promise<DiffResult> {
-    if (scope.base !== undefined && scope.base !== 'HEAD') {
-      throw gitError('EINVAL', `diff base must be 'HEAD', got ${JSON.stringify(scope.base)}`)
-    }
+    // `'HEAD'` (default) and `'index'` are names of ours; anything else must be
+    // a revision git can resolve (checked below, before listing changes).
+    const base = scope.base ?? 'HEAD'
+    const resolved = base === 'HEAD' || base === 'index' ? base : await this.resolveRevision(base)
     const mountPath = scope.path === undefined ? undefined : normalizeMountPath(this.root, scope.path)
     const scopePath = scope.scope === undefined ? '' : normalizeMountPath(this.root, scope.scope)
     if (mountPath !== undefined && scope.scope !== undefined && !within(mountPath, scopePath)) {
@@ -248,10 +276,13 @@ export class GitService {
     }
     // The mount itself is a subtree of the repository: everything below is
     // filtered by mount-relative paths, so a repository path never escapes it.
-    const changes = (await this.status()).filter(entry => {
+    let changes = (await this.status()).filter(entry => {
       if (mountPath !== undefined) return entry.file === mountPath
       return within(entry.file, scopePath)
     })
+    // The index has no room for untracked files: "what did I stage" does not
+    // include what was never added (contract.md §3.2, v0.6).
+    if (resolved === 'index') changes = changes.filter(entry => entry.kind !== 'untracked')
     if (mountPath !== undefined) {
       const info = await this.pathKind(mountPath).catch(() => 'missing' as const)
       if (info === 'missing') throw gitError('ENOENT', `${mountPath} does not exist`)
@@ -261,7 +292,7 @@ export class GitService {
     let lines = 0
     for (const change of changes) {
       if (result.truncated) break
-      const entry = await this.diffOne(change)
+      const entry = await this.diffOne(change, resolved)
       if (!('error' in entry) && entry.text !== undefined) {
         const entryBytes = Buffer.byteLength(entry.text, 'utf8')
         const entryLines = countLines(entry.text)
@@ -318,8 +349,191 @@ export class GitService {
     return entries
   }
 
-  /** One file's diff against `HEAD`, or an `error` entry when git refuses it. */
-  private async diffOne(change: GitStatusEntry): Promise<DiffResult['entries'][number]> {
+  /**
+   * One file's change in one commit, against its parent (`contract.md §3.2`,
+   * v0.6). A root commit is compared with the empty tree.
+   */
+  async show(commit: string, path: RelPath): Promise<DiffEntry> {
+    const revision = normalizeCommit(commit)
+    const mountPath = normalizeMountPath(this.root, path)
+    if (mountPath === '') throw gitError('EINVAL', 'show() needs a file path, not the mount root')
+    const sha = await this.resolveRevision(revision)
+    const repoPath = this.toRepoPath(mountPath)
+    const text = await this.run(['show', '--no-color', '--no-ext-diff', '-M', '--format=', sha, '--', repoPath])
+    if (text.trim() === '') {
+      // No diff: either the file did not change in this commit, or it is not
+      // in it at all. The second is a missing path, the first an empty change.
+      const present = await this.existsIn(sha, repoPath)
+      const inParent = await this.existsIn(`${sha}^`, repoPath)
+      if (!present && !inParent) throw gitError('ENOENT', `${path} does not exist in ${revision}`)
+      return { file: mountPath, kind: 'modified', status: 'M ', text: '' }
+    }
+    return this.toEntry(mountPath, text, kindFromDiff(text))
+  }
+
+  /** One commit in full: message and the files it touched (contract.md §3.2). */
+  async showCommit(commit: string): Promise<CommitDetail> {
+    const revision = normalizeCommit(commit)
+    const sha = await this.resolveRevision(revision)
+    const header = await this.run(['show', '--no-color', '--no-patch', '--format=%H%x1f%h%x1f%s%x1f%an%x1f%ct%x1f%B', sha])
+    const [full, short, subject, author, seconds, ...rest] = header.split('\x1f')
+    if (full === undefined || short === undefined) throw gitError('EIO', `git show returned no commit for ${revision}`)
+    const detail: CommitDetail = {
+      sha: full,
+      shortSha: short,
+      subject: subject ?? '',
+      author: author ?? '',
+      at: Number(seconds ?? 0) * 1000,
+      message: rest.join('\x1f'),
+      files: [],
+    }
+    // The file list is the diff of the commit against its parent, one entry
+    // per file, under the same 4 MiB / 2000 line account `diff()` uses.
+    const names = await this.run(['show', '--no-color', '--name-status', '-z', '--format=', '-M', sha])
+    let bytes = 0
+    let lines = 0
+    for (const change of this.parseCommitFiles(names)) {
+      const text = await this.run(['show', '--no-color', '--no-ext-diff', '-M', '--format=', sha, '--', this.toRepoPath(change.file)])
+      const entry = this.toEntry(change.file, text, change.kind, change.oldPath, change.status)
+      const entryBytes = entry.text === undefined ? 0 : Buffer.byteLength(entry.text, 'utf8')
+      const entryLines = entry.text === undefined ? 0 : countLines(entry.text)
+      if (bytes + entryBytes > MAX_DIFF_BYTES || lines + entryLines > MAX_DIFF_LINES) {
+        detail.truncated = true
+        if (bytes === 0 && lines === 0 && entry.text !== undefined) {
+          detail.files.push({ ...entry, text: clip(entry.text, MAX_DIFF_BYTES, MAX_DIFF_LINES), truncated: true })
+        }
+        break
+      }
+      bytes += entryBytes
+      lines += entryLines
+      detail.files.push(entry)
+    }
+    return detail
+  }
+
+  /** One file's content in one commit, not a diff (contract.md §3.2). */
+  async blob(commit: string, path: RelPath): Promise<BlobResult> {
+    const revision = normalizeCommit(commit)
+    const mountPath = normalizeMountPath(this.root, path)
+    if (mountPath === '') throw gitError('EINVAL', 'blob() needs a file path, not the mount root')
+    const sha = await this.resolveRevision(revision)
+    const repoPath = this.toRepoPath(mountPath)
+    const spec = `${sha}:${repoPath}`
+    // `cat-file -s` first: never ask git for megabytes we would only clip. A
+    // path that is not in this commit is ENOENT (a missing path), not EIO;
+    // any other failure keeps the translated code.
+    const sizeText = await this.run(['cat-file', '-s', spec]).catch((error: unknown) => {
+      const coded = error as { code?: string; message?: string }
+      if (/does not exist|Not a valid object name|path .* does not exist/i.test(coded.message ?? '')) {
+        throw gitError('ENOENT', `${path} does not exist in ${revision}`, error)
+      }
+      throw error
+    })
+    const size = Number(sizeText.trim())
+    if (!Number.isFinite(size)) throw gitError('EIO', `git cat-file reported no size for ${spec}`)
+    const bytes = await this.runBytes(['cat-file', '-p', spec])
+    if (bytes.includes(0)) return { binary: true, size }
+    let text = bytes.toString('utf8')
+    if (size > MAX_BLOB_BYTES) {
+      text = clip(text, MAX_BLOB_BYTES, Number.MAX_SAFE_INTEGER)
+      return { text, size, truncated: true }
+    }
+    return { text, size }
+  }
+
+  /** Resolve a revision to a full sha; `EINVAL` for malformed, `ENOENT` for unknown. */
+  private async resolveRevision(revision: string): Promise<string> {
+    if (typeof revision !== 'string' || revision === '' || revision.length > 256) {
+      throw gitError('EINVAL', `a revision must be a non-empty string, got ${JSON.stringify(revision)}`)
+    }
+    if (!/^[A-Za-z0-9_./^~@{}:-]+$/.test(revision) || revision.includes('..')) {
+      throw gitError('EINVAL', `not a revision: ${JSON.stringify(revision)}`)
+    }
+    // `--verify --quiet` answers with a sha or a non-zero exit; `^{commit}`
+    // rejects trees and blobs, so a resolved revision is always a commit.
+    try {
+      const output = await runGit(this.repoRoot, ['rev-parse', '--verify', '--quiet', `${revision}^{commit}`])
+      const sha = String(output).trim()
+      if (sha === '') throw gitError('ENOENT', `no such commit: ${revision}`)
+      return sha
+    } catch (error) {
+      if (error instanceof GitProcessError) throw gitError('ENOENT', `no such commit: ${revision}`, error)
+      throw error
+    }
+  }
+
+  /** Whether a repository path exists at a revision (`false` for a bad revision). */
+  private async existsIn(revision: string, repoPath: string): Promise<boolean> {
+    try {
+      await runGit(this.repoRoot, ['cat-file', '-e', `${revision}:${repoPath}`])
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /** `git <args>` in the repository as text, translated errors. */
+  private async run(args: string[]): Promise<string> {
+    try {
+      return String(await runGit(this.repoRoot, args))
+    } catch (error) {
+      throw this.translate(error)
+    }
+  }
+
+  /** `git <args>` in the repository as bytes, translated errors. */
+  private async runBytes(args: string[]): Promise<Buffer> {
+    try {
+      const output = await runGit(this.repoRoot, args, true)
+      return Buffer.isBuffer(output) ? output : Buffer.from(String(output), 'utf8')
+    } catch (error) {
+      throw this.translate(error)
+    }
+  }
+
+  /** Entries of `--name-status -z` output for one commit, mount-relative. */
+  private parseCommitFiles(output: string): { file: RelPath; oldPath?: RelPath; kind: GitStatusEntry['kind']; status: string }[] {
+    const parts = output.split('\0')
+    const files: { file: RelPath; oldPath?: RelPath; kind: GitStatusEntry['kind']; status: string }[] = []
+    for (let index = 0; index < parts.length; index++) {
+      const code = parts[index]?.trim()
+      if (code === undefined || code === '') continue
+      const letter = code[0]
+      const first = parts[++index]
+      if (first === undefined) break
+      const kind = letter === 'A' ? 'added' : letter === 'D' ? 'deleted' : letter === 'R' || letter === 'C' ? 'renamed' : letter === 'T' ? 'modified' : 'modified'
+      let repoPath = first
+      let oldRepoPath: string | undefined
+      if (letter === 'R' || letter === 'C') {
+        oldRepoPath = first
+        repoPath = parts[++index] ?? first
+      }
+      const file = this.toMountPath(repoPath)
+      if (file === undefined) continue // outside the mount
+      const oldPath = oldRepoPath === undefined ? undefined : this.toMountPath(oldRepoPath)
+      files.push({ file, kind, status: `${letter} `, ...(oldPath === undefined ? {} : { oldPath }) })
+    }
+    return files
+  }
+
+  /** Attach diff text (or `binary` / `truncated`) to a change description. */
+  private toEntry(
+    file: RelPath,
+    text: string,
+    kind: GitStatusEntry['kind'],
+    oldPath?: RelPath,
+    status = kind === 'added' ? 'A ' : kind === 'deleted' ? 'D ' : 'M ',
+  ): DiffEntry {
+    const base: DiffEntry = { file, kind, status, ...(oldPath === undefined ? {} : { oldPath }) }
+    if (looksBinary(text)) return { ...base, binary: true }
+    if (Buffer.byteLength(text, 'utf8') > MAX_DIFF_BYTES || countLines(text) > MAX_DIFF_LINES) {
+      return { ...base, text: clip(text, MAX_DIFF_BYTES, MAX_DIFF_LINES), truncated: true }
+    }
+    return { ...base, text }
+  }
+
+  /** One file's diff against `base`, or an `error` entry when git refuses it. */
+  private async diffOne(change: GitStatusEntry, comparison: 'HEAD' | 'index' | string = 'HEAD'): Promise<DiffResult['entries'][number]> {
     const base: DiffEntry = {
       file: change.file,
       kind: change.kind,
@@ -333,7 +547,11 @@ export class GitService {
       return { ...base, kind: 'added' }
     }
     const repoPath = this.toRepoPath(change.file)
-    const args = ['diff', '--no-color', '--no-ext-diff', '-M', 'HEAD', '--', repoPath]
+    // `git diff --cached HEAD` compares the index with HEAD; a plain revision
+    // compares the working tree with it.
+    const args = comparison === 'index'
+      ? ['diff', '--cached', '--no-color', '--no-ext-diff', '-M', 'HEAD', '--', repoPath]
+      : ['diff', '--no-color', '--no-ext-diff', '-M', comparison, '--', repoPath]
     let output: Buffer | string
     try {
       output = await runGit(this.repoRoot, args, true)
@@ -395,6 +613,14 @@ export class GitService {
 function normalizeMountPath(root: string, path: RelPath): RelPath {
   resolveInside(root, path) // EINVAL / EOUTSIDE, same rules as `ctx.fs`
   return path.length > 1 && path.endsWith('/') ? path.replace(/\/+$/, '') : path
+}
+
+/** The change kind of a single-file `git show` output, from its `new file` / `deleted file` marker. */
+function kindFromDiff(text: string): GitStatusEntry['kind'] {
+  if (/^new file mode /m.test(text)) return 'added'
+  if (/^deleted file mode /m.test(text)) return 'deleted'
+  if (/^rename from /m.test(text)) return 'renamed'
+  return 'modified'
 }
 
 /** `git diff` prints `Binary files … differ` for files it treats as binary. */

@@ -5,16 +5,28 @@
  * Optional by contract: a mount outside a git working tree has no `git` service
  * at all, so the page asks through `optionalGit()` instead of assuming.
  */
-import type { DiffResult, DiffScope, GitLogEntry, GitStatusEntry, RelPath } from '../shared/types.ts'
+import type {
+  BlobResult,
+  CommitDetail,
+  DiffEntry,
+  DiffResult,
+  DiffScope,
+  GitLogEntry,
+  GitStatusEntry,
+  RelPath,
+} from '../shared/types.ts'
 import type { RpcClient } from './rpc.ts'
 
 /** The proxyable methods of the server's `GitService`. */
-export const GIT_METHODS = ['status', 'diff', 'log'] as const
+export const GIT_METHODS = ['status', 'diff', 'log', 'show', 'showCommit', 'blob'] as const
 
 export interface GitClient {
   status(): Promise<GitStatusEntry[]>
   diff(scope?: DiffScope): Promise<DiffResult>
   log(options?: { limit?: number; path?: RelPath }): Promise<GitLogEntry[]>
+  show(commit: string, path: RelPath): Promise<DiffEntry>
+  showCommit(commit: string): Promise<CommitDetail>
+  blob(commit: string, path: RelPath): Promise<BlobResult>
 }
 
 /** Build the `mountCtx.git` face over the RPC channel. */
@@ -24,6 +36,9 @@ export function createGitClient(rpc: RpcClient): GitClient {
     status: () => remote.status(),
     diff: (scope = {}) => remote.diff(scope),
     log: (options = {}) => remote.log(options),
+    show: (commit, path) => remote.show(commit, path),
+    showCommit: commit => remote.showCommit(commit),
+    blob: (commit, path) => remote.blob(commit, path),
   }
 }
 

@@ -3,7 +3,9 @@ import type {} from './context.ts'
 
 export { buildChangeTree, compareChangeNodes, directoryPaths } from '../shared/changes.ts'
 export type {
+  BlobResult,
   ChangeTreeNode,
+  CommitDetail,
   DiffEntry,
   DiffResult,
   DiffScope,

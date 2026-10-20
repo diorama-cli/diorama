@@ -87,8 +87,11 @@ export interface DiffScope {
   path?: RelPath
   /** Only this directory subtree ('' = the mount root). */
   scope?: RelPath
-  /** v0.5 accepts only `'HEAD'` (working tree vs HEAD); the default. */
-  base?: 'HEAD'
+  /**
+   * What to compare (v0.6): `'HEAD'` (working tree vs HEAD, default), `'index'`
+   * (staged vs HEAD) or any revision git can resolve (working tree vs it).
+   */
+  base?: 'HEAD' | 'index' | string
 }
 
 /** One file's diff. */
@@ -120,6 +123,33 @@ export interface GitLogEntry {
   author: string
   /** ms since epoch. */
   at: number
+}
+
+/** One commit in full, with the files it touched (contract.md §3.2, v0.6). */
+export interface CommitDetail {
+  sha: string
+  shortSha: string
+  subject: string
+  author: string
+  /** ms since epoch. */
+  at: number
+  /** The whole commit message, verbatim (subject and body). */
+  message: string
+  /** The files it changed, shaped like `diff()` entries (mount-relative). */
+  files: DiffEntry[]
+  /** `files` exceeded the diff limit (4 MiB / 2000 lines): it is a prefix. */
+  truncated?: true
+}
+
+/** One file of one commit (contract.md §3.2, v0.6). */
+export interface BlobResult {
+  /** Text content; binary files have `binary: true` instead. */
+  text?: string
+  binary?: true
+  /** Over the text limit (8 MiB): `text` is a prefix. */
+  truncated?: true
+  /** Size in bytes. */
+  size: number
 }
 
 /**

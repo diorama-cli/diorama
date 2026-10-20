@@ -93,7 +93,9 @@ test('git: diff scopes by file and by subtree', async t => {
   assert.deepEqual(subtree.entries.map(entry => entry.file), ['src/app.js'])
   await assert.rejects(svc.diff({ path: 'nope.txt' }), /ENOENT/)
   await assert.rejects(svc.diff({ path: '../outside' }), /EOUTSIDE/)
-  await assert.rejects(svc.diff({ base: 'index' as never }), /EINVAL/)
+  // v0.6: `'index'` is a legitimate base; a malformed revision is not.
+  await assert.doesNotReject(svc.diff({ base: 'index' }))
+  await assert.rejects(svc.diff({ base: 'index..HEAD' }), /EINVAL/)
 })
 
 test('git: renames carry oldPath', async t => {
@@ -194,4 +196,142 @@ test('git: a mount reached through a symlink still sees its changes', async t =>
   assert.ok(entries.some(entry => entry.file === 'src/app.js'), `status was ${JSON.stringify(entries)}`)
   const diff = await svc.diff({ path: 'src/app.js' })
   assert.equal(diff.entries.length, 1)
+})
+
+/** A two-commit history with a root commit, a rename and a binary file. */
+function history(): { root: string; first: string; second: string; dispose(): void } {
+  const root = mkdtempSync(join(tmpdir(), 'diorama-git-hist-'))
+  const write = (path: string, text: string | Buffer): void => {
+    const target = join(root, path)
+    mkdirSync(join(target, '..'), { recursive: true })
+    writeFileSync(target, text)
+  }
+  write('src/app.js', 'one\ntwo\n')
+  write('README.md', '# r\n')
+  git(root, 'init', '-q', '-b', 'main')
+  git(root, 'add', '-A')
+  git(root, 'commit', '-q', '-m', 'first')
+  const first = git(root, 'rev-parse', 'HEAD').trim()
+  write('src/app.js', 'one\nTWO\nthree\n')
+  write('blob.bin', Buffer.from([0, 1, 2, 3]))
+  git(root, 'mv', 'README.md', 'GUIDE.md')
+  git(root, 'add', '-A')
+  git(root, 'commit', '-q', '-m', 'second\n\nwith a body line')
+  const second = git(root, 'rev-parse', 'HEAD').trim()
+  return { root, first, second, dispose: () => rmSync(root, { recursive: true, force: true }) }
+}
+
+test('git: show returns one file of one commit as a diff', async t => {
+  const fixture = history()
+  t.after(() => fixture.dispose())
+  const svc = service(fixture.root)
+  const entry = await svc.show(fixture.second, 'src/app.js')
+  assert.equal(entry.file, 'src/app.js')
+  assert.equal(entry.kind, 'modified')
+  assert.match(entry.text ?? '', /^\+\+\+ b\/src\/app\.js$/m)
+  assert.match(entry.text ?? '', /^\+three$/m)
+  // `show` is per file: given the new path of a rename, its diff is the
+  // addition of that path (the rename *pair* is `showCommit().files`' job).
+  const moved = await svc.show(fixture.second, 'GUIDE.md')
+  assert.equal(moved.kind, 'added')
+  assert.match(moved.text ?? '', /^new file mode /m)
+  // A binary file has no text.
+  const binary = await svc.show(fixture.second, 'blob.bin')
+  assert.equal(binary.binary, true)
+  assert.equal(binary.text, undefined)
+  // A root commit always has a new-file diff, not an error.
+  const rootCommit = await svc.show(fixture.first, 'src/app.js')
+  assert.equal(rootCommit.kind, 'added')
+  assert.match(rootCommit.text ?? '', /^\+one$/m)
+  // Not in this commit, and not in its parent either.
+  await assert.rejects(svc.show(fixture.first, 'blob.bin'), /ENOENT/)
+  await assert.rejects(svc.show('deadbeef', 'src/app.js'), /ENOENT/)
+  await assert.rejects(svc.show('../etc/passwd', 'src/app.js'), /EINVAL/)
+  await assert.rejects(svc.show(fixture.second, '../x'), /EOUTSIDE|EINVAL/)
+})
+
+test('git: showCommit carries the message and the file list', async t => {
+  const fixture = history()
+  t.after(() => fixture.dispose())
+  const svc = service(fixture.root)
+  const detail = await svc.showCommit(fixture.second)
+  assert.equal(detail.sha, fixture.second)
+  assert.equal(detail.shortSha.length, 7)
+  assert.equal(detail.subject, 'second')
+  assert.match(detail.message, /^second\n\nwith a body line/)
+  assert.equal(detail.author, 't')
+  assert.ok(detail.at > 0)
+  const files = detail.files.map(file => file.file).sort()
+  assert.deepEqual(files, ['GUIDE.md', 'blob.bin', 'src/app.js'])
+  const renamed = detail.files.find(file => file.file === 'GUIDE.md')
+  assert.equal(renamed?.oldPath, 'README.md')
+  const binary = detail.files.find(file => file.file === 'blob.bin')
+  assert.equal(binary?.binary, true)
+  // Short shas and revision syntax resolve; an unknown one does not.
+  assert.equal((await svc.showCommit(fixture.second.slice(0, 7))).sha, fixture.second)
+  assert.equal((await svc.showCommit('HEAD~1')).sha, fixture.first)
+  await assert.rejects(svc.showCommit('no-such-branch'), /ENOENT/)
+  await assert.rejects(svc.showCommit('HEAD...HEAD'), /EINVAL/)
+})
+
+test('git: blob returns the content at a commit, binary or text', async t => {
+  const fixture = history()
+  t.after(() => fixture.dispose())
+  const svc = service(fixture.root)
+  const old = await svc.blob(fixture.first, 'src/app.js')
+  assert.equal(old.text, 'one\ntwo\n')
+  assert.equal(old.size, 8)
+  assert.equal(old.truncated, undefined)
+  // The working tree now says THREE; the old commit still says two.
+  const current = await svc.blob('HEAD', 'src/app.js')
+  assert.match(current.text ?? '', /TWO/)
+  const renamedBefore = await svc.blob(fixture.first, 'README.md')
+  assert.equal(renamedBefore.text, '# r\n')
+  // After the rename the old path is gone from HEAD (git says "path does not
+  // exist", which is the contract's ENOENT for a missing path).
+  await assert.rejects(svc.blob('HEAD', 'README.md'), /ENOENT/)
+  const binary = await svc.blob('HEAD', 'blob.bin')
+  assert.equal(binary.binary, true)
+  assert.equal(binary.text, undefined)
+  assert.equal(binary.size, 4)
+  await assert.rejects(svc.blob('HEAD', 'nope.txt'), /ENOENT/)
+})
+
+test('git: diff base accepts the index and a commit', async t => {
+  const fixture = history()
+  t.after(() => fixture.dispose())
+  const svc = service(fixture.root)
+  // Stage one change and leave another unstaged.
+  writeFileSync(join(fixture.root, 'src/app.js'), 'one\nTWO\nTHREE\n')
+  git(fixture.root, 'add', 'src/app.js')
+  writeFileSync(join(fixture.root, 'src/app.js'), 'one\nTWO\nTHREE\nfour\n')
+  writeFileSync(join(fixture.root, 'untracked.txt'), 'new\n')
+
+  const head = await svc.diff({ base: 'HEAD' })
+  assert.ok(head.entries.some(entry => entry.file === 'untracked.txt'), 'HEAD diff lists untracked files')
+  const index = await svc.diff({ base: 'index' })
+  assert.deepEqual(index.entries.map(entry => entry.file), ['src/app.js'])
+  assert.match((index.entries[0] as { text?: string }).text ?? '', /^\+THREE$/m)
+  assert.doesNotMatch((index.entries[0] as { text?: string }).text ?? '', /^\+four$/m)
+
+  // Against the root commit the working tree also differs in the rename.
+  const vsFirst = await svc.diff({ base: fixture.first })
+  assert.ok(vsFirst.entries.some(entry => entry.file === 'src/app.js'))
+  // A revision that does not resolve is ENOENT; a malformed one is EINVAL.
+  await assert.rejects(svc.diff({ base: 'no-such-branch' }), /ENOENT/)
+  await assert.rejects(svc.diff({ base: 'HEAD..HEAD' }), /EINVAL/)
+})
+
+test('git: history methods are reachable over the RPC surface only when described', async t => {
+  const fixture = history()
+  t.after(() => fixture.dispose())
+  const svc = service(fixture.root)
+  const dispatcher = createDispatcher(() => ({ git: svc }))
+  const detail = (await dispatcher.call('git.showCommit', [fixture.first])) as { subject: string }
+  assert.equal(detail.subject, 'first')
+  const blob = (await dispatcher.call('git.blob', [fixture.first, 'README.md'])) as { text?: string }
+  assert.equal(blob.text, '# r\n')
+  const shown = (await dispatcher.call('git.show', [fixture.second, 'src/app.js'])) as { kind: string }
+  assert.equal(shown.kind, 'modified')
+  await assert.rejects(dispatcher.call('git.commit', []), /EMETHOD/)
 })
