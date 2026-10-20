@@ -566,6 +566,97 @@ code {
   font-size: 13px;
 }
 
+/* Shortcut sheet (a second layout.overlay entry, v0.7) */
+.diorama-help {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+}
+
+.diorama-help__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.diorama-help__panel {
+  position: relative;
+  width: min(620px, 92vw);
+  max-height: 72vh;
+  margin: 10vh auto 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--dio-border);
+  border-radius: 8px;
+  background: var(--dio-bg);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
+  outline: none;
+}
+
+.diorama-help__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--dio-border);
+}
+
+.diorama-help__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.diorama-help__hint {
+  color: var(--dio-muted);
+  font-size: 11px;
+}
+
+.diorama-help__list {
+  margin: 0;
+  padding: 4px 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.diorama-help__row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 6px 14px;
+  font-size: 13px;
+}
+
+/* Unavailable right now: dimmed, never hidden (contract.md §3.7). */
+.diorama-help__row--unavailable {
+  color: var(--dio-muted);
+  opacity: 0.6;
+}
+
+.diorama-help__keys {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  min-width: 10em;
+}
+
+.diorama-help__key {
+  padding: 1px 6px;
+  border: 1px solid var(--dio-border);
+  border-radius: 4px;
+  background: rgba(127, 127, 127, 0.08);
+  font-family: inherit;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.diorama-help__empty {
+  padding: 14px;
+  color: var(--dio-muted);
+  font-size: 13px;
+}
+
 /* Git piece: the changes view and the diff reader (contract.md §3.2, §5.2) */
 .diorama-changes {
   padding: 6px 0;

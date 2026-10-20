@@ -9,49 +9,23 @@
  *
  * Only commands that are executable *now* are listed (contract.md §3.7): the
  * palette never shows a row that would do nothing.
+ *
+ * Whether it is open is page state shared with the other overlays (v0.7): the
+ * seat is a list, so the palette and the shortcut sheet take turns. That state
+ * lives on the page global (`overlayStore` in `diorama-ui`), not in a module
+ * object — a client half is one script per page, but a test harness may boot
+ * several pages in one browser context, and the other overlays are other builds.
  */
 import type { Context } from 'cordis'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { CommandsService } from 'diorama-kernel/client'
-import { provideEntry, useKernel } from 'diorama-ui'
+import { hideOverlay, overlayStore, provideEntry, showOverlay, toggleOverlay, useKernel } from 'diorama-ui'
 
 export const name = 'palette'
 export const inject = ['slots']
 
-/**
- * The palette's open state is page-local UI state; the kernel does not own it.
- * It lives on the page global (not module scope): a client half is one script
- * per page, but a test harness may boot several pages in one browser context.
- */
-interface PaletteState {
-  open: boolean
-  listeners: Set<() => void>
-}
-
-const SCOPE = globalThis as unknown as { __diorama_palette__?: PaletteState }
-
-function state(): PaletteState {
-  SCOPE.__diorama_palette__ ??= { open: false, listeners: new Set() }
-  return SCOPE.__diorama_palette__
-}
-
-function setOpen(open: boolean): void {
-  const current = state()
-  if (current.open === open) return
-  current.open = open
-  for (const listener of [...current.listeners]) listener()
-}
-
-function useOpen(): boolean {
-  const current = state()
-  return useSyncExternalStore(
-    listener => {
-      current.listeners.add(listener)
-      return () => current.listeners.delete(listener)
-    },
-    () => current.open,
-  )
-}
+/** This overlay's id in the page's overlay store (see `diorama-ui/overlay`). */
+export const OVERLAY_ID = 'palette'
 
 /** Case-insensitive subsequence match, so "cltab" finds "tabs.close". */
 function fuzzy(text: string, query: string): boolean {
@@ -63,6 +37,16 @@ function fuzzy(text: string, query: string): boolean {
     index++
   }
   return true
+}
+
+/** Whether this overlay is the one that is up (a primitive snapshot). */
+function useOpen(): boolean {
+  return useSyncExternalStore(overlayStore.subscribe, overlayStore.getSnapshot, overlayStore.getSnapshot) === OVERLAY_ID
+}
+
+function setOpen(open: boolean): void {
+  if (open) showOverlay(OVERLAY_ID)
+  else hideOverlay(OVERLAY_ID)
 }
 
 function Palette() {
@@ -168,10 +152,12 @@ export function apply(ctx: Context) {
   provideEntry(ctx, { id: 'palette:overlay', name: 'layout.overlay', order: 100 }, Palette)
   // Opening the palette is a command like any other: registered here because
   // the palette owns the open state, bound here so `mod+k` needs no extra path.
+  // `showOverlay` closes the other overlays (v0.7: the seat is a list, and one
+  // command surface is up at a time).
   commands.register({
     id: 'palette.toggle',
     title: '打开命令面板',
-    run: () => setOpen(!state().open),
+    run: () => toggleOverlay(OVERLAY_ID),
   })
   commands.bind({ keys: 'mod+k', command: 'palette.toggle' })
 }

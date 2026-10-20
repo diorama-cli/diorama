@@ -1,13 +1,14 @@
-# 插件契约 v0.6
+# 插件契约 v0.7
 
 > 记录于 2026-10-18；v0.3 记录于 2026-10-19；v0.4 记录于 2026-10-19；v0.5 记录于 2026-10-19；
-> v0.6 记录于 2026-10-20（v0.1 草案已归档为 [contract-v0.1.md](contract-v0.1.md)）。
+> v0.6 记录于 2026-10-20；v0.7 记录于 2026-10-20（v0.1 草案已归档为 [contract-v0.1.md](contract-v0.1.md)）。
 > 契约先行：这份文档是内核与插件之间的唯一约定，改它 = 破环变更。
 >
-> **状态：v0.6 已定稿。** v0.1 → v0.2 的差异是 M1 决策（§12），v0.2 → v0.3 是 M2 决策（§13），
+> **状态：v0.7 已定稿。** v0.1 → v0.2 的差异是 M1 决策（§12），v0.2 → v0.3 是 M2 决策（§13），
 > v0.3 → v0.4 是 M3 决策（§14），v0.4 → v0.5 是补齐特性的决策（§15），
-> v0.5 → v0.6 是 git 历史视图、字节渲染器与 HTML 渲染器的决策（§16）。
-> 内核契约版本 `0.6`，所有插件声明 `contract: ">=0.6 <0.7"`；内核**已启用**范围检查（§6）。
+> v0.5 → v0.6 是 git 历史视图、字节渲染器与 HTML 渲染器的决策（§16），
+> v0.6 → v0.7 是快捷键说明（`help`）与 `layout.overlay` 改 list 的决策（§17）。
+> 内核契约版本 `0.7`，所有插件声明 `contract: ">=0.7 <0.8"`；内核**已启用**范围检查（§6）。
 
 ## 0. 术语
 
@@ -527,7 +528,9 @@ interface CommandsService {
 | **冲突（执行时）** | 某一按键在当前上下文命中的绑定 `canRun` 同时为真且来自不同命令 → **warn，只执行第一条**（先注册者优先） |
 | 触发条件 | 页面 mounted；按键命中且非 `repeat`；焦点不在 `input` / `textarea` / `[contenteditable]` 内；命中的绑定 `when` 为真 |
 | 浏览器保留键 | 拦不住（`mod+w`、`mod+t`…）。**关闭 tab = `mod+alt+w`**；`ctrl+tab` / `ctrl+shift+tab` 绑定“到边界不动”，`mod+alt+→` / `mod+alt+←` 绑定“循环切换” |
-| palette | 是插件（`requires: ['layout']`、`inject: ['commands']`），注册在 `layout.overlay`（single）上；打开时把按键交还给它（输入框内的按键不当作快捷键）。**默认只列可执行的命令**（不灰显），`Esc` 关闭，`Enter` 执行 |
+| palette | 是插件（`requires: ['layout']`、`inject: ['commands']`），注册在 `layout.overlay`（v0.7 起是 **list**）上；打开时把按键交还给它（输入框内的按键不当作快捷键）。**默认只列可执行的命令**（不灰显），`Esc` 关闭，`Enter` 执行 |
+| 快捷键说明（`help`，v0.7） | 同样是 `layout.overlay` 的条目。列出**全部**绑定，当前不可执行的**灰显而不隐藏**（与 palette 相反：速查表回答“有哪些键”，不是“现在能用哪些”）。`?` 开/关（键记法写 `shift+?`），`Esc` 关闭（`help.close`，`when` = 说明开着） |
+| 覆盖层互斥（v0.7） | `layout.overlay` 是 **list** 座位，但同一时刻只有一个覆盖层是“开着”的：开一个即关掉另一个。状态在**页面全局**（`diorama-ui` 的 `overlayStore`），不是内核服务——这是页面 UI 状态 |
 | 执行失败 | `run` 的 Promise 拒绝 → 控制台报错 + `warn`，不冒泡到按键处理（一次失败不拖垮页面） |
 | 生命周期 | `register` / `bind` 返回 disposer；注册属于**页面级**（一个页面一棵 client 树，§11），卸载即撤销 |
 | O8 | “开关型”交互（如自动刷新开关）用命令实现，v1 不做用户自定义快捷键 |
@@ -548,10 +551,12 @@ interface CommandsService {
 | `sidebar.showFiles` | 侧栏：文件 | `mod+alt+1` | 侧栏有视图 |
 | `sidebar.showChanges` | 侧栏：变更 | `mod+alt+2` | 侧栏有该视图 |
 | `sidebar.showHistory` | 侧栏：历史 | `mod+alt+3` | 侧栏有该视图 |
+| `help.toggle` | 快捷键说明 | `shift+?` | 焦点不在输入框（v0.7） |
+| `help.close` | 关闭快捷键说明 | `escape` | 说明开着（v0.7） |
 
 命令的**来源插件**决定注册点：`tabs.*` 由 tabs 插件注册、`tree.*` 由 file-tree 注册、
-`palette.toggle` 由 palette 注册、`view.*` 由 renderer-registry 注册（它持有文件内容缓存）、
-`sidebar.*` 由 layout 注册（它持有切换器的当前视图，§5.2）。
+`palette.toggle` 由 palette 注册、`help.*` 由 help 注册、`view.*` 由 renderer-registry 注册（它持有
+文件内容缓存）、`sidebar.*` 由 layout 注册（它持有切换器的当前视图，§5.2）。
 
 `sidebar.show*` 是**固定三条**命令，不是“每个视图自动一条”：`layout` 只认识 `files` / `changes` /
 `history` 三个 id（与它画切换器时用的顺序一致）。新增视图**不自动获得快捷键**；要给它一条命令，
@@ -677,7 +682,7 @@ interface RouterService {
 # diorama.toml —— 全部字段可选
 host = "127.0.0.1"          # 监听网卡；默认 127.0.0.1（architecture §8）
 port = 0                    # 0 = 随机空闲端口（默认）
-plugins = ["slots", "layout", "file-tree", "tabs", "renderer-registry", "plaintext", "markdown", "code", "image", "pdf", "html", "palette", "git-changes"]
+plugins = ["slots", "layout", "file-tree", "tabs", "renderer-registry", "plaintext", "markdown", "code", "image", "pdf", "html", "palette", "help", "git-changes"]
 ignore = [".git", "node_modules"]   # 隐藏规则（覆盖内置默认）
 
 [watch]
@@ -726,7 +731,7 @@ maxDirectories = 64         # 每个目录同时监听的目录数上限（§3.1
 | `sidebar.views` | **keyed** | `layout` | N | 左侧栏的视图（**key = 视图 id**：`files`、`changes`…），`layout` 画切换器（§5.2） |
 | `tabs.content` | **keyed** | `tabs` | N | 每个 tab 的内容区（**key = tab id**，§3.4） |
 | `file.renderer` | keyed（内部排序） | `renderer-registry` | N | 按文件类型派发；M1 起带 matcher（§5.1） |
-| `layout.overlay` | 单 | `layout` | 1 | 覆盖层（v0.3 新增：palette 等命令面板；M2 只给 `palette` 用） |
+| `layout.overlay` | **list**（v0.7） | `layout` | N | 覆盖层：命令面板（`palette`）、快捷键说明（`help`）等命令面。座位是 list，但同一时刻只有一个“开着”（§3.7 覆盖层互斥） |
 | `seats.git-diff` | 单 | `tabs` | 1 | `view: 'diff'` 的 tab 画在这里（v0.5）；没填时该 tab 显示「没有 diff 渲染器」 |
 | `seats.git-commit` | 单 | `git-changes` | 1 | 历史视图选中的提交的详情（v0.6）；**不是 tab**，由 `git-changes` 自己声明、自己填；没填时右侧不显示提交详情 |
 
@@ -740,6 +745,10 @@ maxDirectories = 64         # 每个目录同时监听的目录数上限（§3.1
     `history`**，且**选中之后没有 `open()` 过任何文件**（`ctx.tabs.openCount` 没变，§3.4）。任一不成立就
     删掉 `#history` 并回到 tab 列表：打开文件（哪怕打开的是当前活动的那一个）、切到别的侧栏视图，都是
     “阅读者离开这个提交”。反过来，刷新时 hash 与 URL 上的文件一起恢复，仍算同一个提交（v0.6）。
+- **`layout.overlay` 是 list，但覆盖层互斥（v0.7）**：每个条目都渲染（关闭时隐藏而不卸载，与
+  `sidebar.views` / `tabs.content` 同一条规则，这样速查表的滚动位置、palette 的查询词都留得住），
+  “谁开着”由页面全局的 `overlayStore`（`diorama-ui`）回答。开一个即关掉另一个。
+  **不用内核服务**：这是页面 UI 状态；**也不能靠 import 互相知道**：每个 client 半边是各自的构建。
 - **`statusbar`：v1 不做**，从 slot 表移除（需要时再议）。
 - **没有 toolbar**：只读工具没有“要对文件做的事”，v1 不提供 `file.toolbar` / `tabs.actions`（O8）。
 - **回退链**：`file.renderer` 的条目按 §5.1 排序，命中者渲染；渲染抛错 → 标记失败 → **尝试下一个**；matcher 全不命中 → 兜底条目（plaintext）；一个条目都没有 → 「无可用渲染器」。
@@ -1213,6 +1222,25 @@ RPC 广播 `{ topic: 'mount.state', payload: MountStatus }`。
 | §5.1 内置渲染器（HTML） | 无（`.html` 归 `code` 当源码看） | `html`（`ext: ['html', 'htm']`，`code` 不再认领）：预览 = DOMPurify 消毒 + `srcdoc` 沙箱 frame（无 `allow-scripts`），源码 = 转义文本；切换在渲染器头部，缺省预览 |
 | §3.6 `ctx.storage` | 🔲 | 🔲（仍不做主题；签名仍未定） |
 | contract version | `0.5` / `>=0.5 <0.6` | `0.6` / `>=0.6 <0.7`（全部内置插件 + kernel 包自己的 manifest） |
+
+## 17. v0.6 → v0.7 变更清单（破环，故升 minor）
+
+> 2026-10-20。用户拍板：要一个**独立的 `help` 插件**（不是塞进 palette），不可用的快捷键
+> **灰显列出**（不隐藏），`?` 与 `mod+k` 打开任一个时**关掉另一个**。
+> 把 `layout.overlay` 从单座位改成 list 是座位类型变更，按 §6 的规则破环，故升 minor。
+
+| 条款 | v0.6 | v0.7 |
+|---|---|---|
+| §5 `layout.overlay` | 单座位（只有 `palette`） | **list**：多个命令面共存（`palette`、`help`…）。`layout` 全部渲染，各自的显隐由页面全局的 `overlayStore` 决定 |
+| §3.7 覆盖层互斥 | 无（单座位天然只有一个） | 同一时刻只有一个覆盖层“开着”，开一个即关掉另一个。状态在**页面全局** `__diorama_overlay__`（`diorama-ui/overlay.ts`），不是内核服务 |
+| §3.7 命令表 | 12 条 | 另加 `help.toggle`（`shift+?`）与 `help.close`（`escape`，`when` = 说明开着），由 `help` 注册 |
+| §3.7 列表口径 | palette 只列可执行命令 | 新增一条并列口径：**快捷键说明列全部绑定，不可用的灰显**（两者回答不同的问题，不是矛盾） |
+| §5 内置插件 | 13 个 | 14 个：新增 `help`（`layout.overlay`，`order: 200`），进默认清单（§4.1）与 boot 顺序（`palette` 之后） |
+| contract version | `0.6` / `>=0.6 <0.7` | `0.7` / `>=0.7 <0.8`（全部内置插件 + kernel 包自己的 manifest） |
+
+**没有变的东西**：`ctx.commands` 的签名与注册/绑定规则、键记法本身（仍按 `KeyboardEvent.key` 书写）、
+`sidebar.views`、`tabs`、渲染器派发、`ctx.fs` / `ctx.git` / `ctx.router`。`help` 不提供任何服务，
+也不新增座位。
 
 ## 待定清单（v0.4 后仍 🔲）
 

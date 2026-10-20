@@ -32,6 +32,7 @@
     "diorama-plugin-pdf": "workspace:*",
     "diorama-plugin-html": "workspace:*",
     "diorama-plugin-palette": "workspace:*",
+    "diorama-plugin-help": "workspace:*",
     "diorama-plugin-git": "workspace:*"
   },
   "devDependencies": {

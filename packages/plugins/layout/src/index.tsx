@@ -162,9 +162,10 @@ const DECLARE = {
   // One column, many views: the key is the view id (contract.md §5.2).
   'sidebar.views': { kind: 'keyed' },
   'layout.main': { kind: 'single' },
-  // The overlay seat (contract.md §5): the palette and other command surfaces
-  // draw here, above the frame and outside it.
-  'layout.overlay': { kind: 'single' },
+  // The overlay seat (contract.md §5, v0.7): every command surface draws here,
+  // above the frame and outside it, and they take turns rather than stack
+  // (the page-global `overlayStore` in `diorama-ui` decides which one is up).
+  'layout.overlay': { kind: 'list' },
 } as const
 
 /**
@@ -312,11 +313,21 @@ function SplitFrame() {
   )
 }
 
-/** Whatever occupies `layout.overlay` (a palette, …); absent = nothing. */
+/**
+ * Whatever occupies `layout.overlay` (the palette, the shortcut sheet, …).
+ *
+ * A **list** seat (contract.md §5, v0.7): every registered overlay is rendered,
+ * and each decides from the page's overlay store whether it is the one that is
+ * up. Rendering all of them (rather than only the open one) is what lets an
+ * overlay keep its own state — the sheet's scroll, the palette's query — across
+ * a close and a reopen, the same "hidden, not unmounted" rule as `sidebar.views`
+ * and `tabs.content`.
+ */
 function Overlay() {
   return (
     <Slot
       name="layout.overlay"
+      list
       empty={null}
       exhausted={() => null}
       render={entry => {

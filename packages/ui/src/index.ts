@@ -17,3 +17,11 @@ export {
   type Store,
 } from './slot.tsx'
 export { DioramaRoot, FailurePanel, rootProps, type MountHealth, type PageKernel } from './root.tsx'
+export {
+  closeOverlay,
+  hideOverlay,
+  overlayOpen,
+  overlayStore,
+  showOverlay,
+  toggleOverlay,
+} from './overlay.ts'

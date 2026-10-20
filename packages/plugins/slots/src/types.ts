@@ -90,7 +90,11 @@ export interface SlotMap {
    * has no `(path, view)` key.
    */
   'seats.git-commit': CommitSeatProps
-  /** Overlay above the frame, declared by `layout` (palette, command panels). */
+  /**
+   * Overlay above the frame, declared by `layout` (v0.7: a **list**). The
+   * palette and the shortcut sheet both live here; they take turns through the
+   * page-global `overlayStore` in `diorama-ui` rather than stacking.
+   */
   'layout.overlay': Record<string, never>
 }
 

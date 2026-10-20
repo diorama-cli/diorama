@@ -7,7 +7,7 @@
 
 | 顺序 | 文档 | 读它为了 |
 |---|---|---|
-| 1 | [docs/contract.md](docs/contract.md) | **能不能**：内核与插件的唯一约定，带版本号（当前 **v0.6**）。改任何 `ctx.*` / slot 签名都算改契约 |
+| 1 | [docs/contract.md](docs/contract.md) | **能不能**：内核与插件的唯一约定，带版本号（当前 **v0.7**）。改任何 `ctx.*` / slot 签名都算改契约 |
 | 2 | [docs/architecture.md](docs/architecture.md) | **为什么**：已拍板的决定、放弃项、代价。不要重新讨论已拍板的事 |
 | 3 | [docs/features.md](docs/features.md) | **有什么**：能力清单与档位（✅ / v1 / 未来 / 不做） |
 | 4 | 最近一档的 `docs/mN/spec.md` | **怎么实现的** + **§6.2 的坑**（见下面 §5） |
@@ -67,7 +67,7 @@ docs/                     契约、架构、能力、排期、逐档 spec
 
 ### 加一个内置插件：7 处要一起改
 
-1. `packages/plugins/<id>/` 新包：`package.json`（`diorama.id` / `contract: ">=0.6 <0.7"` / `client.entry` / `requires`）、`vite.config.ts`、`tsconfig.json`、`tsconfig.emit.json`（从任意现有插件复制）。
+1. `packages/plugins/<id>/` 新包：`package.json`（`diorama.id` / `contract: ">=0.7 <0.8"` / `client.entry` / `requires`）、`vite.config.ts`、`tsconfig.json`、`tsconfig.emit.json`（从任意现有插件复制）。
 2. `packages/kernel/src/server/plan.ts` 的 `BUILTIN_PLUGIN_IDS`（顺序 = boot 顺序）。
 3. `packages/cli/src/plugins-server.ts` 的 `halves` 映射（server 半边）。
 4. `packages/cli/package.json` 的 `dependencies` 加 `workspace:*`。
@@ -107,7 +107,11 @@ docs/                     契约、架构、能力、排期、逐档 spec
 | e2e 里快捷键不生效（mac 上写 `Control+Alt+x`） | `mod` 在 macOS 上是 Meta | 测试用 `MOD = darwin ? 'Meta' : 'Control'`；别用裸 `Control` |
 | 提交详情不出现在右侧 | 提交不是 tab，不进 `tabs.content` | `tabs` 声明 `seats.git-commit`，hash 里有 `history=<sha>` 时改画它；tab 仍然挂载 |
 | 进过历史视图后点文件，右侧仍是提交详情 | 提交详情没有「离开」的判据：`#history` 只在有人删它时才消失 | 两条判据都要：`ctx.tabs.openCount` 没变（打开文件，**含打开当前那个**）且侧栏 `shown() === 'history'`；判据用到的东西必须进 `useSyncExternalStore` 的快照（m4/spec §6.2 10–13） |
-| 状态已变、画面不变 | 判断用的值不在订阅的快照里（另一个半边的 store、或计数） | 计数与别的 store 的版本都进快照；跨半边用页面 `globalThis`（`__diorama_layout__`），不 `import` |
+| 状态已变、画面不变 | 判断用的值不在订阅的快照里（另一个半边的 store、或计数） | 计数与别的 store 的版本都进快照；跨半边用页面 `globalThis`（`__diorama_layout__`、`__diorama_overlay__`），不 `import` |
+| e2e 里 `press('?')` 打不开快捷键说明 | Playwright 把 `'?'` 当别名，合成的事件是 `key:'?'` + **`shiftKey:false`**，而 `matchesKeys` 要求修饰键精确匹配 | 绑定写 `shift+?`，测试写 `press('Shift+Slash')`（m4/spec §15 坑 1）|
+| 覆盖层打开后 `?` / `mod+k` 全失效 | 给根元素贴了 `data-command-keys`，`inTextEntry` 把整棵子树从分发里摘掉 | 只有**输入面**（palette）贴它；速查表这类不接管按键的面不贴（m4/spec §15 坑 2）|
+| 启动即 `commands.bind: "escape" is already bound to …` | 同键 + 两个普通 `when` → `mayCoexist` 认为可同时为真，`bind` 抛错；跨半边 `exclusive()` 也救不了（Symbol 是各自构建的） | 一个键只注册一条绑定；palette 的 Esc 留在输入框自己的 `onKeyDown` 里 |
+| 第二个覆盖层注册被 warn 拒绝 | `layout.overlay` 曾是 `single` | v0.7 起是 **list**；显隐用 `diorama-ui` 的 `overlayStore`（页面全局），开一个关一个 |
 
 ## 6. 边界（不要越过的线）
 

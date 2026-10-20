@@ -6,7 +6,7 @@
 >
 > **档位标注（2026-10-19，2026-10-20 更新）**：标 ✅ 的已落地；git 只读视图、URL 路由、git 历史视图、
 > 图片与 PDF 渲染器见 [实施说明](m4/spec.md)（§1–§6 是第一轮，§7–§11 是第二轮）。其余仍是 v1 目标。
-> 契约见 [contract.md](contract.md) **v0.6**。
+> 契约见 [contract.md](contract.md) **v0.7**。
 
 ## 一、CLI
 
@@ -20,7 +20,7 @@
 | C9 | `diorama.toml`（`host`/`port`/`plugins`/`ignore`/`[watch]`） | ✅ M2 | 目录 → `$DIORAMA_HOME` 查找；CLI > toml > 默认；写错 fail loud；`--config`、`--all`、`--dump-config` |
 | C6 | 随机端口自动重试 | ✅ M3 | 随机端口上限 20 次；显式端口冲突直接 `EADDRINUSE`（退出码 1）|
 | C7 | realpath 挂载键 + 别名提示 | ✅ M3 | 挂载键 = realpath（同一真实目录幂等）；打印的目录是 realpath 后的 |
-| C8 | 单测/集成测试 | ✅ M0→本轮 | `apps/web/tests/`：73 条端到端（18 个 spec，真实 CLI/gateway + Chromium）；`pnpm test:unit`：130 条单测 |
+| C8 | 单测/集成测试 | ✅ M0→本轮 | `apps/web/tests/`：83 条端到端（19 个 spec，真实 CLI/gateway + Chromium）；`pnpm test:unit`：148 条单测 |
 
 ## 二、Gateway
 
@@ -61,7 +61,7 @@
 
 | # | 插件 | 档位 | 说明 |
 |---|---|---|---|
-| P1 | `layout` | ✅ M0 | 左右分栏（`layout.overlay` 留给 palette，M2）|
+| P1 | `layout` | ✅ M0 | 左右分栏（`layout.overlay` 给命令面：palette 与 help；v0.7 起是 list 座位）|
 | P2 | `file-tree` | ✅ M0 | 左侧导航；目录点击=导航，文件点击=打开 |
 | P3 | `tabs` | ✅ M2 | 多 tab：每文件一个 tab、keyed 座位、关闭回退、每 tab 独立滚动；**不提供编辑** |
 | P4 | `renderer-registry` | ✅ M0→M1 | matcher 三档（ext → mime → probe）+ 兜底 + 失败回退（contract §5.1）|
@@ -69,6 +69,7 @@
 | P6 | `code` | ✅ M1 | highlight.js 按语言注册；`.md` 不在其中（归 markdown），`.html` / `.htm` 也不在其中（归 html）|
 | P7 | `plaintext` | ✅ M0 | 兜底渲染器 |
 | P8 | `palette` | ✅ M2 | 插件，`layout.overlay` 条目，`mod+k`；只列可执行命令 |
+| P18 | `help`（快捷键说明） | ✅ v0.7 | 插件，第二个 `layout.overlay` 条目（`order: 200`），`?`（`shift+?`）开/关；列出**全部**绑定，当前不可用的**灰显**；`Esc` 关闭。与 palette 互斥（开一个关另一个）|
 | P9 | `theme` / `i18n` | 🔲 待定 | 主题明确不做（两轮都拍板不做）；`ctx.storage` 签名仍未定 |
 | P15 | `fs`（server 半边） | ✅ M1 | 内核自带；`--plugins` 不影响服务端 |
 | P10 | `image` 渲染器 | ✅ 本轮 | `mime: ['image/*']`；先 `stat`、超 32 MiB 不请求；bytes → Blob URL → 原生 `<img>`（SVG 也走 `<img>`，不内联 DOM）|
@@ -85,8 +86,9 @@
 |---|---|---|---|
 | U1 | 左侧栏 + 右侧多 tab | ✅ M0→本轮 | 左栏是 `sidebar.views`（文件树 / 变更 …，VS Code 式切换）；每个 tab 一个内容座位（隐藏不卸载）|
 | U2 | 文件变化自动刷新（watch） | ✅ M2 | 内容与树；`view.toggleAutoRefresh` 可关 |
-| U3 | 快捷键 | ✅ M2 | 全局唯一绑定 + `when`；`mod` = ⌘/Ctrl；v0.6 加 `mod+alt+1/2/3` 切侧栏视图 |
+| U3 | 快捷键 | ✅ M2 | 全局唯一绑定 + `when`；`mod` = ⌘/Ctrl；v0.6 加 `mod+alt+1/2/3` 切侧栏视图；v0.7 加 `?` 开快捷键说明 |
 | U4 | command palette | ✅ M2 | 只列可执行命令（不灰显），`Esc` 关、`Enter` 跑 |
+| U13 | 快捷键说明（速查表） | ✅ v0.7 | `?` 开/关，`Esc` 关；全部绑定都在（不可用的灰显）；与 palette 同一时刻只开一个 |
 | U5 | 工具栏 | **不做** | 明确移除；开关型交互改由命令承担（O8 缓解；本轮「改动/内容」是提交座位里的两个按钮，不是工具栏）|
 | U6 | 渲染模式切换 | 部分 ✅ | `html` 在自己的头部给了「预览 / 源码」两个按钮（O8：开关归渲染器，不开工具栏）；`md` 的源码/预览仍未定 |
 | U7 | 图片缩放 / 适配窗口 | 🔲 待定 | O8 |

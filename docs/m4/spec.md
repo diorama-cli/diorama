@@ -361,3 +361,40 @@ frame 文档。e2e 断言的是 `getComputedStyle` 的颜色，不是「标签�
 **验收**：`m5-html` 6 条——样式与内联 `style=` 生效、外部资源策略在 CSP 里、脚本未确认不跑、
 确认后脚本跑且页面读不进去（取证时 Playwright 报 `Blocked a frame … cross-origin` 正是证据）、
 停止执行后回到脚本受限的 frame、无脚本页面没有提示条。
+
+## 15. 补记：快捷键说明（v0.7，`layout.overlay` 改 list）
+
+> 2026-10-20。用户拍板三件事：**独立的 `help` 插件**（不塞进 palette）、不可用的快捷键**灰显列出**、
+> `?` 与 `mod+k` 打开任一个时**关掉另一个**。座位从单改 list，按契约 §6 破环，故契约升 **0.7**。
+
+| 项 | 选择 | 理由 |
+|---|---|---|
+| 归属 | 新插件 `packages/plugins/help`，`layout.overlay` 条目，`order: 200` | 与 palette 平级；palette 的「只列可执行命令」口径不为速查表让路 |
+| 座位 | `layout.overlay` 从 `single` 改 **`list`** | 单座位的第二个条目会被 registry 拒绝并 warn（`registry.ts` 的 `single` 分支）|
+| 互斥 | 页面全局 `__diorama_overlay__`（`packages/ui/src/overlay.ts`） | 两半边是各自的构建，import 不到同一个对象；内核服务又不该持有页面 UI 状态 |
+| 键记法 | `shift+?` | `parseKeys` 取 `KeyboardEvent.key` 且修饰键**精确匹配**：真浏览器敲 `?` 是 `key:'?'`+`shiftKey:true`，写 `?` 永远匹配不到 |
+| 列表口径 | 全部绑定都在，不可用的灰显 | 速查表回答「有哪些键」；palette 回答「现在能跑什么」。两者不矛盾 |
+| 排序 | **绑定注册顺序**（= boot 顺序） | 同一插件的快捷键相邻（`tabs.*` 一起），比按标题排更好找 |
+| 纯函数 | `src/bindings.ts`（`formatKeys` / `shortcutRows`） | `node --test` 不认 `.tsx`（§12 坑 1），组件只负责画 |
+
+**坑**
+
+1. **`press('?')` 在 Playwright 里不等于“敲问号”**：`usKeyboardLayout` 把 `'?'` 当**别名**注册，
+   `press('?')` 合成的事件是 `key:'?'` + **`shiftKey:false`**；`matchesKeys` 要求修饰键精确匹配，
+   绑定 `shift+?` 不会命中。e2e 必须写 `press('Shift+Slash')`（实测产生 `key:'?'`、`shift:true`）。
+2. **`data-command-keys` 不能贴在速查表上**：那个标记的含义是「这块面自己接管按键，内核不要分发」
+   （`boot.ts` 的 `inTextEntry`），贴上去 `?` 与 `mod+k` 在说明打开时全部失效。palette 需要它
+   （输入框要能打 `?` 做过滤），说明不需要。
+3. **`escape` 只能有一条绑定**：`bind` 对「同键 + 两个普通 `when`」直接抛错（`mayCoexist` 默认认为
+   两个函数可能同时为真）。palette 的 Esc 由输入框自己的 `onKeyDown` 处理（既有做法），`help.close`
+   才是唯一注册的 `escape` 绑定；跨半边也用不了 `exclusive()`——标记用的 `Symbol` 是各自构建的。
+4. **overlay 的 snapshot 必须是原始值**：`overlayStore.getSnapshot()` 返回**开着的那个 id**（字符串或
+   `undefined`），不是对象；返回新对象会让 `useSyncExternalStore` 每渲染一次就认为变了（§6.2 的老坑）。
+5. **palette 的输入框要等一拍才拿到焦点**：`useEffect` 里 `setTimeout(…, 0)`。测试紧接着敲 Escape
+   会在焦点落下之前发出，命令不会跑——e2e 先 `toBeFocused()` 再按键。
+
+**验收**（`apps/web/tests/m5-help.spec.ts`，5 条）：`?` 开/关与 Esc 关、键帽按平台渲染（`⌘⌥W` /
+`Ctrl+Alt+W`）、无 tab 时 `tabs.close` 灰显而 `palette.toggle` 正常、打开文件后同一行变可用、
+说明与 palette 互斥、在 palette 里打 `?` 只过滤不弹说明、去掉 `help` 后 `?` 无反应且 palette 照常。
+单测 5 条（`packages/plugins/help/test/bindings.test.ts`）：两个平台的键帽、命名键与单字符、
+绑定顺序与未知命令丢弃、不可用标记与重复键合并、一条命令多个键。

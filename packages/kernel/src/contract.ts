@@ -15,11 +15,14 @@ export const KERNEL_NAME = 'diorama'
  * `showCommit` / `blob` on `ctx.git`, `DiffScope.base` widened to `'index'`
  * or a commit, the `history` sidebar view with `seats.git-commit`, the image
  * and PDF renderers, the `image/*` mime wildcard, and a renderer registry
- * that only pre-reads text (§16). Every plugin declares
- * `contract: ">=0.6 <0.7"`, enforced while reading manifests
+ * that only pre-reads text (§16). `0.7` makes `layout.overlay` a **list** seat
+ * so more than one command surface can live there (the palette and the new
+ * shortcut sheet, `help`), and names the page-global store those overlays use
+ * to take turns (`diorama-ui/overlay`). Every plugin declares
+ * `contract: ">=0.7 <0.8"`, enforced while reading manifests
  * (`server/manifest.ts`).
  */
-export const CONTRACT_VERSION = '0.6'
+export const CONTRACT_VERSION = '0.7'
 
 /** What every plugin built against this kernel declares. */
-export const CONTRACT_RANGE = '>=0.6 <0.7'
+export const CONTRACT_RANGE = '>=0.7 <0.8'
