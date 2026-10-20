@@ -3,6 +3,7 @@
  * layer (no React, no Cordis) so the kernel's page handle can type it without
  * importing a plugin, and renderer pieces depend on the types alone.
  */
+import type { MountHandle } from '../client/mount.ts'
 import type { FileInfo } from './types.ts'
 
 /** How a renderer claims a file (contract.md §5.1). */
@@ -24,4 +25,6 @@ export interface FileRendererProps {
   text?: string
   /** MIME type inferred from the path (contract.md §5.1). */
   mime: string
+  /** The mount this file lives on: `fs.readBytes` for renderers that need bytes. */
+  mountCtx: MountHandle
 }

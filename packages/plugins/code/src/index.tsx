@@ -56,7 +56,9 @@ export const CODE_LANGUAGES: Readonly<Record<string, string>> = {
   html: 'xml',
   htm: 'xml',
   xml: 'xml',
-  svg: 'xml',
+  // No `svg`: an SVG is a picture. The image piece claims it through the
+  // `image/*` mime tier, and an ext entry here would beat that tier (contract
+  // §5.1 rule 2). Seeing SVG source needs the source/preview switch (O8, not v1).
   py: 'python',
   go: 'go',
   rs: 'rust',

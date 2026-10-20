@@ -1,0 +1,60 @@
+{
+  "name": "diorama-plugin-image",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Diorama piece: image renderer (blob URL, native <img>)",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "./lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.mjs"
+    },
+    "./client": {
+      "default": "./lib/client.cjs"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "src"
+  ],
+  "diorama": {
+    "contract": ">=0.6 <0.7",
+    "id": "image",
+    "client": {
+      "entry": "./lib/client.cjs"
+    },
+    "requires": [
+      "slots",
+      "plaintext"
+    ],
+    "displayName": "Images"
+  },
+  "scripts": {
+    "build": "vite build && tsc -p tsconfig.emit.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "cordis": "4.0.0-rc.11",
+    "diorama-kernel": "workspace:*",
+    "react": "^19.3.1"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "diorama-plugin-file-tree": "workspace:*",
+    "diorama-plugin-layout": "workspace:*",
+    "diorama-plugin-renderer-registry": "workspace:*",
+    "diorama-plugin-slots": "workspace:*",
+    "diorama-plugin-tabs": "workspace:*",
+    "diorama-ui": "workspace:*",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.4"
+  }
+}

@@ -94,3 +94,25 @@ test('chooseRenderer: expensive probes only run after ext/mime miss', async () =
   await chooseRenderer([{ id: 'e', order: 0, matcher: { ext: ['dat'] } }, ...candidates], { file, mime: 'text/plain' })
   assert.equal(probes, 1)
 })
+
+test('chooseRenderer: a mime item may end in one wildcard (image/*)', async () => {
+  const file = { path: 'a.svg', name: 'a.svg', kind: 'file' as const, size: 1, mtime: 0 }
+  const image = [{ id: 'image:renderer', order: 100, matcher: { mime: ['image/*'] } }]
+  for (const mime of ['image/png', 'image/svg+xml', 'image/webp']) {
+    assert.deepEqual(await chooseRenderer(image, { file, mime }), { kind: 'match', id: 'image:renderer', tier: 'mime' })
+  }
+  // Not another type, and not a bare `*` (contract §5.1 3b: a type prefix or nothing).
+  assert.deepEqual(await chooseRenderer(image, { file, mime: 'application/pdf' }), { kind: 'no-match' })
+  assert.deepEqual(await chooseRenderer([{ id: 'x', order: 1, matcher: { mime: ['*'] } }], { file, mime: 'a/b' }), {
+    kind: 'no-match',
+  })
+  // A wildcard in the middle is literal: it matches nothing.
+  assert.deepEqual(await chooseRenderer([{ id: 'x', order: 1, matcher: { mime: ['image/*+xml'] } }], { file, mime: 'image/svg+xml' }), {
+    kind: 'no-match',
+  })
+  // Exact entries keep working, and an ext entry still beats the wildcard.
+  assert.deepEqual(
+    await chooseRenderer([...image, { id: 'exact', order: 5, matcher: { mime: ['image/svg+xml'] } }], { file, mime: 'image/svg+xml' }),
+    { kind: 'match', id: 'exact', tier: 'mime' },
+  )
+})

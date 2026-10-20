@@ -22,7 +22,7 @@ export interface Fixture {
 }
 
 /** A small directory tree with one nested file and one binary file. */
-export function fixture(files: Record<string, string> = {}): Fixture {
+export function fixture(files: Record<string, string> = {}, binaries: Record<string, Uint8Array> = {}): Fixture {
   const root = mkdtempSync(join(tmpdir(), 'diorama-test-'))
   const contents = {
     'README.md': '# Readme\n\n- first\n- second\n',
@@ -30,6 +30,11 @@ export function fixture(files: Record<string, string> = {}): Fixture {
     'src/app.js': 'function hi() {\n  return "hi"\n}\n',
     LICENSE: 'plain text license\n',
     ...files,
+  }
+  for (const [path, bytes] of Object.entries(binaries)) {
+    const target = join(root, path)
+    mkdirSync(join(target, '..'), { recursive: true })
+    writeFileSync(target, bytes)
   }
   for (const [path, text] of Object.entries(contents)) {
     const target = join(root, path)

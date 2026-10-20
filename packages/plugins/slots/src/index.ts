@@ -124,6 +124,7 @@ export type {
 } from './types.ts'
 export {
   chooseRenderer,
+  mimeMatches,
   PROBE_HEAD_BYTES,
   probeHead,
   RENDERER_SLOT,

@@ -73,6 +73,17 @@ function isProbe(matcher: FileMatcher): matcher is ProbeMatcher {
   return typeof (matcher as { probe?: unknown }).probe === 'function'
 }
 
+/**
+ * Whether a `mime` matcher item claims `mime`. Only a trailing `*` is a
+ * wildcard (`image/*` matches every `image/...`); anything else is exact.
+ */
+export function mimeMatches(item: string, mime: string): boolean {
+  if (!item.endsWith('*')) return item === mime
+  const prefix = item.slice(0, -1)
+  // `*` alone would match everything; contract §5.1 only allows a type prefix.
+  return prefix.length > 0 && mime.startsWith(prefix)
+}
+
 /** Entries with a matcher, in tier order within each tier (order, then id). */
 function ordered(candidates: readonly RendererCandidate[]): RendererCandidate[] {
   return [...candidates].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id))
@@ -108,10 +119,10 @@ export async function chooseRenderer(
       return { kind: 'match', id: candidate.id, tier: 'ext' }
     }
   }
-  // 2. mime
+  // 2. mime — exact, or a single trailing wildcard (`image/*`, contract §5.1 3b).
   for (const candidate of matched) {
     const matcher = candidate.matcher as FileMatcher
-    if (isMime(matcher) && matcher.mime.some(item => item.toLowerCase() === mime)) {
+    if (isMime(matcher) && matcher.mime.some(item => mimeMatches(item.toLowerCase(), mime))) {
       return { kind: 'match', id: candidate.id, tier: 'mime' }
     }
   }

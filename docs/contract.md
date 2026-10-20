@@ -671,7 +671,7 @@ interface RouterService {
 # diorama.toml —— 全部字段可选
 host = "127.0.0.1"          # 监听网卡；默认 127.0.0.1（architecture §8）
 port = 0                    # 0 = 随机空闲端口（默认）
-plugins = ["slots", "layout", "file-tree", "tabs", "renderer-registry", "plaintext", "markdown", "code", "palette"]
+plugins = ["slots", "layout", "file-tree", "tabs", "renderer-registry", "plaintext", "markdown", "code", "image", "pdf", "palette", "git-changes"]
 ignore = [".git", "node_modules"]   # 隐藏规则（覆盖内置默认）
 
 [watch]

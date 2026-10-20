@@ -236,11 +236,11 @@ class FileCache {
     const mime = mimeOf(file.path)
     try {
       const text = await mount.fs.readText(file.path)
-      state = { status: 'ready', props: { file, text, mime } }
+      state = { status: 'ready', props: { file, text, mime, mountCtx: mount } }
     } catch (error) {
       const code = (error as { code?: string }).code
       if (code === 'EBINARY' || code === 'ETOOLARGE') {
-        state = { status: 'ready', props: { file, mime } }
+        state = { status: 'ready', props: { file, mime, mountCtx: mount } }
       } else {
         state = { status: 'error', error: describeError(error) }
       }

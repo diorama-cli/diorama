@@ -16,6 +16,8 @@ export type {
   TabInfo,
 } from '../shared/types.ts'
 export { fsError, gitError, type FsErrorCode, type GitErrorCode } from '../shared/errors.ts'
+export { MAX_BINARY_BYTES, MAX_TEXT_BYTES } from '../shared/limits.ts'
+export { mimeOf, extensionOf } from '../shared/mime.ts'
 
 export {
   createMountHandle,

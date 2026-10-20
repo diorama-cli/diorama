@@ -28,6 +28,7 @@
     "diorama-plugin-tabs": "workspace:*",
     "diorama-plugin-markdown": "workspace:*",
     "diorama-plugin-code": "workspace:*",
+    "diorama-plugin-image": "workspace:*",
     "diorama-plugin-palette": "workspace:*",
     "diorama-plugin-git": "workspace:*"
   },

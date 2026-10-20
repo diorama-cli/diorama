@@ -13,6 +13,7 @@ import { readdir, readFile, stat } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 import { fsError } from '../shared/errors.ts'
 import { createIgnore, DEFAULT_IGNORE, type IgnoreRules } from '../shared/ignore.ts'
+import { MAX_BINARY_BYTES, MAX_TEXT_BYTES } from '../shared/limits.ts'
 import type { MethodDescriptor } from '../shared/rpc.ts'
 import type { FileInfo, FsWatchEvent, RelPath } from '../shared/types.ts'
 import type { Mounts } from './plugins.ts'
@@ -24,11 +25,9 @@ declare module 'cordis' {
   }
 }
 
-/** Files up to this size are decoded as UTF-8 by `readText` (contract.md §3.1). */
-export const MAX_TEXT_BYTES = 8 * 1024 * 1024
-
-/** Files up to this size may be fetched as bytes by `readBytes` (contract.md §3.1). */
-export const MAX_BINARY_BYTES = 32 * 1024 * 1024
+// The limits live in the shared layer (v0.6): renderers that fetch bytes check
+// them before asking, and both halves must use the same numbers.
+export { MAX_BINARY_BYTES, MAX_TEXT_BYTES } from '../shared/limits.ts'
 
 /**
  * Normalise a plugin-supplied relative path and prove it stays inside the
