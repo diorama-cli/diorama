@@ -334,6 +334,8 @@ code {
 
 /* Plaintext piece */
 .diorama-plaintext {
+  /* The reveal band (contract.md §3.9) is positioned against this box. */
+  position: relative;
   margin: 0;
   padding: 12px 16px;
   font-family: var(--dio-mono);
@@ -443,6 +445,8 @@ code {
 
 /* Code piece (M1) */
 .diorama-code {
+  /* The reveal band (contract.md §3.9) is positioned against this box. */
+  position: relative;
   margin: 0;
   padding: 12px 16px 48px;
   font-family: var(--dio-mono);
@@ -1113,4 +1117,189 @@ code {
   line-height: 1.6;
   tab-size: 4;
   white-space: pre;
+}
+
+/* Search piece (contract.md §3.9): the sidebar view, quick open, reveal bands */
+.diorama-search {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+.diorama-search__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border-bottom: 1px solid var(--dio-border);
+}
+
+.diorama-search__input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 5px 8px;
+  border: 1px solid var(--dio-border);
+  border-radius: 4px;
+  background: var(--dio-bg);
+  color: inherit;
+  font: inherit;
+  outline: none;
+}
+
+.diorama-search__input:focus {
+  border-color: var(--dio-accent);
+}
+
+.diorama-search__toggles {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.diorama-search__spacer {
+  flex: 1;
+}
+
+.diorama-search__toggle {
+  padding: 1px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: var(--dio-muted);
+  font: 11px var(--dio-mono);
+  cursor: pointer;
+}
+
+.diorama-search__toggle:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.diorama-search__toggle--on {
+  border-color: var(--dio-border);
+  background: rgba(47, 111, 235, 0.12);
+  color: var(--dio-text);
+}
+
+.diorama-search__status {
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--dio-border);
+  color: var(--dio-muted);
+  font-size: 11px;
+}
+
+.diorama-search__results {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 0;
+}
+
+.diorama-search__group {
+  display: flex;
+  align-items: center;
+}
+
+.diorama-search__group-toggle {
+  flex: none;
+  width: 18px;
+  border: 0;
+  background: none;
+  color: var(--dio-muted);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.diorama-search__row {
+  padding-left: 18px;
+}
+
+.diorama-search__file {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 8px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.diorama-search__file:hover,
+.diorama-search__match:hover {
+  background: rgba(0, 0, 0, 0.045);
+}
+
+.diorama-search__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diorama-search__dir {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--dio-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.diorama-search__count {
+  flex: none;
+  color: var(--dio-muted);
+  font: 11px var(--dio-mono);
+}
+
+.diorama-search__match {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 8px 2px 18px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: 12px var(--dio-mono);
+  text-align: left;
+  cursor: pointer;
+}
+
+.diorama-search__line {
+  flex: none;
+  min-width: 28px;
+  color: var(--dio-muted);
+  font-size: 11px;
+  text-align: right;
+}
+
+.diorama-search__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+
+.diorama-search__hit {
+  background: rgba(255, 200, 0, 0.45);
+  color: inherit;
+}
+
+/* The revealed line: a band drawn over the text renderer's `<pre>`. */
+.diorama-code-wrap,
+.diorama-plaintext-wrap {
+  min-height: 100%;
+}
+
+.diorama-code__reveal,
+.diorama-plaintext__reveal {
+  position: absolute;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+  background: rgba(255, 200, 0, 0.22);
+  border-top: 1px solid rgba(200, 150, 0, 0.35);
+  border-bottom: 1px solid rgba(200, 150, 0, 0.35);
 }

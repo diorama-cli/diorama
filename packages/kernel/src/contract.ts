@@ -18,11 +18,15 @@ export const KERNEL_NAME = 'diorama'
  * that only pre-reads text (§16). `0.7` makes `layout.overlay` a **list** seat
  * so more than one command surface can live there (the palette and the new
  * shortcut sheet, `help`), and names the page-global store those overlays use
- * to take turns (`diorama-ui/overlay`). Every plugin declares
- * `contract: ">=0.7 <0.8"`, enforced while reading manifests
+ * to take turns (`diorama-ui/overlay`). `0.8` adds file search: `ctx.search`
+ * (`name` / `content`, contract §3.9) as a kernel service every mount
+ * provides, the `search` sidebar view and the quick-open overlay of the
+ * `search` piece, and the `diorama-ui` reveal store that carries a hit's line
+ * from the result list to the renderer (§3.9, §5.2). Every plugin declares
+ * `contract: ">=0.8 <0.9"`, enforced while reading manifests
  * (`server/manifest.ts`).
  */
-export const CONTRACT_VERSION = '0.7'
+export const CONTRACT_VERSION = '0.8'
 
 /** What every plugin built against this kernel declares. */
-export const CONTRACT_RANGE = '>=0.7 <0.8'
+export const CONTRACT_RANGE = '>=0.8 <0.9'

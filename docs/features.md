@@ -5,8 +5,9 @@
 > 与 [architecture.md](architecture.md) 的决定、[contract.md](contract.md) 的契约对照看。
 >
 > **档位标注（2026-10-19，2026-10-20 更新）**：标 ✅ 的已落地；git 只读视图、URL 路由、git 历史视图、
-> 图片与 PDF 渲染器见 [实施说明](m4/spec.md)（§1–§6 是第一轮，§7–§11 是第二轮）。其余仍是 v1 目标。
-> 契约见 [contract.md](contract.md) **v0.7**。
+> 图片与 PDF 渲染器见 [实施说明](m4/spec.md)（§1–§6 是第一轮，§7–§11 是第二轮）；
+> 文件搜索见 [m6/spec.md](m6/spec.md)。其余仍是 v1 目标。
+> 契约见 [contract.md](contract.md) **v0.8**。
 
 ## 一、CLI
 
@@ -46,6 +47,7 @@
 | K6 | slot 系统 | ✅ M0→M1 | 冲突三类分开（contract §3.3）、`ctx.slots.declare`、`file.renderer` matcher |
 | K7 | fail loud + 回退链 | ✅ M0→M1 | 加载/契约/slot/渲染/RPC 五层；渲染器抛错→标记失败→下一个→plaintext |
 | K8 | `ctx.fs`（只读） | ✅ M2→M3 | `list`（尊重 ignore）/ `stat` / `readText` / `readBytes` / `watch`（目录、300ms 合并、**mount 内共享**、`maxDirectories` 上限）；`ETOOLARGE` 上限 |
+| K19 | `ctx.search`（只读） | ✅ v0.8 | `search(query, { kind, caseSensitive, wholeWord, regex, scope, maxFiles, maxMatchesPerFile })`；`name`（子序列）/ `content`（逐行报 line/column/length）；上限 200 文件 / 每文件 20 条 / 扫描 2 万文件，超限**截断**并报真实总数；二进制跳过；`EINVAL` / `ENOENT`（contract §3.9）|
 | K9 | `ctx.git`（只读） | ✅ | `status` / `diff(scope)` / `log`（v0.5）；`show` / `showCommit` / `blob`、`base: 'index' \| <commit>`（v0.6）；仓库探测、上限、错误码（contract §3.2）|
 | K10 | `ctx.slots` | ✅ M0→M1 | |
 | K11 | `ctx.commands` | ✅ M2 | 内核内置：命令 id fail loud、快捷键字面冲突抛错、`CommandContext` 内核采集、单一 keydown 分发 |
@@ -77,17 +79,18 @@
 | P17 | `html` 渲染器 | ✅ | `ext: ['html', 'htm']` 的唯一 owner；**样式阶段**：页面 CSS（内联 / `style=` / 外链）与外部图片放行，脚本不跑；**脚本阶段**：逐文件确认后 `allow-scripts`（无 `allow-same-origin`）执行页面脚本；另有源码视图。切换在渲染器头部（contract §5.1）|
 | P12 | `git-changes`（变更视图 + diff 座位） | ✅ | 左栏「变更」（`sidebar.views` 的 `changes` 视图，`order: 20`）；该 tab 以 `view: 'diff'` 渲染 unified diff；**v0.6：由 `fs.watch` 驱动重算**（不再 5 秒轮询）；不是仓库时两个 git 视图都不出现 |
 | P16 | `git-changes`（历史视图 + 提交座位） | ✅ 本轮 | 左栏「历史」（`history`，`order: 30`）：提交列表（每页 50，上限 500）；点提交写 `#history=<sha>`，右侧 `seats.git-commit` 显示**标题行**（正文展开/收起）、作者、文件清单与「改动 / 提交时的内容」；**打开文件（含再点当前文件）或切走侧栏视图即回到 tab 列表**，`#history` 随之清掉 |
-| P13 | `search`（全文检索） | **未来** | 没讨论过 |
+| P13 | `search-view`（文件搜索） | ✅ v0.8 | 左栏「搜索」视图（`order: 40`）：**按内容**（字面量 / 正则、大小写、全字）与**按文件名**（子序列，VS Code 的 `Ctrl+P` 口径）两种模式；结果按文件折叠，点一条打开文件并**跳到那一行**。另注册 `mod+p` 快速打开覆盖层（`layout.overlay`，`order: 300`）。服务是内核的 `ctx.search`（§3.9），只走 `ctx.fs`，因此 `ignore` 对树与搜索一致 |
 | P14 | `jupyter` / `.ipynb` | **未来** | 第二轮明确不做（只要文本，但渲染形式未定）|
 
 ## 五、UI 交互
 
 | # | 功能 | 档位 | 说明 |
 |---|---|---|---|
-| U1 | 左侧栏 + 右侧多 tab | ✅ M0→本轮 | 左栏是 `sidebar.views`（文件树 / 变更 …，VS Code 式切换）；每个 tab 一个内容座位（隐藏不卸载）|
+| U1 | 左侧栏 + 右侧多 tab | ✅ M0→本轮 | 左栏是 `sidebar.views`（文件树 / 变更 / 历史 / 搜索，VS Code 式切换）；每个 tab 一个内容座位（隐藏不卸载）|
 | U2 | 文件变化自动刷新（watch） | ✅ M2 | 内容与树；`view.toggleAutoRefresh` 可关 |
-| U3 | 快捷键 | ✅ M2 | 全局唯一绑定 + `when`；`mod` = ⌘/Ctrl；v0.6 加 `mod+alt+1/2/3` 切侧栏视图；v0.7 加 `?` 开快捷键说明 |
+| U3 | 快捷键 | ✅ M2 | 全局唯一绑定 + `when`；`mod` = ⌘/Ctrl；v0.6 加 `mod+alt+1/2/3` 切侧栏视图；v0.7 加 `?` 开快捷键说明；v0.8 加 `mod+alt+4`（搜索视图）、`mod+p`（快速打开）、`mod+shift+f`（搜索视图） |
 | U4 | command palette | ✅ M2 | 只列可执行命令（不灰显），`Esc` 关、`Enter` 跑 |
+| U14 | 搜索结果的落点（跳到那一行） | ✅ v0.8 | 点搜索结果打开文件并滚到该行、画出高亮带（`diorama-ui` 的 reveal store，页面全局）；`code` 与 `plaintext` 都实现了，Markdown 等不跳（其渲染不保行号）|
 | U13 | 快捷键说明（速查表） | ✅ v0.7 | `?` 开/关，`Esc` 关；全部绑定都在（不可用的灰显）；与 palette 同一时刻只开一个 |
 | U5 | 工具栏 | **不做** | 明确移除；开关型交互改由命令承担（O8 缓解；本轮「改动/内容」是提交座位里的两个按钮，不是工具栏）|
 | U6 | 渲染模式切换 | 部分 ✅ | `html` 在自己的头部给了「预览 / 源码」两个按钮（O8：开关归渲染器，不开工具栏）；`md` 的源码/预览仍未定 |
@@ -112,7 +115,7 @@
 
 这些是我认为「一个文件查看器通常会想要、但你没提过」的，列出来供你取舍：
 
-1. **全文搜索（命令面板附带文件搜索）** —— 需要额外服务与索引策略。
+1. ~~**全文搜索（命令面板附带文件搜索）**~~ —— **v0.8 已做**：不是塞进命令面板，而是独立的「搜索」视图 + `mod+p` 快速打开（见 P13 / K19 / U14）。不做索引：每次查询现场走目录（上限见 contract §3.9）。
 2. **主题 / 外观配置** —— 至少要不要支持跟随系统深色模式。（**两轮都明确不做**；等 `ctx.storage` 定签名）
 3. **URL 可分享** —— `#/path/to/file`，打开链接直达某文件。
 4. **多 tab 记忆** —— 刷新后恢复上次打开的 tab。（**待定**：现在只恢复活动文件与 hash 里的视图）

@@ -18,6 +18,15 @@ export {
 } from './slot.tsx'
 export { DioramaRoot, FailurePanel, rootProps, type MountHealth, type PageKernel } from './root.tsx'
 export {
+  clearReveal,
+  reveal,
+  revealStore,
+  useReveal,
+  useRevealLine,
+  type RevealedLine,
+  type RevealTarget,
+} from './reveal.ts'
+export {
   closeOverlay,
   hideOverlay,
   overlayOpen,

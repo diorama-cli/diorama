@@ -23,6 +23,25 @@ export { extensionOf, mimeOf } from '../shared/mime.ts'
 export { explainMismatch, parseRange, satisfies } from '../shared/semver.ts'
 
 export { FsService, fsHalf, MAX_BINARY_BYTES, MAX_TEXT_BYTES, resolveInside, type FsServiceOptions } from './fs.ts'
+export { SearchService, searchHalf } from './search.ts'
+export {
+  clipLine,
+  compareNameMatches,
+  contentMatcher,
+  fuzzyMatch,
+  isSubsequence,
+  looksBinary,
+  SEARCH_LINE_MAX_CHARS,
+  SEARCH_MAX_FILES,
+  SEARCH_MAX_MATCHES_PER_FILE,
+  SEARCH_MAX_QUERY_CHARS,
+  SEARCH_MAX_SCANNED_FILES,
+  type SearchFile,
+  type SearchKind,
+  type SearchMatch,
+  type SearchOptions,
+  type SearchResult,
+} from '../shared/search.ts'
 export {
   DEFAULT_LOG_LIMIT,
   detectRepository,

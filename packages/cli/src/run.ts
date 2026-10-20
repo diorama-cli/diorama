@@ -302,9 +302,10 @@ export async function main(argv: readonly string[], env: NodeJS.ProcessEnv = pro
   }
 
   // Server half: a real Cordis tree per served directory (architecture.md §11).
-  // `fs` is infrastructure on this side — it has no client half, so `--plugins`
-  // (a client-graph selection) can neither add nor remove it.
-  const serverIds = [...new Set(['fs', ...config.plugins])]
+  // `fs`, `git` and `search` are infrastructure on this side — they have no
+  // client half, so `--plugins` (a client-graph selection) can neither add nor
+  // remove them (contract.md §3.1, §3.2, §3.9).
+  const serverIds = [...new Set(['fs', 'git', 'search', ...config.plugins])]
   const tree = await bootPlugins({
     plugins: await selectPlugins(serverIds, options.breakPlugin),
     root,
@@ -318,7 +319,7 @@ export async function main(argv: readonly string[], env: NodeJS.ProcessEnv = pro
   // names (`logger`, …), which the allow-list below filters out.
   const proxyable = (): Record<string, unknown> => {
     const services: Record<string, unknown> = {}
-    for (const name of ['fs'] as const) {
+    for (const name of ['fs', 'git', 'search'] as const) {
       const service = (tree.mount as unknown as { get(name: string): unknown }).get(name)
       if (service !== undefined && typeof (service as { describe?: unknown }).describe === 'function') {
         services[name] = service

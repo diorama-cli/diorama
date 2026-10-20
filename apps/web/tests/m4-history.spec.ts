@@ -209,7 +209,8 @@ test('history: a plain directory has neither git view', async ({ page }) => {
   server = await startDiorama(directory.root)
   await page.goto(server.url)
   const tabs = page.getByTestId('sidebar-switcher').getByRole('tab')
-  await expect(tabs).toHaveCount(1)
+  // `files` and `search` (v0.8) are there; the two git views are not.
+  await expect(tabs).toHaveCount(2)
   await expect(tabs.first()).toHaveAccessibleName('文件')
   // "Show the history" cannot run where there is no history view.
   await page.waitForFunction(() => {

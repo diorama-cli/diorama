@@ -1,14 +1,16 @@
-# 插件契约 v0.7
+# 插件契约 v0.8
 
 > 记录于 2026-10-18；v0.3 记录于 2026-10-19；v0.4 记录于 2026-10-19；v0.5 记录于 2026-10-19；
-> v0.6 记录于 2026-10-20；v0.7 记录于 2026-10-20（v0.1 草案已归档为 [contract-v0.1.md](contract-v0.1.md)）。
+> v0.6 记录于 2026-10-20；v0.7 记录于 2026-10-20；v0.8 记录于 2026-10-20
+> （v0.1 草案已归档为 [contract-v0.1.md](contract-v0.1.md)）。
 > 契约先行：这份文档是内核与插件之间的唯一约定，改它 = 破环变更。
 >
-> **状态：v0.7 已定稿。** v0.1 → v0.2 的差异是 M1 决策（§12），v0.2 → v0.3 是 M2 决策（§13），
+> **状态：v0.8 已定稿。** v0.1 → v0.2 的差异是 M1 决策（§12），v0.2 → v0.3 是 M2 决策（§13），
 > v0.3 → v0.4 是 M3 决策（§14），v0.4 → v0.5 是补齐特性的决策（§15），
 > v0.5 → v0.6 是 git 历史视图、字节渲染器与 HTML 渲染器的决策（§16），
-> v0.6 → v0.7 是快捷键说明（`help`）与 `layout.overlay` 改 list 的决策（§17）。
-> 内核契约版本 `0.7`，所有插件声明 `contract: ">=0.7 <0.8"`；内核**已启用**范围检查（§6）。
+> v0.6 → v0.7 是快捷键说明（`help`）与 `layout.overlay` 改 list 的决策（§17），
+> v0.7 → v0.8 是文件搜索（`ctx.search` + `search-view`）的决策（§18）。
+> 内核契约版本 `0.8`，所有插件声明 `contract: ">=0.8 <0.9"`；内核**已启用**范围检查（§6）。
 
 ## 0. 术语
 
@@ -30,7 +32,7 @@
   "name": "diorama-plugin-markdown",
   "version": "0.1.0",
   "diorama": {
-    "contract": ">=0.6 <0.7",                     // 必须：兼容的内核契约范围（§6）
+    "contract": ">=0.8 <0.9",                     // 必须：兼容的内核契约范围（§6）
     "id": "markdown",                              // 必须：全局唯一，短名；外部插件建议带前缀
     "displayName": "Markdown",
     "server": { "entry": "./lib/server.mjs" },     // 可选
@@ -194,7 +196,7 @@ interface FsService {
     并记一条 `warn`（上限说明）——展开文件树不应被一个上限打断页面。上限按 mount 计，不按进程计。
 - **`list` 与忽略规则（v0.3 定，M2）**：`list(path)` **不返回**被 `ignore` 规则隐藏的条目
   （§4.1，`diorama.toml` 的 `[ignore]` 加上内置默认 `'.git'`、`node_modules`；`--all` 解除）。
-  这是隐藏规则的**唯一强制点**：文件树、palette 的文件检索、watch 都读 `list`，因此天然一致。
+  这是隐藏规则的**唯一强制点**：文件树、`ctx.search`（§3.9）、watch 都读 `list`，因此天然一致。
   `stat` 不受影响（直接按路径取信息）：已被打开的文件即使被隐藏，也照样能读。
 - client 半边：`mountCtx.fs` 与上面**同名同签名**，底层走 RPC（§4），调用形状与本地服务一致。
 
@@ -619,6 +621,85 @@ interface RouterService {
 - 服务端对 `/~/…` **只回页面壳**（SPA 回退），不做文件服务——文件访问始终走 `ctx.fs`（§3.1）。
 - 路由不依赖 `tabs` 以外的客户端服务；`file-tree` 不在 boot 图里时深链仍然生效。
 
+### 3.9 `ctx.search`（server + client 半边）✅ v0.8 定
+
+按名字或按内容搜索挂载目录。像 `ctx.fs` 一样是**服务插件**（§2.5）：`apply` 在 root ctx 跑一次，
+每个 mount 通过 `ctx.diorama.mounts` 拿到自己的 `SearchService`。
+
+**只读**，并且**只通过 `ctx.fs` 读盘**：`list` 是隐藏规则（§4.1 `ignore`）的唯一强制点，
+搜索如果自己摸 `node:fs` 就会出现第二条口径——被隐藏的文件不该在搜索结果里出现。
+
+```ts
+type SearchKind = 'name' | 'content'
+
+interface SearchMatch {
+  path: RelPath
+  /** 1 基；该行第一个命中。 */
+  line?: number
+  /** 1 基，按字符计。 */
+  column?: number
+  /** 命中的字符数。 */
+  length?: number
+  /** 该行文本（长行截断，命中始终可见）。 */
+  text?: string
+}
+
+interface SearchFile {
+  path: RelPath
+  /** 该文件的命中（name 命中没有条目）。 */
+  matches: SearchMatch[]
+  /** 该文件的总命中数——可能大于 `matches.length`（有截断）。 */
+  count: number
+}
+
+interface SearchResult {
+  kind: SearchKind
+  files: SearchFile[]
+  /** 含截断部分的真实总数。 */
+  totalFiles: number
+  totalMatches: number
+  /** `files`（或它们的 matches）触到上限：这只是前缀。 */
+  truncated: boolean
+}
+
+interface SearchOptions {
+  kind?: SearchKind                        // 缺省 'name'
+  caseSensitive?: boolean                  // 缺省 false
+  wholeWord?: boolean                      // 缺省 false（内容搜索）
+  regex?: boolean                          // 缺省 false（字面量）
+  scope?: RelPath                          // 只搜这个子树（'' = 根）
+  maxFiles?: number                        // 缺省 / 上限 SEARCH_MAX_FILES = 200
+  maxMatchesPerFile?: number               // 缺省 / 上限 20
+}
+
+interface SearchService {
+  search(query: string, options?: SearchOptions): Promise<SearchResult>
+}
+```
+
+规则：
+
+- **两种问题，一个方法**：
+  - `kind: 'name'`（缺省）：**子序列**匹配路径（`appts` 命中 `src/app.ts`），子序列打分偏向
+    连续段、分隔符后与驼峰边界、basename 命中——这是「快速打开」（`Ctrl/Cmd+P`）的口径。
+    name 结果的 `matches` 为空、`count` 恒 1。
+  - `kind: 'content'`：文件内的**字面量**（或 `regex`）匹配，逐行报 `line` / `column` / `length`
+    与该行文本；同一行的多个命中折成**一条**（`count` 仍是真实次数）。
+- **空查询返回空结果**（搜索永远不是目录列表）；query 超过 `SEARCH_MAX_QUERY_CHARS`（200）→
+  `EINVAL`；非法正则 → `EINVAL`；scope 不存在 → `ENOENT`（与 `fs.list` 同码）。
+- **二进制跳过**：含 NUL 的文件不进内容结果（与 `fs.readText` 的 `EBINARY` 同一判定，§3.1）。
+- **上限是「截断」不是「失败」**：`maxFiles` / `maxMatchesPerFile` 之外的东西不出现，但
+  `totalFiles` / `totalMatches` 报**真实总数**，`truncated: true` 标记。单次读取的文件数上限
+  `SEARCH_MAX_SCANNED_FILES`（20 000），触到即止并截断。
+- **隐藏条目不出现**：搜索只走 `fs.list`，因此 `ignore`（§4.1）对树、watch、搜索三者一致。
+- **client 半边**：`mountCtx.search` 与上面同名同签名，走 RPC 自动代理（§4）。
+- **命中行的落点（client 约定）**：tab 只带路径（§3.4），行号由 `diorama-ui` 的 **reveal store**
+  （页面全局 `__diorama_reveal__`）传递：结果列表 `reveal(path, line)`，渲染器画出并滚动到那一行。
+  这是页面 UI 状态，不是内核服务——与 `overlay`（§5）、`__diorama_layout__` 同一条规则。
+- **插件与服务的 id 分开**：服务 id 是 `search`（内核 server 半边，每个 mount 都提供）；
+  客户端 piece 是 `search-view`（侧栏「搜索」视图 + `mod+p` 快速打开覆盖层），同 `git` /
+  `git-changes` 的拆分。
+
 ## 4. RPC / 通信 ✅ v0.2 定 / v0.3 补事件 session 与 §4.1 配置
 
 **形态：自动代理（A1）。** server 插件的服务公开方法自动成为浏览器可调的 RPC 方法：client 半边里 `mountCtx.fs.list(...)` 的形状与 server 服务一致。
@@ -729,7 +810,7 @@ maxDirectories = 64         # 每个目录同时监听的目录数上限（§3.1
 |---|---|---|---|---|
 | `root` | 单 | 内核 | 1 | 整个页面 |
 | `layout.main` | 单 | `layout` | 1 | 左右分栏 |
-| `sidebar.views` | **keyed** | `layout` | N | 左侧栏的视图（**key = 视图 id**：`files`、`changes`…），`layout` 画切换器（§5.2） |
+| `sidebar.views` | **keyed** | `layout` | N | 左侧栏的视图（**key = 视图 id**：`files`、`changes`、`search`…），`layout` 画切换器（§5.2） |
 | `tabs.content` | **keyed** | `tabs` | N | 每个 tab 的内容区（**key = tab id**，§3.4） |
 | `file.renderer` | keyed（内部排序） | `renderer-registry` | N | 按文件类型派发；M1 起带 matcher（§5.1） |
 | `layout.overlay` | **list**（v0.7） | `layout` | N | 覆盖层：命令面板（`palette`）、快捷键说明（`help`）等命令面。座位是 list，但同一时刻只有一个“开着”（§3.7 覆盖层互斥） |
@@ -780,12 +861,13 @@ interface SidebarViewSpec {
 - **切换器由 `layout` 画**（竖排图标条，VS Code 的 activity bar 形态）；切换状态由 `layout` 持有，
   条目通过 `props.active` 得知。
 - **切换器有快捷键**（v0.6）：`layout` 注册 `sidebar.showFiles` / `sidebar.showChanges` /
-  `sidebar.showHistory`（`mod+alt+1/2/3`，§3.7）；按到没有注册的视图时命令不可执行（`when` 为假），
+  `sidebar.showHistory` / `sidebar.showSearch`（`mod+alt+1/2/3/4`，§3.7）；按到没有注册的视图时命令不可执行（`when` 为假），
   不报错。
 - **非活动视图隐藏不卸载**（与 `tabs.content` 同一做法）：展开、滚动、选择各自保留。
 - **没有视图被注册时，侧栏整栏不画**（M0 验收点 3 的语义，从 `sidebar.tree` 继承）。
 - `file-tree` 在最前（`order: 10`），git 的「变更」视图 `order: 20`，「历史」视图 `order: 30`
-  （v0.6）。三个视图都由 `git-changes` / `file-tree` 各自注册，`layout` 不知道它们的含义。
+  （v0.6），「搜索」视图 `order: 40`（v0.8，由 `search-view` 注册）。
+  这些视图都由各自的 piece 注册，`layout` 不知道它们的含义。
 - **视图内部怎么画是视图自己的事**：git 的「变更」把 `status()` 的扁平行折成**目录树**
   （目录优先、单一子目录链合并成一行、展开状态属于该视图，不与文件树共享）。`ctx.git.status()`
   保持扁平（§3.2），折叠由视图完成。
@@ -875,10 +957,10 @@ interface FileRendererProps {
 
 ## 6. contract version 规则 ✅ v0.2 起强制
 
-- 内核版本 `0.x` 期间：**minor 改动即破环**，插件写窄范围（`>=0.6 <0.7`）。
+- 内核版本 `0.x` 期间：**minor 改动即破环**，插件写窄范围（`>=0.8 <0.9`）。
 - **检查时间**：读 manifest 时（加载前）。不满足 → 拒绝加载该插件，并解释原因（终端 + 浏览器控制台）。
 - 内置插件同样检查：旧范围的 manifest 会被新内核拒绝，所以每次升版都把全部内置插件一起升到
-  当前范围（v0.6 起为 `>=0.6 <0.7`）。**内核与半边必须一起重新构建**（builtin manifest 与 kernel
+  当前范围（v0.8 起为 `>=0.8 <0.9`）。**内核与半边必须一起重新构建**（builtin manifest 与 kernel
   的 `CONTRACT_VERSION` 来自同一份构建）。
 - M2 起**没有**外部插件（§9），因此"UI 显示「插件 X 因契约不兼容未加载」"的展示面随外部插件一起推迟；
   拒绝本身仍然 fail loud（CLI 退出码非 0 / boot 图里不出现）。
@@ -1219,7 +1301,7 @@ RPC 广播 `{ topic: 'mount.state', payload: MountStatus }`。
 | §5 `seats.git-commit` | 无 | 新增单座位（声明者 `git-changes`）；提交详情**不是 tab**、不进 `(path, view)` 键；`#history` 只在“仍在 `history` 视图且之后没 `open()` 过文件”时画详情（§5） |
 | §3.4 `ctx.tabs.openCount` | 无 | 新增只读计数：`open()` 被调用几次；**每次调用都通知**（打开当前文件也算），供“阅读者又去浏览了”这类事件用（§3.4） |
 | §5.2 `history` 视图 | 侧栏两个视图（`files` / `changes`） | 第三个视图 `history`（`order: 30`），由 `git-changes` 注册；选中提交写 `#history=<sha>`（router 的 hash 面，内核不解释） |
-| §3.7 命令表 | 9 条 | 另加 `sidebar.showFiles` / `sidebar.showChanges` / `sidebar.showHistory`（`mod+alt+1/2/3`），由 layout 注册 |
+| §3.7 命令表 | 9 条 | 另加 `sidebar.showFiles` / `sidebar.showChanges` / `sidebar.showHistory`（`mod+alt+1/2/3`），由 layout 注册（v0.8 另加 `sidebar.showSearch`，`mod+alt+4`） |
 | §5.1 内置渲染器（HTML） | 无（`.html` 归 `code` 当源码看） | `html`（`ext: ['html', 'htm']`，`code` 不再认领）：预览 = DOMPurify 消毒 + `srcdoc` 沙箱 frame（无 `allow-scripts`），源码 = 转义文本；切换在渲染器头部，缺省预览 |
 | §3.6 `ctx.storage` | 🔲 | 🔲（仍不做主题；签名仍未定） |
 | contract version | `0.5` / `>=0.5 <0.6` | `0.6` / `>=0.6 <0.7`（全部内置插件 + kernel 包自己的 manifest） |
@@ -1244,6 +1326,32 @@ RPC 广播 `{ topic: 'mount.state', payload: MountStatus }`。
 `sidebar.views`、`tabs`、渲染器派发、`ctx.fs` / `ctx.git` / `ctx.router`。`help` 不提供任何服务，
 也不新增座位。
 
+## 18. v0.7 → v0.8 变更清单（破环，故升 minor）
+
+> 2026-10-20。用户要求：**支持文件搜索，包括文件名和文件内容，体验尽量接近 VS Code**。
+> 新增 `ctx.search`（§3.9）是**新增服务**，但 `sidebar.views` 多了一个视图、命令表多了三条、
+> 内置插件多了一个——按 §6 的规则「minor 改动即破环」，升 minor。
+
+| 条款 | v0.7 | v0.8 |
+|---|---|---|
+| §3.9 `ctx.search` | 无 | 新增内核服务（每个 mount 都提供）：`search(query, options?)`；`kind` = `'name'`（子序列匹配路径）/ `'content'`（文件内的字面量或正则），`SearchResult` 带 `totalFiles` / `totalMatches` / `truncated`；只读，只走 `ctx.fs`（`ignore` 口径与树一致） |
+| §3.9 上限 | 无 | `SEARCH_MAX_FILES` 200、每文件 20 条、扫描 20 000 个文件、query 200 字符；超限**截断**（报真实总数），不报 `ETOOLARGE` |
+| §3.9 命中落点 | 无 | 行号经 `diorama-ui` 的 **reveal store**（页面全局 `__diorama_reveal__`）传给渲染器；tab 仍只带路径（§3.4 不变） |
+| §5.2 `search` 视图 | 三个视图（`files` / `changes` / `history`） | 第四个视图 `search`（`order: 40`），由 `search-view` 注册：字段 + 「内容 / 文件名」两种模式 + 大小写 / 全字 / 正则开关 + 可折叠结果 |
+| §3.7 命令表 | 15 条 | 另加 `sidebar.showSearch`（`mod+alt+4`，layout 注册）、`search.quickOpen`（`mod+p`）、`search.open`（`mod+shift+f`），由 `search-view` 注册 |
+| §5 `layout.overlay` 条目 | `palette`（100）、`help`（200） | 另加快速打开（`order: 300`），与其它覆盖层互斥（§3.7 的 `overlayStore`） |
+| §5 内置插件 | 14 个 | 15 个：新增 `search-view`（客户端 piece），进默认清单（§4.1）与 boot 顺序（`git-changes` 之后） |
+| §3.1 `ctx.fs` | 不变 | 不变。搜索不新增 fs 方法：它复用 `list` / `stat` 与自己的读取 |
+| contract version | `0.7` / `>=0.7 <0.8` | `0.8` / `>=0.8 <0.9`（全部内置插件 + kernel 包自己的 manifest） |
+
+**为什么服务 id 与 piece id 分开**：`search` 是内核的 server 服务（每个 mount 都提供，
+`--plugins` 选不掉）；画它的客户端 piece 是 `search-view`。同一个 id 同时出现在
+`KERNEL_SERVICE_IDS` 与 `BUILTIN_PLUGIN_IDS` 里，会让 CLI 的 server 半边映射表出现同名键
+（`git` / `git-changes` 当初就是这么分的）。
+
+**没有变的东西**：`ctx.fs` / `ctx.git` / `ctx.router` / `ctx.commands` 的签名、`tabs` 的键、
+渲染器派发与 `file.renderer` 的匹配规则、`sidebar.views` 的座位形态（仍是 keyed，只是多一个 key）。
+
 ## 待定清单（v0.4 后仍 🔲）
 
 - [x] `ctx.git` 具体签名（只读：diff / status / log）— v0.5 定（§3.2）
@@ -1257,6 +1365,6 @@ RPC 广播 `{ topic: 'mount.state', payload: MountStatus }`。
 - [ ] gateway 控制面事件的 CLI 消费者（`diorama ls --watch`）— 以后再定（协议已定，见 §7.3）
 - [ ] gateway 单点的 supervisor 兜底（崩溃自拉起，O6）— 以后再定
 - [ ] 挂载持久化（gateway 重启后恢复 mount）— **明确不做**（architecture.md §10）
-- [ ] palette 附录文件检索（`Ctrl+P`）与全量列出灰显 — 以后再定
+- [x] palette 附录文件检索（`Ctrl+P`）— v0.8 定：**不是 palette 的一部分**，是 `search-view` 的独立覆盖层（§3.9）
 - [ ] `.gitignore` 是否纳入隐藏规则 — 以后再定
 - [ ] 多 tab 状态持久化（刷新后恢复）— O5

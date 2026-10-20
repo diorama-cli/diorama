@@ -7,12 +7,12 @@
     "node": ">=22.12.0"
   },
   "scripts": {
-    "build": "pnpm --filter diorama-kernel run build && pnpm --filter diorama-plugin-slots run build && pnpm --filter diorama-ui run build && pnpm --filter diorama-plugin-renderer-registry run build && pnpm --filter diorama-plugin-plaintext run build && pnpm --filter diorama-plugin-markdown run build && pnpm --filter diorama-plugin-code run build && pnpm --filter diorama-plugin-image run build && pnpm --filter diorama-plugin-pdf run build && pnpm --filter diorama-plugin-html run build && pnpm --filter diorama-plugin-layout run build && pnpm --filter diorama-plugin-file-tree run build && pnpm --filter diorama-plugin-tabs run build && pnpm --filter diorama-plugin-palette run build && pnpm --filter diorama-plugin-help run build && pnpm --filter diorama-plugin-git run build && pnpm --filter diorama-cli run build && pnpm --filter diorama-web run build",
+    "build": "pnpm --filter diorama-kernel run build && pnpm --filter diorama-plugin-slots run build && pnpm --filter diorama-ui run build && pnpm --filter diorama-plugin-renderer-registry run build && pnpm --filter diorama-plugin-plaintext run build && pnpm --filter diorama-plugin-markdown run build && pnpm --filter diorama-plugin-code run build && pnpm --filter diorama-plugin-image run build && pnpm --filter diorama-plugin-pdf run build && pnpm --filter diorama-plugin-html run build && pnpm --filter diorama-plugin-layout run build && pnpm --filter diorama-plugin-file-tree run build && pnpm --filter diorama-plugin-tabs run build && pnpm --filter diorama-plugin-palette run build && pnpm --filter diorama-plugin-help run build && pnpm --filter diorama-plugin-git run build && pnpm --filter diorama-plugin-search-view run build && pnpm --filter diorama-cli run build && pnpm --filter diorama-web run build",
     "cli": "node packages/cli/bin/diorama",
     "demo": "node packages/cli/bin/diorama .diorama-verify",
     "test": "pnpm --filter diorama-web run test",
     "typecheck": "pnpm -r run typecheck",
-    "test:unit": "node --test --experimental-transform-types \"packages/kernel/test/*.test.ts\" \"packages/plugins/slots/test/*.test.ts\" \"packages/plugins/html/test/*.test.ts\" \"packages/plugins/help/test/*.test.ts\" \"packages/cli/test/*.test.ts\""
+    "test:unit": "node --test --experimental-transform-types \"packages/kernel/test/*.test.ts\" \"packages/plugins/slots/test/*.test.ts\" \"packages/plugins/html/test/*.test.ts\" \"packages/plugins/help/test/*.test.ts\" \"packages/plugins/search-view/test/*.test.ts\" \"packages/cli/test/*.test.ts\""
   },
   "devDependencies": {
     "@types/dompurify": "^3.2.0",

@@ -27,6 +27,10 @@ const halves: Record<BuiltinPluginId | KernelServiceId, HalfLoader> = {
   // The repository view (contract.md §3.2): provided per mount, only when the
   // directory is inside a git working tree.
   'git': () => import('diorama-kernel/server').then(kernel => kernel.gitHalf),
+  // File search (contract.md §3.9): a service plugin like `fs`, provided per
+  // mount. The *client* piece that draws it is `search-view` (below) — the two
+  // ids must differ, or the map would hold one key twice.
+  'search': () => import('diorama-kernel/server').then(kernel => kernel.searchHalf),
   'layout': () => import('diorama-plugin-layout'),
   'file-tree': () => import('diorama-plugin-file-tree'),
   'tabs': () => import('diorama-plugin-tabs'),
@@ -42,6 +46,10 @@ const halves: Record<BuiltinPluginId | KernelServiceId, HalfLoader> = {
   // The changes view and the diff reader. Not `git`: that id is the kernel's
   // server service (contract.md §3.2); a client piece is its own plugin.
   'git-changes': () => import('diorama-plugin-git'),
+  // The search view and quick open (contract.md §3.9). Not `search`: that id is
+  // the kernel's server service, which every mount provides whether or not this
+  // piece is selected (the same split as `git` / `git-changes`).
+  'search-view': () => import('diorama-plugin-search-view'),
 }
 
 /** Resolve the server-half module of one plugin id. */

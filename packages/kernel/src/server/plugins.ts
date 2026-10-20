@@ -316,7 +316,7 @@ export interface MountTree {
  * {@link mountScope}). A kernel service with a server half that a mount
  * provides belongs here; today that is `fs` and `git` (contract.md §3.1, §3.2).
  */
-export const MOUNT_SERVICES = ['fs', 'git'] as const
+export const MOUNT_SERVICES = ['fs', 'git', 'search'] as const
 
 /**
  * A context scoped to one mount: every {@link MOUNT_SERVICES} name resolves to

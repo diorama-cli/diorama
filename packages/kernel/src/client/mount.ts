@@ -8,6 +8,7 @@
 import { createFsClient, type FsClient } from './fs.ts'
 import { createGitClient, type GitClient } from './git.ts'
 import { createRpcClient, rpcUrl, type RpcClient } from './rpc.ts'
+import { createSearchClient, type SearchClient } from './search.ts'
 
 export interface BootPlugin {
   id: string
@@ -45,6 +46,13 @@ export interface MountHandle extends MountInfo {
    * `hasGit()` (from `diorama-kernel/client`) before relying on it.
    */
   git: GitClient
+  /**
+   * Search the mount by name or content (contract.md §3.9). The service comes
+   * from the `search` piece; on a mount without it every call rejects with
+   * `ESERVICE` (the piece that renders results is the one that registers it,
+   * so a page that shows search always has it).
+   */
+  search: SearchClient
   /** The RPC channel: escape hatch plus event subscription (contract.md §4). */
   rpc: RpcClient
 }
@@ -59,6 +67,7 @@ export function createMountHandle(manifest: MountManifest): MountHandle {
     baseUrl,
     fs: createFsClient(rpc),
     git: createGitClient(rpc),
+    search: createSearchClient(rpc),
     rpc,
   }
 }

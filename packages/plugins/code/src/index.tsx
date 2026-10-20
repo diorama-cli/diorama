@@ -9,8 +9,8 @@
  * markup comes from highlight.js itself (no repository HTML is interpreted).
  */
 import type { Context } from 'cordis'
-import { useMemo } from 'react'
-import { provideEntry } from 'diorama-ui'
+import { useMemo, useRef } from 'react'
+import { provideEntry, useRevealLine } from 'diorama-ui'
 import hljs from 'highlight.js/lib/core'
 import bash from 'highlight.js/lib/languages/bash'
 import c from 'highlight.js/lib/languages/c'
@@ -143,6 +143,10 @@ function escapeHtml(text: string): string {
 
 function Code({ file, text }: FileRendererProps) {
   const result = useMemo(() => highlight(text ?? '', file.path), [text, file.path])
+  // A search hit opens the file at its line (contract.md §3.9): the reveal
+  // store says which one, and this `<pre>` is what scrolls there.
+  const pre = useRef<HTMLPreElement | null>(null)
+  const revealed = useRevealLine(file.path, pre)
   return (
     <div className="diorama-code-wrap" data-testid="code" data-language={result.language}>
       <div className="diorama-code__path">{file.path}</div>
@@ -151,9 +155,18 @@ function Code({ file, text }: FileRendererProps) {
           二进制文件，无法高亮
         </div>
       ) : (
-        <pre className="diorama-code">
+        <pre className="diorama-code" ref={pre}>
           {/* highlight.js escapes its input; this markup is generated, not copied. */}
           <code dangerouslySetInnerHTML={{ __html: result.html }} />
+          {revealed === undefined ? null : (
+            <span
+              className="diorama-code__reveal"
+              data-testid="code-reveal"
+              data-line={revealed.line}
+              aria-hidden="true"
+              style={{ top: revealed.top, height: revealed.height }}
+            />
+          )}
         </pre>
       )}
     </div>

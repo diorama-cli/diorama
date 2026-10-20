@@ -33,7 +33,8 @@
     "diorama-plugin-html": "workspace:*",
     "diorama-plugin-palette": "workspace:*",
     "diorama-plugin-help": "workspace:*",
-    "diorama-plugin-git": "workspace:*"
+    "diorama-plugin-git": "workspace:*",
+    "diorama-plugin-search-view": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",

@@ -66,7 +66,7 @@ export interface MountParams {
 }
 
 /** Services a mount may proxy over RPC (contract.md §4); only these leave the tree. */
-const PROXYABLE = ['fs', 'git'] as const
+const PROXYABLE = ['fs', 'git', 'search'] as const
 
 /**
  * Boot the gateway: bind the control socket, then answer control requests.
@@ -104,8 +104,10 @@ export async function serveGateway(options: GatewayServeOptions): Promise<Stoppa
     if (loading !== undefined) return loading
     loading = (async () => {
       const created = await createPluginHost(log)
-      // `fs` and `git` are kernel services every mount needs (contract.md §3.1, §3.2).
-      const halves = await selectPlugins([...new Set(['fs', 'git', ...ids])], breakPlugin)
+      // `fs`, `git` and `search` are kernel services every mount needs
+      // (contract.md §3.1, §3.2, §3.9). A client piece of the same name (the
+      // `search-view` piece) is not one of them.
+      const halves = await selectPlugins([...new Set(['fs', 'git', 'search', ...ids])], breakPlugin)
       const failures = await created.load(halves)
       if (failures.length > 0) {
         hostFailure = failures.map(failure => `${failure.id}: ${failure.message}`).join('; ')

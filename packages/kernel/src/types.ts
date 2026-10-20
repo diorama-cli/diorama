@@ -29,6 +29,13 @@ export type { FsClient } from './client/fs.ts'
 export type { GitClient } from './client/git.ts'
 export type { RpcClient } from './client/rpc.ts'
 export type { FileMatcher, FileRendererProps } from './shared/matcher.ts'
+export type {
+  SearchFile,
+  SearchKind,
+  SearchMatch,
+  SearchOptions,
+  SearchResult,
+} from './shared/search.ts'
 export type { DescribedService, MethodDescriptor } from './shared/rpc.ts'
 export { ROUTE_PREFIX } from './shared/types.ts'
 export { mimeOf, extensionOf } from './shared/mime.ts'

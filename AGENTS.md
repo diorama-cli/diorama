@@ -7,7 +7,7 @@
 
 | 顺序 | 文档 | 读它为了 |
 |---|---|---|
-| 1 | [docs/contract.md](docs/contract.md) | **能不能**：内核与插件的唯一约定，带版本号（当前 **v0.7**）。改任何 `ctx.*` / slot 签名都算改契约 |
+| 1 | [docs/contract.md](docs/contract.md) | **能不能**：内核与插件的唯一约定，带版本号（当前 **v0.8**）。改任何 `ctx.*` / slot 签名都算改契约 |
 | 2 | [docs/architecture.md](docs/architecture.md) | **为什么**：已拍板的决定、放弃项、代价。不要重新讨论已拍板的事 |
 | 3 | [docs/features.md](docs/features.md) | **有什么**：能力清单与档位（✅ / v1 / 未来 / 不做） |
 | 4 | 最近一档的 `docs/mN/spec.md` | **怎么实现的** + **§6.2 的坑**（见下面 §5） |
@@ -57,18 +57,20 @@ docs/                     契约、架构、能力、排期、逐档 spec
 | `ctx.tabs` / `ctx.tree` | `kernel/src/client/tabs.ts`、`client/tree.ts` |
 | `ctx.git`（仓库探测、status/diff/log/show/showCommit/blob、上限） | `kernel/src/server/git.ts`、`kernel/src/shared/types.ts`、`kernel/src/client/git.ts` |
 | `ctx.fs` 的大小上限（两端共用一个数） | `kernel/src/shared/limits.ts` |
+| `ctx.search`（文件名 / 内容搜索、上限、reveal store） | `kernel/src/server/search.ts`、`kernel/src/shared/search.ts`、`kernel/src/client/search.ts`、`ui/src/reveal.ts` |
 | `ctx.router`（`/~/` URL 与活动 tab） | `kernel/src/client/router.ts`、`kernel/src/server/http.ts`（`/~/` 回壳） |
 | 插件图、boot 顺序、`settle`、mount fork / `onMount` | `kernel/src/server/plugins.ts`、`client/boot.ts`、`server/plan.ts` |
 | gateway 的 mount 表、端口、degraded 状态机 | `kernel/src/server/gateway.ts` |
 | 控制面协议（帧、方法、错误码） | `kernel/src/shared/control.ts`、`kernel/src/server/control.ts` |
 | CLI 子命令、`ls` 表格、后台 gateway | `cli/src/main.ts`、`cli/src/control-client.ts`、`cli/src/gateway.ts`、`cli/src/gateway-command.ts` |
 | `diorama.toml` | `kernel/src/server/config.ts` |
+| 新内核服务的「每 mount 一份」接线 | `KERNEL_SERVICE_IDS`（plan.ts）、`MOUNT_SERVICES`（plugins.ts）、CLI 的 `PROXYABLE` 与 server 半边选择（`cli/src/gateway.ts`、`run.ts`、`plugins-server.ts`）——**四处一起改**，漏一处就是 RPC `ESERVICE` |
 | 契约版本 | `kernel/src/contract.ts`（**只在这里改**） |
 
 ### 加一个内置插件：7 处要一起改
 
-1. `packages/plugins/<id>/` 新包：`package.json`（`diorama.id` / `contract: ">=0.7 <0.8"` / `client.entry` / `requires`）、`vite.config.ts`、`tsconfig.json`、`tsconfig.emit.json`（从任意现有插件复制）。
-2. `packages/kernel/src/server/plan.ts` 的 `BUILTIN_PLUGIN_IDS`（顺序 = boot 顺序）。
+1. `packages/plugins/<id>/` 新包：`package.json`（`diorama.id` / `contract: ">=0.8 <0.9"` / `client.entry` / `requires`）、`vite.config.ts`、`tsconfig.json`、`tsconfig.emit.json`（从任意现有插件复制）。
+2. `packages/kernel/src/server/plan.ts` 的 `BUILTIN_PLUGIN_IDS`（顺序 = boot 顺序）。**插件的 id 不能与内核服务 id 相同**（`KERNEL_SERVICE_IDS`：`fs` / `git` / `search`）——同名会让 `halves` 表出现重复键，服务被静默覆盖；照 `git` / `git-changes` 的样子分开命名。
 3. `packages/cli/src/plugins-server.ts` 的 `halves` 映射（server 半边）。
 4. `packages/cli/package.json` 的 `dependencies` 加 `workspace:*`。
 5. 根 `package.json` 的 `build` 脚本加一条 `pnpm --filter diorama-plugin-<id> run build`（放在依赖它的包之前）。
@@ -113,6 +115,9 @@ docs/                     契约、架构、能力、排期、逐档 spec
 | 覆盖层打开后 `?` / `mod+k` 全失效 | 给根元素贴了 `data-command-keys`，`inTextEntry` 把整棵子树从分发里摘掉 | 只有**输入面**（palette）贴它；速查表这类不接管按键的面不贴（m4/spec §15 坑 2）|
 | 启动即 `commands.bind: "escape" is already bound to …` | 同键 + 两个普通 `when` → `mayCoexist` 认为可同时为真，`bind` 抛错；跨半边 `exclusive()` 也救不了（Symbol 是各自构建的） | 一个键只注册一条绑定；palette 的 Esc 留在输入框自己的 `onKeyDown` 里 |
 | 第二个覆盖层注册被 warn 拒绝 | `layout.overlay` 曾是 `single` | v0.7 起是 **list**；显隐用 `diorama-ui` 的 `overlayStore`（页面全局），开一个关一个 |
+| 新服务在 `onMount` 里报「no "fs" on this mount」 | `onMount` 跑在 mount fiber 还在 `apply` 的时候，`provide` 是 effect，要等 fiber 激活 | 需要别的 mount 服务的服务插件：要么在子 fiber 里 `provide`（`gitHalf`），要么把查找**推迟到第一次使用**（`SearchService` 收 `() => FsService`）|
+| 浏览器报 `does not declare the expected name "x" (got y)`，整个插件被跳过 | 模块的 `name` 导出必须等于 manifest 的 `diorama.id` | 改 id 时三处一起改：`package.json` 的 `diorama.id`、`src` 里的 `export const name`、`BUILTIN_PLUGIN_IDS` |
+| RPC 对某个内核服务一直 `ESERVICE`，日志没有报错 | 服务的 server 半边没被 CLI 选中（`selectPlugins` 的固定清单漏了它） | 新内核服务的四处接线见 §4「新内核服务的『每 mount 一份』接线」 |
 
 ## 6. 边界（不要越过的线）
 

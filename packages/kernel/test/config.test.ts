@@ -16,8 +16,9 @@ test('config: defaults match contract §4.1', () => {
   assert.deepEqual(defaults.ignore, ['.git', 'node_modules'])
   assert.deepEqual(defaults.watch, { debounceMs: 300, enabled: true, maxDirectories: 64 })
   // Every built-in client plugin, in boot order (contract.md §1: the selection
-  // is the boot order). `fs`/`git` are kernel services, not client pieces
-  // (contract.md §3.1, §3.2): they never appear in the page's boot graph.
+  // is the boot order). `fs`/`git`/`search` are kernel services, not client
+  // pieces (contract.md §3.1, §3.2, §3.9): they never appear in the page's
+  // boot graph.
   assert.deepEqual(defaults.plugins, [
     'slots',
     'layout',
@@ -33,6 +34,7 @@ test('config: defaults match contract §4.1', () => {
     'palette',
     'help',
     'git-changes',
+    'search-view',
   ])
 })
 

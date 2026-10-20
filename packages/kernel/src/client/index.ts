@@ -30,6 +30,25 @@ export {
 } from './mount.ts'
 export { createFsClient, FS_METHODS, type FsClient } from './fs.ts'
 export { createGitClient, GIT_METHODS, hasGit, type GitClient } from './git.ts'
+export { createSearchClient, SEARCH_METHODS, type SearchClient } from './search.ts'
+export {
+  clipLine,
+  compareNameMatches,
+  contentMatcher,
+  fuzzyMatch,
+  isSubsequence,
+  SEARCH_LINE_MAX_CHARS,
+  SEARCH_MAX_FILES,
+  SEARCH_MAX_MATCHES_PER_FILE,
+  SEARCH_MAX_QUERY_CHARS,
+  SEARCH_MAX_SCANNED_FILES,
+  type FuzzyMatch,
+  type SearchFile,
+  type SearchKind,
+  type SearchMatch,
+  type SearchOptions,
+  type SearchResult,
+} from '../shared/search.ts'
 export { createRpcClient, rpcUrl, RPC_PATH, type RpcClient } from './rpc.ts'
 export {
   browserHistory,

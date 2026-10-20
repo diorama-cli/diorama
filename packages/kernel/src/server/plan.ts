@@ -25,7 +25,7 @@ export const PLUGIN_PREFIX = 'diorama-plugin-'
  * with every mount's tree and never appear in the page's boot graph
  * (contract.md §3.1, §3.2).
  */
-export const KERNEL_SERVICE_IDS = ['fs', 'git'] as const
+export const KERNEL_SERVICE_IDS = ['fs', 'git', 'search'] as const
 
 export type KernelServiceId = (typeof KERNEL_SERVICE_IDS)[number]
 
@@ -45,6 +45,7 @@ export const BUILTIN_PLUGIN_IDS = [
   'palette',
   'help',
   'git-changes',
+  'search-view',
 ] as const
 
 export type BuiltinPluginId = (typeof BUILTIN_PLUGIN_IDS)[number]

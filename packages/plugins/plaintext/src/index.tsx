@@ -7,8 +7,9 @@
  * monospace, no highlighting and no Markdown.
  */
 import type { Context } from 'cordis'
+import { useRef } from 'react'
 import type {} from 'diorama-plugin-slots'
-import { provideEntry } from 'diorama-ui'
+import { provideEntry, useRevealLine } from 'diorama-ui'
 import type { FileInfo, FileRendererProps } from 'diorama-kernel'
 
 export const name = 'plaintext'
@@ -30,12 +31,25 @@ function formatSize(bytes: number): string {
 }
 
 function Plaintext({ file, text, mime }: FileRendererProps) {
+  // A search hit opens the file at its line (contract.md §3.9): the reveal
+  // store says which one, and this `<pre>` is what scrolls there.
+  const pre = useRef<HTMLPreElement | null>(null)
+  const revealed = useRevealLine(file.path, pre)
   return (
     <div className="diorama-plaintext-wrap" data-testid="plaintext">
       <div className="diorama-plaintext__path">{file.path}</div>
       {text !== undefined ? (
-        <pre className="diorama-plaintext" data-path={file.path}>
+        <pre className="diorama-plaintext" data-path={file.path} ref={pre}>
           {text}
+          {revealed === undefined ? null : (
+            <span
+              className="diorama-plaintext__reveal"
+              data-testid="plaintext-reveal"
+              data-line={revealed.line}
+              aria-hidden="true"
+              style={{ top: revealed.top, height: revealed.height }}
+            />
+          )}
         </pre>
       ) : (
         <div className="diorama-renderer__empty" role="status" data-testid="plaintext-binary">

@@ -137,13 +137,15 @@ function publishViewChoice(): void {
 }
 
 /**
- * The side column's views, keyed by id, are `files` / `changes` / `history`
- * (contract.md §3.7): the commands below are fixed, not one per registered view.
+ * The side column's views, keyed by id, are `files` / `changes` / `history` /
+ * `search` (contract.md §3.7): the commands below are fixed, not one per
+ * registered view.
  */
 const SIDEBAR_COMMANDS = [
   { id: 'sidebar.showFiles', key: 'files', title: '侧栏：文件', keys: 'mod+alt+1' },
   { id: 'sidebar.showChanges', key: 'changes', title: '侧栏：变更', keys: 'mod+alt+2' },
   { id: 'sidebar.showHistory', key: 'history', title: '侧栏：历史', keys: 'mod+alt+3' },
+  { id: 'sidebar.showSearch', key: 'search', title: '侧栏：搜索', keys: 'mod+alt+4' },
 ] as const
 
 /** The view ids whose hash flags `layout` honours on boot (contract.md §3.8). */
