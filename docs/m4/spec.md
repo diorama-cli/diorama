@@ -314,3 +314,34 @@ pnpm --filter diorama-web exec playwright test   # 69 passed（17 个 spec 文�
 
 **已知遗留**：`GIT_*` 作为进程级环境是在 gateway 启动时定下的；已经跑起来的 gateway 要
 `diorama-beta gateway restart` 才会带上修复。
+
+## 14. HTML 预览：样式放行、脚本逐文件确认（v0.6 内修订）
+
+§12 的预览把 `<style>` 也剥掉了，实际效果是「白页」——`rbac.html` 的样式全在 `<head>` 的 `<style>`
+里，预览只剩文字。用户确认改为：**样式/外部样式/外部图片全放行；脚本默认不执行，逐文件确认后放行。**
+
+| 项 | 取值 | 理由 |
+|---|---|---|
+| 样式阶段 CSP | `default-src 'none'`；`style-src 'unsafe-inline' https: http:`；`img-src data: blob: https: http:`；`font-src data: https: http:`；**无 `script-src`** | 保住页面外观与外部资源，脚本仍被 CSP 与 sandbox 双重挡住 |
+| 脚本阶段 CSP | 上面再加 `script-src 'unsafe-inline' 'unsafe-eval' https: http:`、`connect-src`、`media-src` | 确认后页面要能真正跑起来 |
+| sandbox | 样式阶段 `allow-same-origin`；脚本阶段 `allow-scripts`，**没有** `allow-same-origin` | 两者同时给 = 没沙箱；脚本阶段牺牲 same-origin，换取页面脚本够不到本页 |
+| 消毒 | 样式阶段才消毒；脚本阶段直接用原文 | 消毒会删掉刚被确认的脚本，等于确认无效 |
+| 确认 UI | `html-script-notice`：未确认时「执行脚本并预览」，确认后「停止执行」 | 提示只在页面真的有脚本时出现（`<script`、`on*=`、`javascript:`） |
+| 信任范围 | 渲染器实例；换文件/换代/刷新即失效 | 不给「信任」一个跨文件的持久身份 |
+
+**坑（这次踩到的）**：DOMPurify 默认**只消毒 `<body>`**，`<head>` 里的节点整个被丢掉——
+`<style>` 看起来「不在允许列表里」，其实是位置问题。证据（浏览器内实测）：
+
+```
+sanitize(fullDocument)                                  → "<h1>Hi</h1>"
+sanitize(fullDocument, { WHOLE_DOCUMENT: true })       → "<html><head><style>h1{color:red}</style></head><body><h1>Hi</h1></body></html>"
+sanitize('<head><style>a{color:red}</style></head>…')  → 样式没了
+sanitize('<body><style>a{color:red}</style>…')         → 样式保留
+```
+
+修法：`WHOLE_DOCUMENT: true`，并把返回文档的 `<head>`（title + style）与 `<body>` 分别取出来放进
+frame 文档。e2e 断言的是 `getComputedStyle` 的颜色，不是「标签存在」。
+
+**验收**：`m5-html` 6 条——样式与内联 `style=` 生效、外部资源策略在 CSP 里、脚本未确认不跑、
+确认后脚本跑且页面读不进去（取证时 Playwright 报 `Blocked a frame … cross-origin` 正是证据）、
+停止执行后回到脚本受限的 frame、无脚本页面没有提示条。

@@ -73,7 +73,7 @@
 | P15 | `fs`（server 半边） | ✅ M1 | 内核自带；`--plugins` 不影响服务端 |
 | P10 | `image` 渲染器 | ✅ 本轮 | `mime: ['image/*']`；先 `stat`、超 32 MiB 不请求；bytes → Blob URL → 原生 `<img>`（SVG 也走 `<img>`，不内联 DOM）|
 | P11 | `pdf` 渲染器 | ✅ 本轮 | `ext: ['pdf']`；bytes → Blob URL → `<iframe>`（浏览器 viewers），另给 blob 链接；不引 PDF 引擎 |
-| P17 | `html` 渲染器 | ✅ | `ext: ['html', 'htm']` 的唯一 owner；**预览**（DOMPurify 消毒 → `<iframe srcdoc sandbox>` 无脚本）+ **源码**，切换在渲染器头部，缺省预览；只用预读文本（contract §5.1）|
+| P17 | `html` 渲染器 | ✅ | `ext: ['html', 'htm']` 的唯一 owner；**样式阶段**：页面 CSS（内联 / `style=` / 外链）与外部图片放行，脚本不跑；**脚本阶段**：逐文件确认后 `allow-scripts`（无 `allow-same-origin`）执行页面脚本；另有源码视图。切换在渲染器头部（contract §5.1）|
 | P12 | `git-changes`（变更视图 + diff 座位） | ✅ | 左栏「变更」（`sidebar.views` 的 `changes` 视图，`order: 20`）；该 tab 以 `view: 'diff'` 渲染 unified diff；**v0.6：由 `fs.watch` 驱动重算**（不再 5 秒轮询）；不是仓库时两个 git 视图都不出现 |
 | P16 | `git-changes`（历史视图 + 提交座位） | ✅ 本轮 | 左栏「历史」（`history`，`order: 30`）：提交列表（每页 50，上限 500）；点提交写 `#history=<sha>`，右侧 `seats.git-commit` 显示**标题行**（正文展开/收起）、作者、文件清单与「改动 / 提交时的内容」|
 | P13 | `search`（全文检索） | **未来** | 没讨论过 |

@@ -981,6 +981,28 @@ code {
   color: var(--dio-accent);
 }
 
+.diorama-html__script {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--dio-border);
+  background: var(--dio-panel);
+  color: var(--dio-muted);
+  font-size: 12px;
+}
+
+.diorama-html__script button {
+  border: 1px solid var(--dio-accent);
+  border-radius: 4px;
+  background: none;
+  color: var(--dio-accent);
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
 .diorama-html__frame {
   flex: 1;
   min-height: 0;

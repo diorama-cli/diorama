@@ -101,6 +101,7 @@ docs/                     契约、架构、能力、排期、逐档 spec
 | 两个 mount 的 `git` 串了（`service "git" has been registered at <git:…>`，或 root 解析到某个 mount 的 git） | **Cordis 按服务名隔离，不按 fiber**：`isolate` 只命名一个名字，其余落回 root 的默认键 | 每个 mount 提供的服务名都要进 `MOUNT_SERVICES`（`kernel/src/server/plugins.ts`）；插件自己的按目录服务用 `isolateMountService(ctx, name)`（m4/spec §13）|
 | git 读到别的仓库 / 历史与文件树不是同一个目录 | 进程环境里的 `GIT_DIR` / `GIT_WORK_TREE` 优先于 `-C` | `runGit` 用 `gitEnvironment()`（丢掉所有 `GIT_*`）；别把 `process.env` 直接交给 git（m4/spec §13）|
 | 日志里健康 mount 反复 `degraded: ENOENT` / `EBINARY` → `recovered` | RPC 调用报的**回答码**被当成 mount 故障 | 内核错误表里的码都不 degrade；只有无码/未知码才算故障（`cli/src/gateway.ts` 的 `ANSWER_CODES`）|
+| HTML 预览「样式全没了」 | DOMPurify 默认**只消毒 `<body>`**，`<head>` 里的 `<style>` 被整段丢掉 | `WHOLE_DOCUMENT: true`，再把返回文档的 head/body 分别取出来（m4/spec §14）|
 | `node --test` 报 `ERR_UNKNOWN_FILE_EXTENSION: .tsx` | Node 不认 `.tsx` | 单测只导入 `.ts`；把要测的纯函数从组件文件里拆出来（m4/spec §12）|
 | 「找不到成员 `mountCtx`」/ props 里还有 `bytes` | `FileRendererProps` 曾在内核与 slots 各有一份且漂移 | 只有内核一份；slots re-export 它。`export type {X} from` 后同文件不能再用 `X` |
 | e2e 里快捷键不生效（mac 上写 `Control+Alt+x`） | `mod` 在 macOS 上是 Meta | 测试用 `MOD = darwin ? 'Meta' : 'Control'`；别用裸 `Control` |

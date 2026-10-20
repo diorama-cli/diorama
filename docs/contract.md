@@ -830,18 +830,29 @@ interface FileRendererProps {
   `stat` 再 `readBytes`，从 bytes 建 Blob URL 交给浏览器原生的 `<img>` / `<iframe>`；内核**
   不**内联 SVG 的 DOM（`<img>` 渲染 SVG，脚本不执行）。
 - **HTML 渲染器（v0.6，`html`）**：`ext: ['html', 'htm']` 的**唯一 owner**（`code` 的 ext 表里
-  **没有** `.html` / `.htm`，§5.1 rule 2）。只用预读的 `text`，不发任何请求。**两种显示方式**，
-  切换按钮在渲染器自己的头部（不是工具栏，O8），状态属于渲染器实例（一个 tab 座位一个）：
-  1. **预览**（缺省）：DOMPurify 消毒（markdown 的策略加上：无 `style`，无 `form` / `iframe` /
-     `object` / `embed`，无事件处理器与 `javascript:` URL），消毒结果放进
-     `<iframe srcdoc sandbox="allow-same-origin">`——**没有 `allow-scripts`**，因此即使有脚本漏过消毒
-     也不会执行；frame 的 `Content-Security-Policy: default-src 'none'; img-src data:; style-src 'none'`
-     禁止一切外部请求与任何样式（页面的 `<style>` 在消毒时已被去掉；wrapper 不带自己的样式，nonce
-     在沙箱 frame 里不传播——预览是「消毒后的内容 + 浏览器默认排版」，不是「页面的样子」）。
+  **没有** `.html` / `.htm`，§5.1 rule 2）。只用预读的 `text`，不发任何请求。**两种显示方式**
+  （按钮在渲染器自己的头部，不是工具栏，O8），状态属于渲染器实例（一个 tab 座位一个）：
+  1. **预览**（缺省）：
+     - **样式阶段**（缺省）：页面的 CSS 全部保留——`<style>`、`style=` 属性、外部样式表
+       （`style-src 'unsafe-inline' https: http:`），外部图片与字体同样放行
+       （`img-src` / `font-src` 含 `https: http:`）。**脚本不执行**：CSP 没有 `script-src`，frame 是
+       `sandbox="allow-same-origin"`（无 `allow-scripts`）。
+     - **脚本阶段**（读者逐文件确认后）：页面原样载入（**跳过消毒**——消毒会删掉被确认的脚本），
+       frame 换成  `sandbox="allow-scripts"`、CSP 放行 `script-src` / `connect-src` / `media-src`。
+       **同时给 `allow-scripts` 与 `allow-same-origin` 等于没有沙箱**，所以脚本阶段**没有**
+       `allow-same-origin`：页面脚本能跑，但读不到本页、本页的 cookie 与文件。
+     - **确认**：页面含脚本（`<script>`、`on*=` 或 `javascript:`）时，预览上方出现提示条
+       「此页面含脚本，预览中未执行 · 执行脚本并预览」；确认后同一位置变为「已执行页面脚本」+
+       「停止执行」。**信任只属于渲染器实例**：换文件、换 tab、刷新页面都回到未确认。
+     - 消毒（样式阶段）用 `WHOLE_DOCUMENT`：DOMPurify 不带它时**只处理 `<body>`**，页面放在 `<head>`
+       里的 `<style>` 会被整段丢掉（v0.6 修：这就是「CSS 没加载」）。
   2. **源码**：文件的原文用 `<pre>` 显示（转义为文本，不解释）。没有 `html` 插件时 `.html` 落到兜底
      `plaintext`（普通文本），**不**回到 `code`。
-  同一 tab 换成另一个文件时回到**预览**（深链、刷新恢复都是“打开一个页面”）。
+  同一 tab 换成另一个文件时回到**预览**且**未确认**（深链、刷新恢复都是“打开一个页面”）。
   **不使用 blob URL**：`srcdoc` 是内联文档，不需要在本站 origin 上开一个 URL。
+  边界：**预览会执行读者确认过的页面脚本**——只读承诺覆盖的是 `ctx.fs` / `ctx.git`（本工具从不写
+  被浏览的目录），不覆盖页面自身的脚本行为；脚本阶段不携 `allow-same-origin` 正是为了让页面脚本
+  够不到本页面。
 
 ## 6. contract version 规则 ✅ v0.2 起强制
 
