@@ -868,6 +868,11 @@ interface SidebarViewSpec {
 - `file-tree` 在最前（`order: 10`），git 的「变更」视图 `order: 20`，「历史」视图 `order: 30`
   （v0.6），「搜索」视图 `order: 40`（v0.8，由 `search-view` 注册）。
   这些视图都由各自的 piece 注册，`layout` 不知道它们的含义。
+- **图标是页面数据，不是模块导入**（v0.8 起，见 docs/m7/spec.md）：`icon` 仍是普通内联 SVG 字符串，
+  但内置 piece 用 `diorama-ui` 的 `iconSvg(name)` 从**页面全局 `__diorama_icons__`** 取形——
+  插画由 shell 通过 `diorama-ui/icons` 装一份（否则每个 client 半边都会把插画 bundle 一遍）。
+  页面没有装表时（外部宿主、单测）`iconSvg` 返回 `''`，切换器按本节的缺省规则用 title 首字；
+  `icon` 字段本身与形状没有任何耦合，外部 piece 可以照旧给任意 SVG。
 - **视图内部怎么画是视图自己的事**：git 的「变更」把 `status()` 的扁平行折成**目录树**
   （目录优先、单一子目录链合并成一行、展开状态属于该视图，不与文件树共享）。`ctx.git.status()`
   保持扁平（§3.2），折叠由视图完成。

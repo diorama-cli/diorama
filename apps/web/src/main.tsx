@@ -20,6 +20,10 @@ import {
   type MountManifest,
 } from 'diorama-kernel/client'
 import { DioramaRoot, FailurePanel, type MountHealth, type PageKernel } from 'diorama-ui'
+// The page's icon artwork: built and published here, once, before any piece
+// renders (docs/m7/spec.md §3). Halves read it off the page global, so this
+// stays out of their bundles.
+import { installIcons } from 'diorama-ui/icons'
 import 'diorama-ui/styles.css'
 
 type Phase =
@@ -78,6 +82,8 @@ interface PageBoot {
 
 /** Fetch the boot graph, load every half, boot Cordis. */
 async function boot(): Promise<PageBoot> {
+  // Before anything draws: every half's first render may draw a tree row.
+  installIcons()
   const response = await fetch('/plugin.json', { cache: 'no-store' })
   if (!response.ok) throw new Error(`GET /plugin.json failed: ${response.status} ${response.statusText}`)
   const manifest = (await response.json()) as Omit<MountManifest, 'baseUrl'>

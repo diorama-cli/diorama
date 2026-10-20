@@ -12,15 +12,18 @@
     "demo": "node packages/cli/bin/diorama .diorama-verify",
     "test": "pnpm --filter diorama-web run test",
     "typecheck": "pnpm -r run typecheck",
-    "test:unit": "node --test --experimental-transform-types \"packages/kernel/test/*.test.ts\" \"packages/plugins/slots/test/*.test.ts\" \"packages/plugins/html/test/*.test.ts\" \"packages/plugins/help/test/*.test.ts\" \"packages/plugins/search-view/test/*.test.ts\" \"packages/cli/test/*.test.ts\""
+    "test:unit": "node --test --experimental-transform-types \"packages/kernel/test/*.test.ts\" \"packages/ui/test/*.test.ts\" \"packages/plugins/slots/test/*.test.ts\" \"packages/plugins/html/test/*.test.ts\" \"packages/plugins/help/test/*.test.ts\" \"packages/plugins/search-view/test/*.test.ts\" \"packages/cli/test/*.test.ts\"",
+    "icons": "node scripts/generate-icons.mjs"
   },
   "devDependencies": {
+    "@tabler/icons": "3.49.0",
     "@types/dompurify": "^3.2.0",
     "@types/node": "^26.6.5",
     "@types/ws": "^8.18.2",
     "dompurify": "^3.4.17",
     "highlight.js": "^11.12.0",
     "marked": "^18.1.1",
+    "material-icon-theme": "5.39.0",
     "rolldown": "^1.2.14",
     "tsdown": "^0.23.1",
     "typescript": "^5.9.3",

@@ -15,7 +15,7 @@ import { useEffect, useState } from 'react'
 import type { FileRendererProps, FileInfo } from 'diorama-kernel'
 import { MAX_BINARY_BYTES } from 'diorama-kernel/client'
 import type {} from 'diorama-plugin-slots'
-import { provideEntry } from 'diorama-ui'
+import { FileIcon, provideEntry } from 'diorama-ui'
 
 export const name = 'image'
 export const inject = ['slots']
@@ -125,6 +125,7 @@ export function Image(props: FileRendererProps) {
   return (
     <div className="diorama-image" data-testid="image">
       <div className="diorama-image__meta">
+        <FileIcon name={file.name} />
         {file.name} · {mime} · {formatSize(file.size)}
       </div>
       <img

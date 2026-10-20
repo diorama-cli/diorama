@@ -40,10 +40,11 @@ pnpm --filter diorama-web exec playwright test   # 真实 CLI + Chromium
 ```
 packages/kernel/          内核：服务端（HTTP/RPC/fs/config/plan）、客户端（boot/rpc/fs/tabs/tree/commands）、shared
 packages/plugins/<id>/    内置插件，一包两半边：lib/index.mjs（server 半边）+ lib/client.cjs（页面工厂）
-packages/ui/              页面渲染原语（Slot、useKernel、useStore、错误边界、样式）
+packages/ui/              页面渲染原语（Slot、useKernel、useStore、错误边界、样式、图标）
 packages/cli/             命令行：参数、diorama.toml 合成、服务端插件树装配
 apps/web/                 页面壳（Vite）+ Playwright e2e（tests/）
 docs/                     契约、架构、能力、排期、逐档 spec
+scripts/                  生成器（图标表；`pnpm icons` 重新生成）
 ```
 
 ### 内核里改哪里

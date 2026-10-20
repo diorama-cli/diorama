@@ -48,9 +48,11 @@ test('images: svg is shown as an image, not inlined into the page', async ({ pag
   await page.locator('[data-path="assets/logo.svg"]').click()
   const image = page.getByTestId('image-img')
   await expect(image).toBeVisible()
-  // An <img> shows the SVG; its DOM is never part of the page.
+  // An <img> shows the SVG; its DOM is never part of the page. (The header's
+  // file-type glyph is an <svg> of our own, so the assertion names the file's
+  // own markup — the fixture's `<rect>` — rather than "any svg in the pane".)
   expect(await image.evaluate((node: HTMLImageElement) => node.naturalWidth)).toBe(4)
-  expect(await page.locator('.diorama-image svg').count()).toBe(0)
+  expect(await page.locator('.diorama-image svg rect').count()).toBe(0)
 })
 
 test('images: a file over the byte limit says so and is never requested', async ({ page }) => {

@@ -184,10 +184,13 @@ code {
 }
 
 .diorama-tree__caret {
-  width: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
   flex: none;
   color: var(--dio-muted);
-  font-size: 10px;
 }
 
 .diorama-tree__name {
@@ -203,7 +206,9 @@ code {
 
 /* Large directories: the rest of a directory, on request (M2). */
 .diorama-tree__more {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 4px;
   width: 100%;
   padding: 3px 8px;
   border: 0;
@@ -213,6 +218,11 @@ code {
   font-size: 12px;
   text-align: left;
   cursor: pointer;
+}
+
+.diorama-tree__more .diorama-icon {
+  color: var(--dio-muted);
+  opacity: 0.8;
 }
 
 .diorama-tree__more:hover {
@@ -257,8 +267,11 @@ code {
 }
 
 .diorama-tabs__label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   min-width: 0;
-  padding: 0 6px 0 14px;
+  padding: 0 6px 0 10px;
   border: 0;
   background: none;
   color: inherit;
@@ -266,14 +279,23 @@ code {
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
+}
+
+.diorama-tabs__name {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .diorama-tabs__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: none;
   width: 22px;
   height: 22px;
   margin-right: 4px;
+  padding: 0;
   border: 0;
   border-radius: 4px;
   background: none;
@@ -681,6 +703,9 @@ code {
 
 .diorama-changes__reload,
 .diorama-diff__reload {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   border: 0;
   background: none;
   color: var(--dio-accent);
@@ -989,6 +1014,18 @@ code {
   color: var(--dio-accent);
 }
 
+/* Image renderer (contract.md §5.1, v0.6): the file's own header, then the
+   picture at its natural size (the layout around it is the tab's). */
+.diorama-image__meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--dio-border);
+  color: var(--dio-muted);
+  font-size: 12px;
+}
+
 /* PDF renderer (contract.md §5.1, v0.6): the browser's viewer in a frame */
 .diorama-pdf {
   display: flex;
@@ -1009,6 +1046,9 @@ code {
 }
 
 .diorama-pdf__open {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   color: var(--dio-accent);
   text-decoration: none;
 }
@@ -1061,6 +1101,9 @@ code {
 }
 
 .diorama-html__modes button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   border: 1px solid var(--dio-border);
   border-radius: 4px;
   background: none;
@@ -1088,6 +1131,9 @@ code {
 }
 
 .diorama-html__script button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   border: 1px solid var(--dio-accent);
   border-radius: 4px;
   background: none;
@@ -1162,7 +1208,12 @@ code {
 }
 
 .diorama-search__toggle {
-  padding: 1px 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 1px 4px;
   border: 1px solid transparent;
   border-radius: 4px;
   background: none;
@@ -1201,12 +1252,16 @@ code {
 }
 
 .diorama-search__group-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: none;
   width: 18px;
+  height: 18px;
+  padding: 0;
   border: 0;
   background: none;
   color: var(--dio-muted);
-  font-size: 10px;
   cursor: pointer;
 }
 
@@ -1216,7 +1271,7 @@ code {
 
 .diorama-search__file {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 6px;
   width: 100%;
   padding: 3px 8px;
@@ -1302,4 +1357,33 @@ code {
   background: rgba(255, 200, 0, 0.22);
   border-top: 1px solid rgba(200, 150, 0, 0.35);
   border-bottom: 1px solid rgba(200, 150, 0, 0.35);
+}
+
+/* Icons (docs/m7/spec.md): button glyphs inherit the text colour, file glyphs
+   carry their own colour from the theme. Both are decoration: the control or
+   the row owns the accessible name. */
+.diorama-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  vertical-align: -3px;
+}
+
+.diorama-icon svg {
+  display: block;
+}
+
+.diorama-file-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  vertical-align: -3px;
+}
+
+.diorama-file-icon svg {
+  display: block;
 }

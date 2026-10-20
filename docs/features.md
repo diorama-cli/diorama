@@ -6,7 +6,7 @@
 >
 > **档位标注（2026-10-19，2026-10-20 更新）**：标 ✅ 的已落地；git 只读视图、URL 路由、git 历史视图、
 > 图片与 PDF 渲染器见 [实施说明](m4/spec.md)（§1–§6 是第一轮，§7–§11 是第二轮）；
-> 文件搜索见 [m6/spec.md](m6/spec.md)。其余仍是 v1 目标。
+> 文件搜索见 [m6/spec.md](m6/spec.md)；界面图标见 [m7/spec.md](m7/spec.md)。其余仍是 v1 目标。
 > 契约见 [contract.md](contract.md) **v0.8**。
 
 ## 一、CLI
@@ -81,12 +81,14 @@
 | P16 | `git-changes`（历史视图 + 提交座位） | ✅ 本轮 | 左栏「历史」（`history`，`order: 30`）：提交列表（每页 50，上限 500）；点提交写 `#history=<sha>`，右侧 `seats.git-commit` 显示**标题行**（正文展开/收起）、作者、文件清单与「改动 / 提交时的内容」；**打开文件（含再点当前文件）或切走侧栏视图即回到 tab 列表**，`#history` 随之清掉 |
 | P13 | `search-view`（文件搜索） | ✅ v0.8 | 左栏「搜索」视图（`order: 40`）：**按内容**（字面量 / 正则、大小写、全字）与**按文件名**（子序列，VS Code 的 `Ctrl+P` 口径）两种模式；结果按文件折叠，点一条打开文件并**跳到那一行**。另注册 `mod+p` 快速打开覆盖层（`layout.overlay`，`order: 300`）。服务是内核的 `ctx.search`（§3.9），只走 `ctx.fs`，因此 `ignore` 对树与搜索一致 |
 | P14 | `jupyter` / `.ipynb` | **未来** | 第二轮明确不做（只要文本，但渲染形式未定）|
+| P19 | 图标（文件类型 + 功能按钮） | ✅ v0.8 | 按钮 = Tabler 描边（语义名），文件/文件夹 = Material Icon Theme 彩色（精选 ~195 glyph + 其映射表）；插画由 shell 经 `diorama-ui/icons` 装到页面全局，半边只带读法（[m7/spec.md](m7/spec.md)）|
 
 ## 五、UI 交互
 
 | # | 功能 | 档位 | 说明 |
 |---|---|---|---|
 | U1 | 左侧栏 + 右侧多 tab | ✅ M0→本轮 | 左栏是 `sidebar.views`（文件树 / 变更 / 历史 / 搜索，VS Code 式切换）；每个 tab 一个内容座位（隐藏不卸载）|
+| U15 | 文件类型图标 / 功能按钮图标 | ✅ v0.8 | 树、tab 条、搜索结果、变更列表的文件行带彩色类型图标（目录随展开态换画）；切换器、tab 关闭、搜索开关、刷新等按钮用同族描边图标；换掉文字的按钮都补 `aria-label`（[m7/spec.md](m7/spec.md)）|
 | U2 | 文件变化自动刷新（watch） | ✅ M2 | 内容与树；`view.toggleAutoRefresh` 可关 |
 | U3 | 快捷键 | ✅ M2 | 全局唯一绑定 + `when`；`mod` = ⌘/Ctrl；v0.6 加 `mod+alt+1/2/3` 切侧栏视图；v0.7 加 `?` 开快捷键说明；v0.8 加 `mod+alt+4`（搜索视图）、`mod+p`（快速打开）、`mod+shift+f`（搜索视图） |
 | U4 | command palette | ✅ M2 | 只列可执行命令（不灰显），`Esc` 关、`Enter` 跑 |

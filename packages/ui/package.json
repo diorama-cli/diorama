@@ -9,6 +9,10 @@
       "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
     },
+    "./icons": {
+      "types": "./lib/icons.d.ts",
+      "default": "./lib/icons.js"
+    },
     "./styles.css": "./src/styles.css",
     "./src/*": "./src/*",
     "./package.json": "./package.json"

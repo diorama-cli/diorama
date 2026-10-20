@@ -17,7 +17,7 @@ import { useEffect, useState } from 'react'
 import type { FileInfo, FileRendererProps } from 'diorama-kernel'
 import { MAX_BINARY_BYTES } from 'diorama-kernel/client'
 import type {} from 'diorama-plugin-slots'
-import { provideEntry } from 'diorama-ui'
+import { FileIcon, Icon, provideEntry } from 'diorama-ui'
 
 export const name = 'pdf'
 export const inject = ['slots']
@@ -118,11 +118,13 @@ export function Pdf(props: FileRendererProps) {
     <div className="diorama-pdf" data-testid="pdf">
       <div className="diorama-pdf__meta">
         <span>
+          <FileIcon name={file.name} />
           {file.name} · application/pdf · {formatSize(file.size)}
         </span>
         {/* The viewer may be unavailable (it is the browser's): the blob is
             always reachable, so the file is never a dead end. */}
         <a className="diorama-pdf__open" href={state.url} target="_blank" rel="noreferrer" data-testid="pdf-open">
+          <Icon name="external-link" size={14} />
           在新标签打开
         </a>
       </div>

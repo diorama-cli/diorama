@@ -13,7 +13,7 @@
 import type { Context } from 'cordis'
 import { useCallback, useEffect, useRef, useSyncExternalStore, type ReactElement } from 'react'
 import type {} from 'diorama-plugin-slots'
-import { bindMethods, provideEntry, Slot, useKernel, useStore } from 'diorama-ui'
+import { bindMethods, FileIcon, Icon, provideEntry, Slot, useKernel, useStore } from 'diorama-ui'
 import { createTabsService, type CommandsService, type TabInfo } from 'diorama-kernel/client'
 
 export const name = 'tabs'
@@ -300,7 +300,9 @@ function TabsView() {
                 tabIndex={-1}
                 onClick={() => tabs.activate(tab.id)}
               >
-                {name}
+                {/* A tab is a file: its icon says which kind, the label which one. */}
+                <FileIcon name={name} />
+                <span className="diorama-tabs__name">{name}</span>
               </button>
               <button
                 type="button"
@@ -308,12 +310,13 @@ function TabsView() {
                 aria-label={`关闭 ${name}`}
                 tabIndex={-1}
                 data-testid="tab-close"
+                title={`关闭 ${name}`}
                 onClick={event => {
                   event.stopPropagation()
                   tabs.close(tab.id)
                 }}
               >
-                ×
+                <Icon name="close" size={14} />
               </button>
             </div>
           )

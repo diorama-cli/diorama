@@ -24,7 +24,7 @@ import { useMemo, useState } from 'react'
 import DOMPurify from 'dompurify'
 import type {} from 'diorama-plugin-slots'
 import type { FileRendererProps } from 'diorama-kernel'
-import { provideEntry } from 'diorama-ui'
+import { FileIcon, Icon, provideEntry } from 'diorama-ui'
 import { formatSize, HTML_EXTENSIONS, lineCount, type HtmlMode } from './frame.ts'
 import { documentTitle, hasScript, previewDocument, type PreviewStage } from './policy.ts'
 
@@ -98,6 +98,7 @@ export function HtmlRenderer({ file, text }: FileRendererProps) {
   return (
     <div className="diorama-html" data-testid="html" data-mode={current.mode} data-stage={stage}>
       <div className="diorama-html__bar">
+        <FileIcon name={file.name} />
         <span className="diorama-html__path" title={file.path}>
           {file.path}
         </span>
@@ -110,16 +111,20 @@ export function HtmlRenderer({ file, text }: FileRendererProps) {
             type="button"
             aria-pressed={current.mode === 'preview'}
             data-testid="html-mode-preview"
+            title="预览"
             onClick={() => setMode('preview')}
           >
+            <Icon name="eye" size={14} />
             预览
           </button>
           <button
             type="button"
             aria-pressed={current.mode === 'source'}
             data-testid="html-mode-source"
+            title="源码"
             onClick={() => setMode('source')}
           >
+            <Icon name="code" size={14} />
             源码
           </button>
         </div>
@@ -132,6 +137,7 @@ export function HtmlRenderer({ file, text }: FileRendererProps) {
                 <>
                   <span>已执行页面脚本（页面内运行，读不到本页与你的文件）。</span>
                   <button type="button" data-testid="html-script-revoke" onClick={revoke}>
+                    <Icon name="stop" size={14} />
                     停止执行
                   </button>
                 </>
@@ -139,6 +145,7 @@ export function HtmlRenderer({ file, text }: FileRendererProps) {
                 <>
                   <span>此页面含脚本，预览中未执行。</span>
                   <button type="button" data-testid="html-script-run" onClick={trust}>
+                    <Icon name="play" size={14} />
                     执行脚本并预览
                   </button>
                 </>

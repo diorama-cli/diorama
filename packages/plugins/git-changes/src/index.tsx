@@ -21,7 +21,7 @@ import type { Context } from 'cordis'
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactElement } from 'react'
 import type { ChangeTreeNode, CommitDetail, DiffEntry, DiffResult, FileInfo, GitLogEntry, GitStatusEntry } from 'diorama-kernel'
 import { buildChangeTree, hasGit, type GitClient, type TabsService } from 'diorama-kernel/client'
-import { provideEntry, useKernel } from 'diorama-ui'
+import { FileIcon, Icon, iconSvg, provideEntry, useKernel } from 'diorama-ui'
 import type {} from 'diorama-plugin-slots'
 import type { CommitSeatProps, TabDiffProps } from 'diorama-plugin-slots'
 
@@ -49,13 +49,11 @@ export const HISTORY_VIEW = 'history'
  */
 export const HISTORY_HASH_KEY = 'history'
 
-/** The switcher icon (inline SVG; `layout` draws it verbatim). */
-export const CHANGES_ICON =
-  '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="5" cy="3.5" r="1.6"/><circle cx="5" cy="12.5" r="1.6"/><circle cx="11" cy="5.5" r="1.6"/><path d="M5 5.1v5.8M11 7.1c0 2-1.5 2.6-3.2 3.4"/></svg>'
+/** The changes view's switcher icon (docs/m7/spec.md §3: the button table). */
+export const CHANGES_ICON = iconSvg('git-changes')
 
-/** The history view's icon (a commit graph). */
-export const HISTORY_ICON =
-  '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M3 2v12"/><circle cx="3" cy="5" r="1.7"/><circle cx="3" cy="11" r="1.7"/><path d="M4.7 5h2.3a3 3 0 0 1 3 3v2"/><circle cx="13" cy="11" r="1.7"/></svg>'
+/** The history view's switcher icon. */
+export const HISTORY_ICON = iconSvg('git-history')
 
 /** Kind → the badge shown in the changes list (VS Code's letters). */
 const BADGE: Record<GitStatusEntry['kind'], string> = {
@@ -198,6 +196,7 @@ function ChangeRow({
       style={indent}
       onClick={() => onOpen(entry)}
     >
+      <FileIcon name={name} />
       <span className={`diorama-changes__badge diorama-changes__badge--${TONE[entry.kind]}`} aria-hidden="true">
         {BADGE[entry.kind]}
       </span>
@@ -264,8 +263,15 @@ function ChangesView({ active }: { active: boolean }) {
     <div className="diorama-changes" data-testid="git-changes">
       <div className="diorama-changes__group">
         <span>{changes.entries.length} 个改动</span>
-        <button type="button" className="diorama-changes__reload" data-testid="git-changes-reload" onClick={changes.reload}>
-          刷新
+        <button
+          type="button"
+          className="diorama-changes__reload"
+          data-testid="git-changes-reload"
+          title="刷新变更列表"
+          aria-label="刷新变更列表"
+          onClick={changes.reload}
+        >
+          <Icon name="reload" size={14} />
         </button>
       </div>
       <ChangeTree entries={changes.entries} selected={activeTab} onOpen={open} />
@@ -351,8 +357,9 @@ function ChangeNode({
         onClick={() => onToggle(node.path)}
       >
         <span className="diorama-tree__caret" aria-hidden="true">
-          {closed ? '▸' : '▾'}
+          <Icon name={closed ? 'caret-right' : 'caret-down'} size={14} />
         </span>
+        <FileIcon name={node.name} kind="dir" expanded={!closed} />
         <span className="diorama-tree__name">{node.name}/</span>
         <span className="diorama-changes__count">{node.count}</span>
       </button>
@@ -572,9 +579,16 @@ function DiffBody({
         <span className={`diorama-changes__badge diorama-changes__badge--${TONE[entry.kind]}`} aria-hidden="true">
           {BADGE[entry.kind]}
         </span>
+        <FileIcon name={path.slice(path.lastIndexOf('/') + 1)} />
         <span className="diorama-diff__path">{path}</span>
-        <button type="button" className="diorama-diff__reload" onClick={onRefresh}>
-          重新读取
+        <button
+          type="button"
+          className="diorama-diff__reload"
+          title="重新读取这个文件"
+          aria-label="重新读取这个文件"
+          onClick={onRefresh}
+        >
+          <Icon name="reload" size={14} />
         </button>
       </div>
       {notes.length > 0 && (
@@ -710,8 +724,15 @@ function HistoryView({ active }: { active: boolean }) {
     <div className="diorama-changes" data-testid="git-history">
       <div className="diorama-changes__group">
         <span>{history.commits.length} 个提交</span>
-        <button type="button" className="diorama-changes__reload" data-testid="git-history-reload" onClick={history.reload}>
-          刷新
+        <button
+          type="button"
+          className="diorama-changes__reload"
+          data-testid="git-history-reload"
+          title="刷新提交历史"
+          aria-label="刷新提交历史"
+          onClick={history.reload}
+        >
+          <Icon name="reload" size={14} />
         </button>
       </div>
       <div className="diorama-history" role="listbox" aria-label="提交历史">
@@ -741,6 +762,7 @@ function HistoryView({ active }: { active: boolean }) {
       </div>
       {history.more && (
         <button type="button" className="diorama-changes__reload" data-testid="git-history-more" onClick={history.loadMore}>
+          <Icon name="caret-down" size={14} />
           加载更多
         </button>
       )}
@@ -913,7 +935,7 @@ function CommitMessage({ detail }: { detail: CommitDetail }) {
         data-testid="git-commit-message-toggle"
         onClick={() => setOpen(value => !value)}
       >
-        <span aria-hidden="true">{open ? '▾' : '▸'}</span>
+        <Icon name={open ? 'caret-down' : 'caret-right'} size={14} />
         <span className="diorama-git-commit__subject" data-testid="git-commit-message">
           {title}
         </span>

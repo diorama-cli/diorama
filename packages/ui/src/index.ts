@@ -34,3 +34,18 @@ export {
   showOverlay,
   toggleOverlay,
 } from './overlay.ts'
+export {
+  baseName,
+  fileGlyph,
+  FALLBACK_FILE,
+  FALLBACK_FOLDER,
+  glyphNameForFile,
+  glyphNameForFolder,
+  iconSvg,
+  iconTable,
+  publishIcons,
+  type ButtonGlyph,
+  type FileGlyph,
+  type IconTable,
+} from './icons/page.ts'
+export { FileIcon, Icon, type FileIconProps, type IconProps } from './icons/Icon.tsx'

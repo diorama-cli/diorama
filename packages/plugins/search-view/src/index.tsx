@@ -29,7 +29,7 @@ import type { FileInfo, MountHandle } from 'diorama-kernel/client'
 import type { SearchOptions, SearchResult } from 'diorama-kernel/client'
 import type { TabsService } from 'diorama-kernel/client'
 import { fuzzyMatch } from 'diorama-kernel/client'
-import { closeOverlay, hideOverlay, overlayStore, provideEntry, reveal, toggleOverlay, useKernel } from 'diorama-ui'
+import { closeOverlay, FileIcon, hideOverlay, Icon, iconSvg, overlayStore, provideEntry, reveal, toggleOverlay, useKernel } from 'diorama-ui'
 import type {} from 'diorama-plugin-slots'
 import { flattenResult, highlightPositions, highlightRange, splitPath, summarize, type ResultRow } from './results.ts'
 
@@ -42,9 +42,8 @@ export const SEARCH_VIEW = 'search'
 /** This overlay's id in the page's overlay store (see `diorama-ui/overlay`). */
 export const QUICK_OPEN_ID = 'quick-open'
 
-/** The switcher icon (inline SVG; `layout` draws it verbatim). */
-export const SEARCH_ICON =
-  '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2 14 14"/></svg>'
+/** The switcher icon (docs/m7/spec.md §3: the page's button table). */
+export const SEARCH_ICON = iconSvg('search')
 
 /** Wait this long after the last keystroke before searching (ms). */
 export const DEBOUNCE_MS = 180
@@ -139,6 +138,7 @@ function ResultRowView({ row, onPick }: { row: ResultRow; onPick(row: ResultRow)
         title={row.path}
         onClick={() => onPick(row)}
       >
+        <FileIcon name={name} />
         <span className="diorama-search__name">{name}</span>
         {dir === '' ? null : <span className="diorama-search__dir">{dir}</span>}
         <span className="diorama-search__count">{row.count}</span>
@@ -233,9 +233,10 @@ function SearchView({ active }: { active: boolean }) {
             className={`diorama-search__toggle${kind === 'content' ? ' diorama-search__toggle--on' : ''}`}
             data-testid="search-kind-content"
             title="在文件内容中查找"
+            aria-label="在文件内容中查找"
             onClick={() => setKind('content')}
           >
-            内容
+            <Icon name="file-text" size={14} />
           </button>
           <button
             type="button"
@@ -243,9 +244,10 @@ function SearchView({ active }: { active: boolean }) {
             className={`diorama-search__toggle${kind === 'name' ? ' diorama-search__toggle--on' : ''}`}
             data-testid="search-kind-name"
             title="按文件名查找"
+            aria-label="按文件名查找"
             onClick={() => setKind('name')}
           >
-            文件名
+            <Icon name="files" size={14} />
           </button>
           <span className="diorama-search__spacer" />
           <button
@@ -254,9 +256,10 @@ function SearchView({ active }: { active: boolean }) {
             className={`diorama-search__toggle${caseSensitive ? ' diorama-search__toggle--on' : ''}`}
             data-testid="search-case"
             title="区分大小写"
+            aria-label="区分大小写"
             onClick={() => setCaseSensitive(value => !value)}
           >
-            Aa
+            <Icon name="text-case" size={14} />
           </button>
           {kind === 'content' ? (
             <>
@@ -266,9 +269,10 @@ function SearchView({ active }: { active: boolean }) {
                 className={`diorama-search__toggle${wholeWord ? ' diorama-search__toggle--on' : ''}`}
                 data-testid="search-word"
                 title="全字匹配"
+                aria-label="全字匹配"
                 onClick={() => setWholeWord(value => !value)}
               >
-                词
+                <Icon name="whole-word" size={14} />
               </button>
               <button
                 type="button"
@@ -276,9 +280,10 @@ function SearchView({ active }: { active: boolean }) {
                 className={`diorama-search__toggle${regex ? ' diorama-search__toggle--on' : ''}`}
                 data-testid="search-regex"
                 title="使用正则表达式"
+                aria-label="使用正则表达式"
                 onClick={() => setRegex(value => !value)}
               >
-                .*
+                <Icon name="regex" size={14} />
               </button>
             </>
           ) : null}
@@ -300,7 +305,7 @@ function SearchView({ active }: { active: boolean }) {
                   data-path={row.path}
                   onClick={() => toggle(row.path)}
                 >
-                  {collapsed.has(row.path) ? '▸' : '▾'}
+                  <Icon name={collapsed.has(row.path) ? 'caret-right' : 'caret-down'} size={14} />
                 </button>
                 <ResultRowView row={row} onPick={pick} />
               </div>

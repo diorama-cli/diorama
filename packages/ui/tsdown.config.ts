@@ -6,7 +6,10 @@ import { defineConfig } from 'tsdown'
  * set of React contexts, in a page.
  */
 export default defineConfig({
-  entry: { index: 'src/index.ts' },
+  // Two entries: the primitives every half imports, and the artwork + installer
+  // the shell alone imports (docs/m7/spec.md §3). Keeping them apart is what
+  // keeps ~170 KB of icon data out of every client half.
+  entry: { index: 'src/index.ts', icons: 'src/icons/install.ts' },
   outDir: 'lib',
   format: ['esm'],
   platform: 'browser',

@@ -19,7 +19,7 @@ import type { Context } from 'cordis'
 import { useCallback, useEffect, useState } from 'react'
 import type { FileInfo, MountHandle } from 'diorama-kernel/client'
 import { createTreeService, type CommandsService } from 'diorama-kernel/client'
-import { bindMethods, provideEntry, useKernel, useStore } from 'diorama-ui'
+import { bindMethods, FileIcon, Icon, iconSvg, provideEntry, useKernel, useStore } from 'diorama-ui'
 
 export const name = 'file-tree'
 export const inject = ['slots']
@@ -27,9 +27,13 @@ export const inject = ['slots']
 /** Entries a collapsed-until-asked directory shows at first (M2). */
 export const PAGE_SIZE = 500
 
-/** The switcher icon (contract.md §5.2; `layout` draws it verbatim). */
-export const FILES_ICON =
-  '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M2.5 3.5h4l1.2 1.5h5.8v7.5h-11z"/></svg>'
+/**
+ * The switcher icon (contract.md §5.2; `layout` draws it verbatim). Built from
+ * the page's button table (docs/m7/spec.md §3), so the activity bar is one
+ * family of glyphs; `iconSvg` answers `''` in a page with no table, and the
+ * switcher then falls back to the title's first character as it always has.
+ */
+export const FILES_ICON = iconSvg('files')
 
 interface DirState {
   entries?: FileInfo[]
@@ -103,8 +107,9 @@ function TreeRow({ mountCtx, file, depth }: { mountCtx: MountHandle; file: FileI
         onClick={() => (isDir ? tree.toggle(file.path) : tree.select(file))}
       >
         <span className="diorama-tree__caret" aria-hidden="true">
-          {isDir ? (expanded ? '▾' : '▸') : ''}
+          {isDir ? <Icon name={expanded ? 'caret-down' : 'caret-right'} size={14} /> : null}
         </span>
+        <FileIcon name={file.name} kind={file.kind} expanded={expanded} />
         <span className="diorama-tree__name">{file.name}</span>
       </button>
       {expanded && dirState.error !== undefined && (
@@ -125,6 +130,7 @@ function TreeRow({ mountCtx, file, depth }: { mountCtx: MountHandle; file: FileI
           data-testid="tree-more"
           onClick={() => dirState.more()}
         >
+          <Icon name="caret-down" size={14} />
           加载更多（已显示 {cut} / 共 {total} 条）
         </button>
       )}
@@ -151,6 +157,7 @@ function FileTreeRoot({ active = true }: { active?: boolean }) {
       ))}
       {cut < total && (
         <button type="button" className="diorama-tree__more" data-testid="tree-more" onClick={() => rootEntries.more()}>
+          <Icon name="caret-down" size={14} />
           加载更多（已显示 {cut} / 共 {total} 条）
         </button>
       )}
