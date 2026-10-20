@@ -60,7 +60,16 @@ test('history: commits list, newest first, and a commit opens in the commit seat
   const seat = page.getByTestId('git-commit')
   await expect(seat).toBeVisible()
   await expect(seat).toHaveAttribute('data-sha', shas.second)
-  await expect(page.getByTestId('git-commit-message')).toContainText('with a body')
+  // The message is the subject only; the body is folded until asked for.
+  await expect(page.getByTestId('git-commit-message')).toHaveText('second commit')
+  await expect(page.getByTestId('git-commit-message-body')).toHaveCount(0)
+  const toggle = page.getByTestId('git-commit-message-toggle')
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  await expect(page.getByTestId('git-commit-message-body')).toHaveText('with a body')
+  await toggle.click()
+  await expect(page.getByTestId('git-commit-message-body')).toHaveCount(0)
   // The commit's file list, and the first file's diff next to it.
   await expect(page.getByTestId('git-commit-file')).toHaveCount(1)
   await expect(page.getByTestId('git-commit-file').first()).toHaveAttribute('data-file', 'src/app.js')
@@ -176,4 +185,32 @@ test('history: the changes view re-reads on file-system events, without polling'
   writeFileSync(join(directory.root, 'src/added.js'), 'added\n')
   await expect(changes.locator('[data-path="src"]')).toBeVisible()
   await expect(changes.getByText('added.js')).toBeVisible()
+})
+
+test('history: a multi-line body folds to one line; a title-only commit has no toggle', async ({ page }) => {
+  directory = fixture()
+  git(directory.root, 'init', '-q', '-b', 'main')
+  git(directory.root, 'add', '-A')
+  git(directory.root, 'commit', '-q', '-m', 'title only')
+  execFileSync('sh', ['-c', 'printf "x\\n" > a.txt'], { cwd: directory.root })
+  git(directory.root, 'add', '-A')
+  git(directory.root, 'commit', '-q', '-m', 'layered\n\nfirst body line\nsecond body line\n\nthird paragraph')
+  server = await startDiorama(directory.root)
+  await page.goto(server.url)
+  await openHistory(page)
+
+  // The newest commit has a body: one title line, the rest behind the toggle.
+  const rows = page.getByTestId('git-history-commit')
+  await rows.first().click()
+  await expect(page.getByTestId('git-commit-message')).toHaveText('layered')
+  await page.getByTestId('git-commit-message-toggle').click()
+  const body = page.getByTestId('git-commit-message-body')
+  await expect(body).toContainText('first body line')
+  await expect(body).toContainText('third paragraph')
+
+  // A title-only commit has nothing to fold: no toggle, just the title.
+  await rows.nth(1).click()
+  await expect(page.getByTestId('git-commit-message')).toHaveText('title only')
+  await expect(page.getByTestId('git-commit-message-toggle')).toHaveCount(0)
+  await expect(page.getByTestId('git-commit-message-body')).toHaveCount(0)
 })

@@ -192,12 +192,12 @@ pnpm --filter diorama-web exec playwright test   # 53 passed
 pnpm build                                       # clean
 pnpm test:unit                                   # 128 passed
 pnpm -r --no-sort run typecheck                  # clean
-pnpm --filter diorama-web exec playwright test   # 68 passed（17 个 spec 文件）
+pnpm --filter diorama-web exec playwright test   # 69 passed（17 个 spec 文件）
 ```
 
 | 用例文件 | 覆盖 |
 |---|---|
-| `m4-history`（6） | 提交列表（新的在前、作者）、点提交出详情与文件 diff、`#history=<sha>` 写 URL、刷新回到同一提交与同一视图、改动/内容两种显示、`mod+alt+1/2/3` 切换视图、非仓库时命令不可执行、变更视图由 watch 即时更新 |
+| `m4-history`（7） | 提交列表（新的在前、作者）、点提交出详情与文件 diff、`#history=<sha>` 写 URL、刷新回到同一提交与同一视图、改动/内容两种显示、`mod+alt+1/2/3` 切换视图、非仓库时命令不可执行、变更视图由 watch 即时更新；提交说明只显示标题行，正文可展开/收起，纯标题的提交没有展开按钮 |
 | `m4-images`（4） | png 解码（`naturalWidth`）、svg 经 `<img>`（页面里没有内联 `<svg>`）、超 32 MiB 显示「文件过大」且**未发生** `readBytes`、未知二进制仍回退 plaintext |
 | `m4-pdf`（3） | viewer 的帧拿到完整 blob（`%PDF-` 头 + 与链接同源）、超限不请求、去掉 `pdf` 插件后 plaintext 描述 |
 | `m4-git`（改） | 侧栏视图数 2 → 3 |

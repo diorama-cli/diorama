@@ -832,14 +832,11 @@ function CommitSeat({ commit }: CommitSeatProps) {
     <div className="diorama-diff" data-testid="git-commit" data-sha={detail.sha}>
       <div className="diorama-diff__header">
         <code className="diorama-git-commit__sha">{detail.shortSha}</code>
-        <span className="diorama-diff__path">{detail.subject || detail.sha}</span>
+        <CommitMessage detail={detail} />
       </div>
       <div className="diorama-git-commit__meta">
         {detail.author} · {formatWhen(detail.at)}
       </div>
-      <pre className="diorama-git-commit__message" data-testid="git-commit-message">
-        {detail.message.replace(/\n+$/, '')}
-      </pre>
       {detail.truncated === true && (
         <div className="diorama-diff__notes" role="status">
           改动的文件过多，只列出了一部分
@@ -888,6 +885,62 @@ function CommitSeat({ commit }: CommitSeatProps) {
       </div>
     </div>
   )
+}
+
+/**
+ * The commit message: the subject on one line, the rest (git's body, after the
+ * first blank line) folded away until asked for. A long message must not push
+ * the file list off the screen — the list is what the seat is for.
+ */
+function CommitMessage({ detail }: { detail: CommitDetail }) {
+  const body = messageBody(detail.message)
+  const [open, setOpen] = useState(false)
+  const title = detail.subject || detail.sha
+  if (body === '') {
+    return (
+      <span className="diorama-diff__path diorama-git-commit__subject" data-testid="git-commit-message">
+        {title}
+      </span>
+    )
+  }
+  return (
+    <div className="diorama-git-commit__message-block">
+      <button
+        type="button"
+        className="diorama-git-commit__subject-toggle"
+        aria-expanded={open}
+        title={open ? '收起提交说明' : '展开完整提交说明'}
+        data-testid="git-commit-message-toggle"
+        onClick={() => setOpen(value => !value)}
+      >
+        <span aria-hidden="true">{open ? '▾' : '▸'}</span>
+        <span className="diorama-git-commit__subject" data-testid="git-commit-message">
+          {title}
+        </span>
+      </button>
+      {open && (
+        <pre className="diorama-git-commit__message" data-testid="git-commit-message-body">
+          {body}
+        </pre>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The part of a commit message after its subject: everything following a
+ * blank line. A message whose lines are all connected has no body — git would
+ * call that whole text the subject, and the title line already shows it.
+ */
+export function messageBody(message: string): string {
+  const lines = message.replace(/\n+$/, '').split('\n')
+  const blank = lines.findIndex(line => line.trim() === '')
+  if (blank === -1) return ''
+  return lines
+    .slice(blank + 1)
+    .join('\n')
+    .replace(/^\n+/, '')
+    .replace(/\n+$/, '')
 }
 
 /** One file's change in the commit (`show()`), as diff lines. */

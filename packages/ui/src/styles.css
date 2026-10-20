@@ -807,9 +807,42 @@ code {
   font-size: 12px;
 }
 
+.diorama-git-commit__message-block {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  /* Flex items do not shrink below their content by default: without this a
+     long subject widens the header instead of ellipsising. */
+  min-width: 0;
+}
+
+/* The subject line: one line, always; the body is opt-in (the toggle). */
+.diorama-git-commit__subject-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.diorama-git-commit__subject {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The folded body: scrolls on its own so the file list keeps its height. */
 .diorama-git-commit__message {
-  margin: 8px 12px;
+  margin: 6px 12px 8px;
   padding: 8px 10px;
+  max-height: 30vh;
+  overflow: auto;
   border-radius: 6px;
   background: var(--dio-surface-alt, #f6f7f9);
   font-family: var(--dio-mono);
