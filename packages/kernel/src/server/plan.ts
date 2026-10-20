@@ -40,6 +40,7 @@ export const BUILTIN_PLUGIN_IDS = [
   'markdown',
   'code',
   'image',
+  'pdf',
   'palette',
   'git-changes',
 ] as const

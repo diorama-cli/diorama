@@ -860,3 +860,34 @@ code {
   border-color: var(--dio-accent);
   color: var(--dio-accent);
 }
+
+/* PDF renderer (contract.md §5.1, v0.6): the browser's viewer in a frame */
+.diorama-pdf {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.diorama-pdf__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--dio-border);
+  color: var(--dio-muted);
+  font-size: 12px;
+}
+
+.diorama-pdf__open {
+  color: var(--dio-accent);
+  text-decoration: none;
+}
+
+.diorama-pdf__frame {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+}

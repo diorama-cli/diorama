@@ -35,6 +35,7 @@ const halves: Record<BuiltinPluginId | KernelServiceId, HalfLoader> = {
   'markdown': () => import('diorama-plugin-markdown'),
   'code': () => import('diorama-plugin-code'),
   'image': () => import('diorama-plugin-image'),
+  'pdf': () => import('diorama-plugin-pdf'),
   'palette': () => import('diorama-plugin-palette'),
   // The changes view and the diff reader. Not `git`: that id is the kernel's
   // server service (contract.md §3.2); a client piece is its own plugin.
