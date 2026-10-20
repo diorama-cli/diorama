@@ -1,5 +1,15 @@
 #!/usr/bin/env node
-import { main } from '../lib/main.js'
+// The released entry (`npm i -g @diorama-cli/diorama` → `diorama`).
+//
+// The version is read from the package's own manifest rather than hard-coded:
+// `diorama --version` and the gateway's `GatewayInfo` must agree with what npm
+// installed, and a release never edits this file.
+import { readFileSync } from 'node:fs'
+
+const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+process.env.DIORAMA_VERSION = manifest.version
+
+const { main } = await import('../lib/main.js')
 
 const code = await main(process.argv.slice(2))
 if (code !== undefined) process.exitCode = code

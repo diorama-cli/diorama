@@ -279,6 +279,10 @@ importers:
       cordis:
         specifier: 4.0.0-rc.11
         version: 4.0.0-rc.11
+    devDependencies:
+      '@types/node':
+        specifier: ^26.6.5
+        version: 26.6.5
       diorama-kernel:
         specifier: workspace:*
         version: link:../kernel
@@ -327,10 +331,6 @@ importers:
       diorama-plugin-tabs:
         specifier: workspace:*
         version: link:../plugins/tabs
-    devDependencies:
-      '@types/node':
-        specifier: ^26.6.5
-        version: 26.6.5
       tsdown:
         specifier: ^0.23.1
         version: 0.23.1(typescript@5.9.3)

@@ -59,18 +59,50 @@ export function kernelPackageDir(): string {
 const PLUGIN_PATH_SEGMENTS = ['..', 'plugins'] as const
 
 /**
+ * Where a built-in plugin's `package.json` can live, in the order tried.
+ *
+ * Three layouts have to work with one lookup:
+ *
+ * - **a checkout** — `packages/plugins/<id>/`, i.e. `<kernel>/../plugins/<id>`;
+ * - **an install of the separate packages** — the plugin is a sibling package
+ *   of the kernel (`<…>/node_modules/diorama-plugin-<id>/`), which is where
+ *   npm/pnpm put it;
+ * - **an install of the single published package** — the CLI carries every
+ *   built-in plugin's manifest and client half in its own `plugins/<id>/`
+ *   (the plugin *code* is inlined into `lib/main.js`, but the manifest is
+ *   still read for `id` / `contract` / `client.entry`).
+ *
+ * In a bundled build `import.meta.url` points at the CLI's `lib/main.js`, so
+ * `kernelPackageDir()` is the CLI package root and the last candidate lands on
+ * `<cli>/plugins/<id>`. In a checkout that directory does not exist and the
+ * first candidate answers first — a repository never resolves a stale copy.
+ */
+function builtinCandidates(id: string): string[] {
+  const kernelDir = kernelPackageDir()
+  const checkoutDir = PLUGIN_PATH_SEGMENTS.reduce((dir, segment) => resolve(dir, segment), kernelDir)
+  return [
+    // Checkout: the plugin directory is named by its short id.
+    resolve(checkoutDir, id, 'package.json'),
+    // Installed separately: a sibling package under the same `node_modules`.
+    resolve(kernelDir, '..', `${PLUGIN_PREFIX}${id}`, 'package.json'),
+    // Single published package: manifests carried inside the CLI package.
+    resolve(kernelDir, 'plugins', id, 'package.json'),
+  ]
+}
+
+/**
  * Resolve the package.json of a built-in plugin by id.
  * @throws PluginLoadError when the package is not part of this build.
  */
 export function builtinPackageJson(id: string): string {
-  const packageDir = PLUGIN_PATH_SEGMENTS.reduce((dir, segment) => resolve(dir, segment), kernelPackageDir())
-  // Plugin directories are named by their short id (`packages/plugins/<id>`);
-  // the package name (`diorama-plugin-<id>`) is read from their manifest.
-  const path = resolve(packageDir, id, 'package.json')
-  if (!existsSync(path)) {
-    throw new PluginLoadError(id, `built-in package ${PLUGIN_PREFIX}${id} is missing (expected at ${path})`)
+  const candidates = builtinCandidates(id)
+  for (const path of candidates) {
+    if (existsSync(path)) return path
   }
-  return path
+  throw new PluginLoadError(
+    id,
+    `built-in package ${PLUGIN_PREFIX}${id} is missing (looked in ${candidates.join(', ')})`,
+  )
 }
 
 export function isBuiltinPluginId(id: string): id is BuiltinPluginId {

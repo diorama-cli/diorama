@@ -38,6 +38,7 @@ export function controlUsage(name = 'diorama'): string {
   ${name} restart <mount|dir>    unmount and mount again
   ${name} gateway start|stop|status|restart
   ${name} gateway run            run the gateway in the foreground
+  ${name} --version              print the version (from this package's manifest)
 
 Options for "${name} [dir]":
   --foreground                   run the gateway in this process (no daemon)
@@ -69,6 +70,14 @@ export async function main(argv: readonly string[], env: NodeJS.ProcessEnv = pro
 
   if (command === '--help' || command === '-h') {
     io.out(usage(cliName(io)))
+    return 0
+  }
+
+  // `--version` / `-v`: the number the package was published with. The bin
+  // entries put it in `DIORAMA_VERSION` (read from `package.json`), so this
+  // never drifts from what npm installed (docs/m8/spec.md §1).
+  if (command === '--version' || command === '-v') {
+    io.out(env.DIORAMA_VERSION ?? '0.0.0-dev')
     return 0
   }
 

@@ -80,7 +80,7 @@ export async function serveGateway(options: GatewayServeOptions): Promise<Stoppa
   const trees = new Map<string, MountTree>()
   const info: GatewayInfo = {
     pid: process.pid,
-    version: process.env.DIORAMA_VERSION ?? '0.0.1-m3',
+    version: process.env.DIORAMA_VERSION ?? '0.0.0-dev',
     contract: CONTRACT_VERSION,
     protocol: CONTROL_PROTOCOL,
     startedAt: Date.now(),

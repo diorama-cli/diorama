@@ -1,6 +1,6 @@
 {
   "name": "diorama-plugin-git",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "private": true,
   "description": "Diorama piece: git changes view and diff renderer",
   "type": "module",
@@ -22,7 +22,7 @@
     "src"
   ],
   "diorama": {
-    "contract": ">=0.8 <0.9",
+    "contract": ">=0.0.1 <0.1.0",
     "id": "git-changes",
     "client": {
       "entry": "./lib/client.cjs"

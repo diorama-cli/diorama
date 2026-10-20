@@ -7,3 +7,10 @@ lib/
 .diorama-verify-b/
 test-results/
 playwright-report/
+
+# Assembled for `npm pack` only (scripts/assemble-package.mjs): the published
+# tarball carries the plugin manifests/client halves and the page shell, but in
+# a checkout they are build outputs.
+packages/cli/plugins/
+packages/cli/web/
+packages/cli/LICENSE

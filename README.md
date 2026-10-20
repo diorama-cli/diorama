@@ -28,8 +28,9 @@
 | Slogan | A live diorama of your files. / 把你的目录，摆成一个场景。 |
 
 ```bash
-# 发布版：从 registry 安装，命令名是 diorama
-npm install -g diorama
+# 发布版：从 npm 安装，命令名是 diorama
+npm install -g @diorama-cli/diorama
+diorama .                                   # 目录 → 浏览器里的场景
 
 # 开发版（本仓库）：link 进来后命令名是 diorama-beta，永不覆盖已安装的 diorama
 pnpm install && ./link.sh
@@ -46,6 +47,10 @@ registry 安装。
 两个版本默认**互不干扰**：beta 的 gateway 用 `$DIORAMA_HOME/diorama-beta.sock`、
 `gateway-beta.pid`、`gateway-beta.log`；发布版用 `diorama.sock`、`gateway.pid`、`gateway.log`。
 `diorama-beta ls` 看不到发布版的挂载，反之亦然（契约 §7.1/§7.4）。
+
+发布版是**一个包**：内核、UI 原语与 15 个内置插件都内联在里面，装完即可用，不需要再装插件
+（见 [docs/m8/spec.md](docs/m8/spec.md)）。`diorama --version` 与 gateway 报的版本取自包自己的
+`package.json`。
 
 也可以不 link：`node packages/cli/bin/diorama-beta <dir>`，或 `source ./link.sh` 只给当前
 shell 加 PATH。

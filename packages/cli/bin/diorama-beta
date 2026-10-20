@@ -7,7 +7,7 @@
 // two gateways can therefore run side by side without taking each other's
 // socket, and `diorama-beta ls` never shows an installed build's mounts.
 process.env.DIORAMA_CHANNEL = 'beta'
-process.env.DIORAMA_VERSION = '0.0.1-m3-beta'
+process.env.DIORAMA_VERSION = '0.0.1-beta'
 
 const { main } = await import('../lib/main.js')
 

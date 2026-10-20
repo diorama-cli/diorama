@@ -1,49 +1,70 @@
 {
-  "name": "diorama-cli",
-  "version": "0.0.1-m3-beta",
-  "private": true,
-  "description": "diorama CLI: serve one directory in the foreground",
+  "name": "@diorama-cli/diorama",
+  "version": "0.0.1",
+  "private": false,
+  "description": "A live diorama of your files: serve any directory as a browsable scene (tree, tabs, Markdown, code, git, search).",
   "type": "module",
   "bin": {
-    "diorama": "./bin/diorama",
-    "diorama-beta": "./bin/diorama-beta"
+    "diorama": "./bin/diorama"
   },
   "files": [
     "bin",
     "lib",
-    "web"
+    "plugins",
+    "web",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit && tsdown",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "cordis": "4.0.0-rc.11",
-    "diorama-kernel": "workspace:*",
-    "diorama-plugin-file-tree": "workspace:*",
-    "diorama-plugin-layout": "workspace:*",
-    "diorama-plugin-plaintext": "workspace:*",
-    "diorama-plugin-renderer-registry": "workspace:*",
-    "diorama-plugin-slots": "workspace:*",
-    "diorama-plugin-tabs": "workspace:*",
-    "diorama-plugin-markdown": "workspace:*",
-    "diorama-plugin-code": "workspace:*",
-    "diorama-plugin-image": "workspace:*",
-    "diorama-plugin-pdf": "workspace:*",
-    "diorama-plugin-html": "workspace:*",
-    "diorama-plugin-palette": "workspace:*",
-    "diorama-plugin-help": "workspace:*",
-    "diorama-plugin-git": "workspace:*",
-    "diorama-plugin-search-view": "workspace:*"
+    "cordis": "4.0.0-rc.11"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
+    "diorama-kernel": "workspace:*",
+    "diorama-plugin-code": "workspace:*",
     "diorama-plugin-file-tree": "workspace:*",
+    "diorama-plugin-git": "workspace:*",
+    "diorama-plugin-help": "workspace:*",
+    "diorama-plugin-html": "workspace:*",
+    "diorama-plugin-image": "workspace:*",
     "diorama-plugin-layout": "workspace:*",
+    "diorama-plugin-markdown": "workspace:*",
+    "diorama-plugin-palette": "workspace:*",
+    "diorama-plugin-pdf": "workspace:*",
     "diorama-plugin-plaintext": "workspace:*",
+    "diorama-plugin-renderer-registry": "workspace:*",
+    "diorama-plugin-search-view": "workspace:*",
     "diorama-plugin-slots": "workspace:*",
     "diorama-plugin-tabs": "workspace:*",
     "tsdown": "^0.23.1",
     "typescript": "^5.9.3"
-  }
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diorama-cli/diorama.git"
+  },
+  "homepage": "https://github.com/diorama-cli/diorama#readme",
+  "bugs": {
+    "url": "https://github.com/diorama-cli/diorama/issues"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "keywords": [
+    "diorama",
+    "file-viewer",
+    "markdown",
+    "git",
+    "static-server",
+    "cli"
+  ]
 }
