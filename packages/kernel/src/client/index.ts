@@ -1,7 +1,9 @@
 // The client tree's context face (kernel services) is declared once here.
 import type {} from './context.ts'
 
+export { buildChangeTree, compareChangeNodes, directoryPaths } from '../shared/changes.ts'
 export type {
+  ChangeTreeNode,
   DiffEntry,
   DiffResult,
   DiffScope,

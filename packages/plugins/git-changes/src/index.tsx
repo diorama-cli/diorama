@@ -19,8 +19,8 @@
  */
 import type { Context } from 'cordis'
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactElement } from 'react'
-import type { DiffResult, FileInfo, GitStatusEntry } from 'diorama-kernel'
-import { hasGit, type GitClient, type TabsService } from 'diorama-kernel/client'
+import type { ChangeTreeNode, DiffResult, FileInfo, GitStatusEntry } from 'diorama-kernel'
+import { buildChangeTree, hasGit, type GitClient, type TabsService } from 'diorama-kernel/client'
 import { provideEntry, useKernel } from 'diorama-ui'
 import type {} from 'diorama-plugin-slots'
 import type { TabDiffProps } from 'diorama-plugin-slots'
@@ -104,14 +104,16 @@ function useChanges(git: GitClient): {
 function ChangeRow({
   entry,
   selected,
+  indent,
   onOpen,
 }: {
   entry: GitStatusEntry
   selected: boolean
+  /** Left padding from the tree depth (the row is drawn inside the tree). */
+  indent?: { paddingLeft: number }
   onOpen(entry: GitStatusEntry): void
 }) {
   const name = entry.file.slice(entry.file.lastIndexOf('/') + 1)
-  const directory = entry.file.slice(0, Math.max(0, entry.file.lastIndexOf('/')))
   return (
     <button
       type="button"
@@ -119,13 +121,14 @@ function ChangeRow({
       data-path={entry.file}
       data-kind={entry.kind}
       title={entry.oldPath === undefined ? entry.file : `${entry.oldPath} → ${entry.file}`}
+      style={indent}
       onClick={() => onOpen(entry)}
     >
       <span className={`diorama-changes__badge diorama-changes__badge--${TONE[entry.kind]}`} aria-hidden="true">
         {BADGE[entry.kind]}
       </span>
       <span className="diorama-changes__name">{name}</span>
-      {directory === '' ? null : <span className="diorama-changes__dir">{directory}</span>}
+      {entry.oldPath === undefined ? null : <span className="diorama-changes__dir">← {entry.oldPath}</span>}
     </button>
   )
 }
@@ -192,10 +195,107 @@ function ChangesView({ active }: { active: boolean }) {
           刷新
         </button>
       </div>
-      {changes.entries.map(entry => (
-        <ChangeRow key={`${entry.file}:${entry.status}`} entry={entry} selected={entry.file === activeTab} onOpen={open} />
+      <ChangeTree entries={changes.entries} selected={activeTab} onOpen={open} />
+    </div>
+  )
+}
+
+/**
+ * The changed files as a tree, the way an editor shows them (contract.md §3.2,
+ * §5.2): directories fold, a single-child chain becomes one row, and the
+ * expansion is this view's own state — the file tree's expansion is separate.
+ */
+function ChangeTree({
+  entries,
+  selected,
+  onOpen,
+}: {
+  entries: readonly GitStatusEntry[]
+  selected: string | undefined
+  onOpen(entry: GitStatusEntry): void
+}) {
+  const tree = useMemo(() => buildChangeTree(entries), [entries])
+  // A new set of changes starts fully expanded: seeing every change matters
+  // more than remembering a collapse from an earlier session.
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
+  const toggle = (path: string): void => {
+    setCollapsed(current => {
+      const next = new Set(current)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
+  }
+  return (
+    <div className="diorama-changes__tree">
+      {(tree.children ?? []).map(child => (
+        <ChangeNode key={child.path} node={child} depth={0} collapsed={collapsed} onToggle={toggle} selected={selected} onOpen={onOpen} />
       ))}
     </div>
+  )
+}
+
+/** One tree row: a directory (caret, count) or a file (status badge). */
+function ChangeNode({
+  node,
+  depth,
+  collapsed,
+  onToggle,
+  selected,
+  onOpen,
+}: {
+  node: ChangeTreeNode
+  depth: number
+  collapsed: ReadonlySet<string>
+  onToggle(path: string): void
+  selected: string | undefined
+  onOpen(entry: GitStatusEntry): void
+}) {
+  const indent = { paddingLeft: 8 + depth * 14 }
+  if (node.kind === 'file') {
+    const entry = node.entry
+    if (entry === undefined) return null
+    return (
+      <ChangeRow
+        entry={entry}
+        selected={entry.file === selected}
+        indent={indent}
+        onOpen={onOpen}
+      />
+    )
+  }
+  const closed = collapsed.has(node.path)
+  return (
+    <>
+      <button
+        type="button"
+        className="diorama-tree__row diorama-changes__dir"
+        style={indent}
+        data-path={node.path}
+        data-kind="dir"
+        aria-expanded={!closed}
+        title={node.path}
+        onClick={() => onToggle(node.path)}
+      >
+        <span className="diorama-tree__caret" aria-hidden="true">
+          {closed ? '▸' : '▾'}
+        </span>
+        <span className="diorama-tree__name">{node.name}/</span>
+        <span className="diorama-changes__count">{node.count}</span>
+      </button>
+      {!closed &&
+        (node.children ?? []).map(child => (
+          <ChangeNode
+            key={child.path}
+            node={child}
+            depth={depth + 1}
+            collapsed={collapsed}
+            onToggle={onToggle}
+            selected={selected}
+            onOpen={onOpen}
+          />
+        ))}
+    </>
   )
 }
 

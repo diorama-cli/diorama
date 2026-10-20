@@ -724,3 +724,21 @@ code {
 .diorama-diff__line--meta {
   color: var(--dio-muted);
 }
+
+/* Changes view: a tree of changed files (contract.md §3.2, §5.2) */
+.diorama-changes__tree {
+  padding-bottom: 6px;
+}
+
+/* A directory row: same shape as a tree row, with its change count on the right. */
+.diorama-changes__dir {
+  color: var(--dio-text);
+}
+
+.diorama-changes__count {
+  margin-left: auto;
+  padding-left: 8px;
+  color: var(--dio-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}

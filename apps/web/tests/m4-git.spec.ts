@@ -158,3 +158,49 @@ test('git: content and diff of one file are two tabs; the hash restores the diff
     repo.dispose()
   }
 })
+
+test('git: the changes view is a tree — directories fold, chains become one row', async ({ page }) => {
+  const repo = fixture()
+  // A nested change plus a deep single-child chain (which folds to one row).
+  mkdirSync(join(repo.root, 'src', 'lib'), { recursive: true })
+  mkdirSync(join(repo.root, 'docs'), { recursive: true })
+  writeFileSync(join(repo.root, 'src/app.js'), 'const a = 1\n')
+  writeFileSync(join(repo.root, 'src/lib/util.ts'), 'export const u = 1\n')
+  writeFileSync(join(repo.root, 'docs/a.md'), '# a\n')
+  git(repo.root, 'init', '-q', '-b', 'main')
+  git(repo.root, 'add', '-A')
+  git(repo.root, 'commit', '-q', '-m', 'first')
+  writeFileSync(join(repo.root, 'src/app.js'), 'const a = 2\n')
+  writeFileSync(join(repo.root, 'src/lib/util.ts'), 'export const u = 2\n')
+  writeFileSync(join(repo.root, 'docs/a.md'), '# a2\n')
+  writeFileSync(join(repo.root, 'fresh.txt'), 'new\n')
+  const server = await startDiorama(repo.root)
+  try {
+    await page.goto(server.url)
+    await page.getByTestId('sidebar-switcher').locator('[data-view="changes"]').click()
+    const changes = page.getByTestId('git-changes')
+    // Directories first (with their change counts), then root files.
+    await expect(changes.locator('[data-path="src"]')).toHaveAttribute('data-kind', 'dir')
+    await expect(changes.locator('[data-path="src"]')).toContainText('src/')
+    await expect(changes.locator('[data-path="src"]')).toContainText('2')
+    // Children are indented under their directory.
+    const rootPad = await changes.locator('[data-path="docs"]').evaluate(el => parseInt((el as HTMLElement).style.paddingLeft))
+    const filePad = await changes.locator('[data-path="docs/a.md"]').evaluate(el => parseInt((el as HTMLElement).style.paddingLeft))
+    expect(filePad).toBeGreaterThan(rootPad)
+
+    // Collapsing a directory hides its subtree; expanding brings it back.
+    await changes.locator('[data-path="src"]').click()
+    await expect(changes.locator('[data-path="src/app.js"]')).toHaveCount(0)
+    await expect(changes.locator('[data-path="src/lib/util.ts"]')).toHaveCount(0)
+    await changes.locator('[data-path="src"]').click()
+    await expect(changes.locator('[data-path="src/lib/util.ts"]')).toBeVisible()
+
+    // A file in the tree opens its diff, as the flat list did.
+    await changes.locator('[data-path="src/lib/util.ts"]').click()
+    await expect(page.getByTestId('tabs-content').filter({ visible: true }).getByTestId('git-diff-text')).toContainText('+export const u = 2')
+    await expect(page).toHaveURL(/\/~\/src\/lib\/util\.ts#diff$/)
+  } finally {
+    await server.stop()
+    repo.dispose()
+  }
+})

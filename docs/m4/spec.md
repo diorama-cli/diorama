@@ -58,6 +58,7 @@ pnpm --filter diorama-web exec playwright test
 | 路由 | History API；`/~/` 记浏览位置，`#key=value` 是插件状态；服务端对 `/~/` 回退壳 | 两条互不相交的面：路径可校验、可分享；状态归插件 |
 | 路由 ↔ tabs | 路由订阅 tabs：**活动 content tab** 的变化 `pushState`；diff 等其它视图不动路径 | 一个 URL 只表达“浏览哪个文件” |
 | hash ↔ 插件 | 插件在 `apply` 里 `ctx.router.state(key)` 读写，自己负责刷新后恢复 | 内核不认识 `diff`，以后 history/搜索同理 |
+| 变更视图 = 目录树 | `shared/changes.ts` 把扁平 `status()` 折成树；视图持有展开状态 | 服务保持扁平（一个 path 一行），画法归视图 |
 | tab 键 | `(path, view)` | 同一文件的 content 与 diff 可以并排 |
 
 ## 4. 验收（演示脚本）
@@ -94,7 +95,7 @@ pnpm --filter diorama-web exec playwright test   # 53 passed
 |---|---|
 | `m4-git`（3） | 仓库挂载经 RPC 答 `git.status`；非仓库 `ESERVICE`；侧栏「变更」与「文件」互切、点开文件右侧看到 diff、未跟踪文件标注 |
 | `m4-router`（2） | `/~/` 深链直达且单 tab、刷新保留、树点击写 URL、关闭回到根、`goBack` 沿历史、越界路径不开 |
-| `m4-git`（3） | 同一文件的 content 与 diff 是两个 tab；diff 只进 `#diff=`，刷新两者都恢复 |
+| `m4-git`（4） | 同一文件的 content 与 diff 是两个 tab；diff 只进 `#diff`，刷新两者都恢复；变更视图是目录树（折叠、单一子目录链合并） |
 
 单测：`git` 10（status/diff/log、按文件与子树、改名、子目录挂载、二进制、非仓库、RPC 白名单、porcelain 解析）；
 `router` 6（编解码、非法路径、URL 写回、历史、深链、tabs 未就绪时排队）。

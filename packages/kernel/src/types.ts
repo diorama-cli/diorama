@@ -9,6 +9,7 @@
  * that provides them; a plugin gets those by importing that module.
  */
 export type {
+  ChangeTreeNode,
   DiffEntry,
   DiffResult,
   DiffScope,

@@ -1,5 +1,7 @@
 /** Server-side entry of the kernel (`diorama-kernel/server`). */
+export { buildChangeTree, compareChangeNodes, directoryPaths, type ChangeTreeOptions } from '../shared/changes.ts'
 export type {
+  ChangeTreeNode,
   DiffEntry,
   DiffResult,
   DiffScope,

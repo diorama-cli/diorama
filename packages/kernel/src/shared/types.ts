@@ -121,3 +121,19 @@ export interface GitLogEntry {
   /** ms since epoch. */
   at: number
 }
+
+/**
+ * One node of a changed-file tree (contract.md §3.2's flat `status()` rows,
+ * folded by directory for the changes view). A directory's `path` is its
+ * mount-relative path; `name` is its last segment.
+ */
+export interface ChangeTreeNode {
+  kind: 'dir' | 'file'
+  path: RelPath
+  name: string
+  /** Files at or below this node (a file node counts as 1). */
+  count: number
+  /** Root node: absent. The entry that changed, for a file node. */
+  entry?: GitStatusEntry
+  children?: ChangeTreeNode[]
+}
