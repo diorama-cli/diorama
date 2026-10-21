@@ -49,8 +49,12 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          # Trusted publishing needs npm >= 11.5.1, which ships with Node 22.14+.
-          node-version: 22.14.0
+          # Trusted publishing needs npm >= 11.5.1 (Node 22.14+). This also
+          # pins the version CI *builds* with: tsdown picks its config loader
+          # from `process.features.typescript`, which only exists on Node
+          # >= 22.18 — older Nodes fall back to the `unrun` peer, which is why
+          # `unrun` is a real devDependency (see docs/release.md §7).
+          node-version: 22.20.0
           cache: pnpm
           # No `registry-url`: that writes an `.npmrc` with a token placeholder,
           # which would make npm try token auth instead of OIDC.

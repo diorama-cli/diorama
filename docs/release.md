@@ -137,6 +137,8 @@ cd packages/cli && npm publish --access public
 | 升级后 `diorama-beta --version` 报旧号 | `bin/diorama-beta` 曾硬编码 `'0.0.1-beta'` | 已改成从 `package.json` 读 |
 | CI 报 `need auth` | 配了 `registry-url`，它会写 token 占位符，让 npm 走 token 认证 | `setup-node` 不写 `registry-url` |
 | CI 里 `verify --tag` 说 tag 不指向 HEAD | `checkout` 默认 `fetch-depth: 1` | `fetch-depth: 0` |
+| **推了 tag，Actions 毫无反应** | 引入 workflow 的那次 push **不会**触发它自己：GitHub 要在 push 之后才注册 `.github/workflows/*.yml` | 首次推 workflow 之后，再打一次 tag（`git tag -d v0.0.3 && git push origin :v0.0.3` 后重推，或用 `workflow_dispatch` 跑一次确认） |
+| **CI 里 `pnpm build` 报 `Failed to import module "unrun"`，本地却正常** | tsdown 按 `process.features.typescript` 选配置加载器：Node ≥ 22.18 用内置的 `native`，更早的版本回退到 `unrun`（一个 **可选** peerDependency，`pnpm install` 不会装它）。本地 Node 22.20 走了 native，CI 的 22.14 走了 unrun | `unrun` 写进根 `devDependencies`；CI 的 Node 也钉到 `22.20.0`，两边走同一条路 |
 | 发了同版本号两次 | npm 不允许覆盖已发布版本 | `concurrency` 按 ref 串行；重发只能升号 |
 | 文档里残留旧版本号 | 正则锚定错了（行尾、`> ` 前缀、全角标点） | `packages/cli/test/release.test.ts` 用真实文件断言"一处都不许剩" |
 

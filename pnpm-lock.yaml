@@ -202,10 +202,13 @@ importers:
         version: 1.2.14
       tsdown:
         specifier: ^0.23.1
-        version: 0.23.1(typescript@5.9.3)
+        version: 0.23.1(typescript@5.9.3)(unrun@0.3.1)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
+      unrun:
+        specifier: ^0.3.1
+        version: 0.3.1
       ws:
         specifier: ^8.22.0
         version: 8.22.0
@@ -336,7 +339,7 @@ importers:
         version: link:../plugins/theme
       tsdown:
         specifier: ^0.23.1
-        version: 0.23.1(typescript@5.9.3)
+        version: 0.23.1(typescript@5.9.3)(unrun@0.3.1)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -361,7 +364,7 @@ importers:
         version: 19.3.1
       tsdown:
         specifier: ^0.23.1
-        version: 0.23.1(typescript@5.9.3)
+        version: 0.23.1(typescript@5.9.3)(unrun@0.3.1)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -438,7 +441,7 @@ importers:
         version: link:../../ui
       tsdown:
         specifier: ^0.23.1
-        version: 0.23.1(typescript@5.9.3)
+        version: 0.23.1(typescript@5.9.3)(unrun@0.3.1)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -641,7 +644,7 @@ importers:
         version: link:../../ui
       tsdown:
         specifier: ^0.23.1
-        version: 0.23.1(typescript@5.9.3)
+        version: 0.23.1(typescript@5.9.3)(unrun@0.3.1)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -733,7 +736,7 @@ importers:
         version: link:../../ui
       tsdown:
         specifier: ^0.23.1
-        version: 0.23.1(typescript@5.9.3)
+        version: 0.23.1(typescript@5.9.3)(unrun@0.3.1)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -822,7 +825,7 @@ importers:
         version: link:../../ui
       tsdown:
         specifier: ^0.23.1
-        version: 0.23.1(typescript@5.9.3)
+        version: 0.23.1(typescript@5.9.3)(unrun@0.3.1)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -868,7 +871,7 @@ importers:
         version: link:../../ui
       tsdown:
         specifier: ^0.23.1
-        version: 0.23.1(typescript@5.9.3)
+        version: 0.23.1(typescript@5.9.3)(unrun@0.3.1)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -914,7 +917,7 @@ importers:
         version: link:../../ui
       tsdown:
         specifier: ^0.23.1
-        version: 0.23.1(typescript@5.9.3)
+        version: 0.23.1(typescript@5.9.3)(unrun@0.3.1)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -942,7 +945,7 @@ importers:
         version: 19.3.1
       tsdown:
         specifier: ^0.23.1
-        version: 0.23.1(typescript@5.9.3)
+        version: 0.23.1(typescript@5.9.3)(unrun@0.3.1)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -976,7 +979,7 @@ importers:
         version: link:../../ui
       tsdown:
         specifier: ^0.23.1
-        version: 0.23.1(typescript@5.9.3)
+        version: 0.23.1(typescript@5.9.3)(unrun@0.3.1)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -1047,7 +1050,7 @@ importers:
         version: 19.3.1(react@19.3.1)
       tsdown:
         specifier: ^0.23.1
-        version: 0.23.1(typescript@5.9.3)
+        version: 0.23.1(typescript@5.9.3)(unrun@0.3.1)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -1580,6 +1583,16 @@ packages:
   undici-types@8.9.0:
     resolution: {integrity: sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg==}
 
+  unrun@0.3.1:
+    resolution: {integrity: sha512-onIck/oNnCaytwths1ZVp1LK2Gq2hPoyFhiHebObuUXqR3S0uHuLLaBK8K6mRRgV7Ptip8AnNvaUsgzwWwBZuA==}
+    engines: {node: ^22.13.0 || >=24.0.0}
+    hasBin: true
+    peerDependencies:
+      synckit: ^0.11.11
+    peerDependenciesMeta:
+      synckit:
+        optional: true
+
   verkit@0.5.0:
     resolution: {integrity: sha512-u4J1hr6Y+C/hit34GwL3eIcUf3wngT8TlYUjK7tk0jxydKLAq3sYvifjdTDA6U3KCKRcQCQDGf/srjxfZF3l7g==}
     engines: {node: '>=18.12.0'}
@@ -1967,7 +1980,7 @@ snapshots:
 
   tree-kill@1.2.2: {}
 
-  tsdown@0.23.1(typescript@5.9.3):
+  tsdown@0.23.1(typescript@5.9.3)(unrun@0.3.1):
     dependencies:
       cac: 7.1.0
       defu: 6.1.7
@@ -1985,6 +1998,7 @@ snapshots:
       verkit: 0.5.0
     optionalDependencies:
       typescript: 5.9.3
+      unrun: 0.3.1
     transitivePeerDependencies:
       - '@typescript/native-preview'
       - '@volar/typescript'
@@ -2000,6 +2014,10 @@ snapshots:
       quansync: 1.0.0
 
   undici-types@8.9.0: {}
+
+  unrun@0.3.1:
+    dependencies:
+      rolldown: 1.2.14
 
   verkit@0.5.0: {}
 
