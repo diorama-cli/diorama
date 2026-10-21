@@ -43,6 +43,18 @@ function repoFiles() {
   return files
 }
 
+/**
+ * The version the repository is *at*, and the one a release would move to.
+ *
+ * These are derived, never written down: the release script bumps the files
+ * first and only then runs this suite, so a hard-coded `'0.0.2'` makes the
+ * first real release fail its own verification. (It did.)
+ */
+const AT = currentVersion(repoFiles())
+const TO = nextVersion(AT)
+/** Escape a version for a regex, e.g. `0.0.3` -> `0\.0\.3`. */
+const rx = version => version.replace(/\./g, '\\.')
+
 test('versions: parse, reject suffixes, and only move the last number', () => {
   assert.equal(parseVersion('0.0.3'), '0.0.3')
   assert.equal(parseVersion('v0.0.3'), '0.0.3')
@@ -62,12 +74,15 @@ test('contract range: pre-1.0 breaks at the next minor, not the next major', () 
 })
 
 test('current version comes from the published manifest', () => {
-  assert.equal(currentVersion(repoFiles()), '0.0.2')
+  // Whatever it is right now — the point is *where* it is read from.
+  const published = JSON.parse(read('packages/cli/package.json')).version
+  assert.equal(currentVersion(repoFiles()), published)
+  assert.match(currentVersion(repoFiles()), /^\d+\.\d+\.\d+$/)
 })
 
 test('the plan edits every manifest, the contract, and every doc that quotes it', () => {
   const files = repoFiles()
-  const edits = releaseEdits({ files, version: '0.0.3' })
+  const edits = releaseEdits({ files, version: TO })
   const paths = edits.map(edit => edit.path)
 
   for (const required of [
@@ -89,41 +104,42 @@ test('the plan edits every manifest, the contract, and every doc that quotes it'
 
 test('no version is left behind: every planned file is actually at the new number', () => {
   const files = repoFiles()
-  const edits = releaseEdits({ files, version: '0.0.3' })
+  const edits = releaseEdits({ files, version: TO })
   const after = { ...files }
   for (const edit of edits) after[edit.path] = edit.after
 
-  assert.equal(JSON.parse(after['packages/cli/package.json']).version, '0.0.3')
-  assert.equal(JSON.parse(after['packages/plugins/markdown/package.json']).diorama.contract, '>=0.0.3 <0.1.0')
-  assert.match(after['packages/kernel/src/contract.ts'], /CONTRACT_VERSION = '0\.0\.3'/)
-  assert.match(after['packages/kernel/src/contract.ts'], /CONTRACT_RANGE = '>=0\.0\.3 <0\.1\.0'/)
+  assert.equal(JSON.parse(after['packages/cli/package.json']).version, TO)
+  assert.equal(JSON.parse(after['packages/plugins/markdown/package.json']).diorama.contract, contractRange(TO))
+  assert.match(after['packages/kernel/src/contract.ts'], new RegExp(`CONTRACT_VERSION = '${rx(TO)}'`))
+  assert.match(after['packages/kernel/src/contract.ts'], new RegExp(`CONTRACT_RANGE = '${rx(contractRange(TO))}'`))
 
   // Every mention outside the changelog tables of past versions must have
   // moved. This is the check that caught a stale `v0.0.2` in AGENTS.md and a
   // missed range in contract.md's manifest sample.
   for (const path of ['docs/contract.md', 'docs/features.md', 'AGENTS.md', 'README.md']) {
-    const stale = after[path].match(/0\.0\.2/g) ?? []
+    const stale = after[path].match(new RegExp(rx(AT), 'g')) ?? []
     // `docs/contract.md` keeps its history sections (§12–§22), which are a
     // record of past releases; every other file should have none left.
     if (path !== 'docs/contract.md') {
-      assert.equal(stale.length, 0, `${path} still quotes 0.0.2 ${stale.length} time(s)`)
+      assert.equal(stale.length, 0, `${path} still quotes ${AT} ${stale.length} time(s)`)
     }
   }
-  // The two places a reader is told the *current* version must be new.
-  assert.match(after['docs/contract.md'], /^# 插件契约 v0\.0\.3$/m)
-  assert.match(after['docs/contract.md'], /内核契约版本 `0\.0\.3`/)
-  assert.match(after['docs/contract.md'], /所有插件声明 `contract: ">=0\.0\.3 <0\.1\.0"`/)
-  assert.match(after['docs/contract.md'], /插件写窄范围（当前 `>=0\.0\.3 <0\.1\.0`）/)
-  assert.match(after['docs/contract.md'], /当前范围（`0\.0\.3` 起为 `>=0\.0\.3 <0\.1\.0`）/)
+  // The places a reader is told the *current* version must be new.
+  const range = contractRange(TO)
+  assert.match(after['docs/contract.md'], new RegExp(`^# 插件契约 v${rx(TO)}$`, 'm'))
+  assert.match(after['docs/contract.md'], new RegExp('内核契约版本 `' + rx(TO) + '`'))
+  assert.match(after['docs/contract.md'], new RegExp('所有插件声明 `contract: "' + rx(range) + '"`'))
+  assert.match(after['docs/contract.md'], new RegExp('插件写窄范围（当前 `' + rx(range) + '`）'))
+  assert.match(after['docs/contract.md'], new RegExp('当前范围（`' + rx(TO) + '` 起为 `' + rx(range) + '`）'))
   // §1's copy-me manifest sample.
-  assert.match(after['docs/contract.md'], /"contract": ">=0\.0\.3 <0\.1\.0"/)
+  assert.match(after['docs/contract.md'], new RegExp('"contract": "' + rx(range) + '"'))
   // The doc comment above the constants.
-  assert.match(after['packages/kernel/src/contract.ts'], /\(`>=0\.0\.3 <0\.1\.0`\), so a published kernel/)
+  assert.match(after['packages/kernel/src/contract.ts'], new RegExp('\\(' + '`' + rx(range) + '`' + '\\), so a published kernel'))
 })
 
 test('the changelog tables of past versions are not rewritten', () => {
   const files = repoFiles()
-  const edits = releaseEdits({ files, version: '0.0.3' })
+  const edits = releaseEdits({ files, version: TO })
   const contract = edits.find(edit => edit.path === 'docs/contract.md').after
   // §19 is the record of what 0.0.2 contained — a release must not touch it.
   assert.match(contract, /v0\.8 → v0\.9 变更清单（已计入 `0\.0\.2`）/)
@@ -132,10 +148,10 @@ test('the changelog tables of past versions are not rewritten', () => {
 
 test('re-running a release is idempotent', () => {
   const files = repoFiles()
-  const first = releaseEdits({ files, version: '0.0.3' })
+  const first = releaseEdits({ files, version: TO })
   const after = { ...files }
   for (const edit of first) after[edit.path] = edit.after
-  assert.deepEqual(releaseEdits({ files: after, version: '0.0.3' }), [])
+  assert.deepEqual(releaseEdits({ files: after, version: TO }), [])
 })
 
 test('changelog: conventional types become sections, the rest is kept', () => {
