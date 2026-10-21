@@ -6,8 +6,15 @@
 // (contract.md §7.1/§7.4). The released `diorama` keeps the plain names; the
 // two gateways can therefore run side by side without taking each other's
 // socket, and `diorama-beta ls` never shows an installed build's mounts.
+//
+// The version comes from this package's manifest, the way `bin/diorama` reads
+// it: a hard-coded number here goes stale on the next release, and `--version`
+// would then disagree with the checkout it is actually running from.
+import { readFileSync } from 'node:fs'
+
+const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
 process.env.DIORAMA_CHANNEL = 'beta'
-process.env.DIORAMA_VERSION = '0.0.1-beta'
+process.env.DIORAMA_VERSION = `${manifest.version}-beta`
 
 const { main } = await import('../lib/main.js')
 

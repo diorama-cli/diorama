@@ -22,7 +22,7 @@
 
 - **契约**回答"能不能"，**架构**回答"为什么"，**features** 回答"有什么"，**spec** 回答"当时怎么做的"。
 - 不要用里程碑编号（M1/M2/M4）作为**长期引用**。契约与架构里写"未排期""v1 之外"，不写"M4"——排期会变，能力不会。
-- **契约号只在发版时升**（contract.md §6）：日常开发改 `ctx.*` / slot / 加插件都**不动** `CONTRACT_VERSION`，只照常改 `contract.md` 正文与变更清单；发版才升号，并一次性把全部内置 manifest 的 `contract` 范围升到新值。
+- **契约号只在发版时升**（contract.md §6）：日常开发改 `ctx.*` / slot / 加插件都**不动** `CONTRACT_VERSION`，只照常改 `contract.md` 正文与变更清单；发版才升号，并一次性把全部内置 manifest 的 `contract` 范围升到新值。发版走 `pnpm release`，流程见 [docs/release.md](docs/release.md)——**不要手工改这 24 个文件**，漏一个就是新内核拒绝加载自己的插件。
 
 ## 3. 验证（改完必跑，顺序固定）
 

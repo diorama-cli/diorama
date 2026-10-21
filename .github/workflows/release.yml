@@ -1,0 +1,123 @@
+name: release
+
+# A release is triggered by a tag, and nothing else. `pnpm release <version>`
+# creates the tag locally (docs/release.md); pushing it is the publish decision.
+#
+#   pnpm release next          # bump every version, verify, commit, tag
+#   git push origin main --follow-tags
+#
+# This workflow never decides a version number. It checks that the tag agrees
+# with every manifest, builds the tarball the same way a maintainer would, and
+# publishes it with npm trusted publishing (OIDC) — no npm token is stored in
+# this repository or on anyone's machine.
+on:
+  push:
+    tags:
+      - 'v*'
+  # For a dry run: build and verify the tarball, then stop before publishing.
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Build and verify only (do not publish)'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  # Two releases must never race for the same version number.
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub release
+      id-token: write # mint the OIDC token npm trusted publishing verifies
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # `release:verify --tag` compares the tag with HEAD, and the changelog
+          # is generated from the history, so the full log has to be here.
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.5.1
+
+      - uses: actions/setup-node@v4
+        with:
+          # Trusted publishing needs npm >= 11.5.1, which ships with Node 22.14+.
+          node-version: 22.14.0
+          cache: pnpm
+          # No `registry-url`: that writes an `.npmrc` with a token placeholder,
+          # which would make npm try token auth instead of OIDC.
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # The version is the tag, and the tag must be the commit that was
+      # reviewed. Both halves of that are checked before anything is built.
+      - name: Verify the tag matches every manifest
+        if: startsWith(github.ref, 'refs/tags/')
+        run: node scripts/release/verify.mjs --tag "${{ github.ref_name }}"
+
+      - name: Verify the working tree is consistent
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: node scripts/release/verify.mjs
+
+      - name: Build the four checks
+        run: |
+          pnpm build
+          pnpm test:unit
+          pnpm -r --no-sort run typecheck
+          pnpm --filter diorama-web exec playwright test
+
+      # Assembles plugins/, web/, README.md and LICENSE next to the bundle.
+      # Without it the tarball has no page shell and no README (docs/m8 §5).
+      - name: Assemble the package
+        run: node scripts/assemble-package.mjs
+
+      - name: Verify the tarball contents
+        if: startsWith(github.ref, 'refs/tags/')
+        run: node scripts/release/verify.mjs --tag "${{ github.ref_name }}" --tarball "$(cd packages/cli && npm pack --silent --pack-destination "$RUNNER_TEMP")"
+
+      - name: Publish to npm
+        if: startsWith(github.ref, 'refs/tags/') && inputs.dry_run != true
+        working-directory: packages/cli
+        run: |
+          # Trusted publishing mints the credential from the OIDC token and
+          # adds provenance automatically — no `--provenance`, no token.
+          npm publish --access public
+
+      - name: Create the GitHub release
+        if: startsWith(github.ref, 'refs/tags/') && inputs.dry_run != true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The notes are the entry `pnpm release` wrote into CHANGELOG.md, so
+          # the release page and the changelog cannot disagree.
+          awk -v tag="${{ github.ref_name }}" '
+            $0 ~ "^## " substr(tag, 2) " " { inside = 1; next }
+            inside && /^## / { exit }
+            inside { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          gh release create "${{ github.ref_name }}" \
+            --title "${{ github.ref_name }}" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            --verify-tag
+
+      - name: Summarise
+        run: |
+          {
+            echo "### release ${{ github.ref_name }}"
+            echo
+            if [ "${{ inputs.dry_run }}" = "true" ]; then
+              echo "Dry run: built and verified, not published."
+            else
+              echo "Published \`@diorama-cli/diorama@$(node -p "require('./packages/cli/package.json').version")\`."
+              echo "https://www.npmjs.com/package/@diorama-cli/diorama"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
