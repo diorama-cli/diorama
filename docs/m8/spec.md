@@ -39,21 +39,31 @@ cd packages/cli && npm publish
 - **`tsdown.config.ts`（CLI）**：`deps.alwaysBundle: [/^diorama-/]`。tsdown 默认把
   `dependencies` 全部外部化，不写这条，17 个内部包会被原样写进发布 manifest，让
   `npm i` 去拉从未发布的包。`cordis` 保持外部（真正的第三方依赖）。
-- **`scripts/assemble-package.mjs`**：幂等，做两件事——
+- **`scripts/assemble-package.mjs`**：幂等，做三件事——
   1. 从 `plan.ts` 的 `BUILTIN_PLUGIN_IDS` 读清单（不另维护一份，防漂移），把每个插件的
      `package.json` + client half 拷进 `packages/cli/plugins/<id>/`。插件**代码**已内联，
      但 kernel 启动时仍要从真实文件读 manifest（`id` / `contract` / `client.entry`）并对
      client half 做内容哈希；浏览器也要逐个 `<script>` 加载这些 closure 工厂。
   2. 把 `apps/web/dist` 拷进 `packages/cli/web/`（`assetsRoot()` 的第一落点）。
+  3. 把根 `README.md` 与 `LICENSE` 拷进 `packages/cli/`（见下条；npm 只认**包目录**里
+     的同名文件，`files` 写不写都一样）。
+- **README 的链接要改写**（`scripts/readme-for-npm.mjs`）：npm 展示的 README 是**在
+  npmjs.com 上渲染的一页**，相对链接的基准是包页面而不是仓库根——`docs/contract.md`、
+  `docs/m7/tree.png` 在那边都不存在。发布副本里相对链接一律改写成仓库地址：普通链接去
+  `blob/<branch>/`，图片去 `raw.githubusercontent.com`（`blob/` 地址返回的是 HTML 页，
+  `<img>` 渲染不出来）。代码块里的路径不动（那是示例内容，不是链接）；改写后仍残留相对
+  链接就**报错**，别让一种没认出来的写法静默发出。分支默认 `main`，可用
+  `DIORAMA_README_BRANCH` 覆盖（发布 tag 时想钉住版本就靠它）。
 - **产物**：74 个文件、约 1.1 MB 压缩。`dependencies` 只剩 `cordis`；16 个内部包挪进
   `devDependencies`（workspace 协议在 checkout 里继续工作，但不会进发布 manifest）。
-- **gitignore**：`packages/cli/plugins/`、`packages/cli/web/`、`packages/cli/LICENSE` 是
-  组装产物，不进版本库。
+- **gitignore**：`packages/cli/plugins/`、`packages/cli/web/`、`packages/cli/README.md`、
+  `packages/cli/LICENSE` 是组装产物，不进版本库。
 
 ## 4. 验证（发布前的完整链路）
 
 1. `pnpm pack` → `diorama-cli-diorama-0.0.1.tgz`，检查内容：`bin/` + `lib/`（2.3 MB，
-   `main.js` 322 KB）+ `plugins/`（15 个 manifest + client half）+ `web/` + LICENSE。
+   `main.js` 322 KB）+ `plugins/`（15 个 manifest + client half）+ `web/` + **`README.md`**
+   + LICENSE。
 2. **在 monorepo 之外安装**：`pnpm add <tgz>` 成功，依赖树只需 `cordis`。
 3. **安装版启动**：`diorama site --foreground --port 0` 打印 URL，日志列出全部
    15 个插件，`config:` / `hidden:` 两行正常。
@@ -77,3 +87,11 @@ cd packages/cli && npm publish
    才能看到 404 与空 `web/`。顺序反了会以为只是权限问题。
 5. **发布通道与 beta 通道的分离靠 bin 决定**：发布包只带 `diorama`；`diorama-beta` 的
    socket/pid/log 后缀语义（契约 §7.1）仍然只属于 link 进来的 checkout。
+6. **npm 只从包目录找 README/LICENSE，`files` 管不着**。它们本来就在「总是包含」名单里，
+   但名单的前提是**包目录**里有这个文件；仓库把它们放在根上，而 `packages/cli/` 里没有，
+   于是 `files` 里写着 `"README.md"` 也照样打不进去——registry 上这一版包的 `readme`
+   字段就是 `"ERROR: No README data found!"`。判据只能看 `npm pack --dry-run` 的清单，
+   `files` 字段看起来"写对了"什么都不说明。
+7. **相对链接的基准是 npmjs.com 的包页面**，不是仓库根：`docs/contract.md` 会被解析成
+   `npmjs.com/package/@diorama-cli/diorama/docs/contract.md`，404。所以 README 是**改写后
+   发布**的，而不是原样拷——原样拷只解决了"有没有"，没解决"点得动吗"。
