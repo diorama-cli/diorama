@@ -222,6 +222,7 @@ test('menu: the drawn lines carry numbers, checkboxes and the footer', () => {
  */
 interface FakeTty extends TerminalInput {
   rawModes: boolean[]
+  listenerCount(event: string): number
   /** Feed bytes, the way a terminal delivers them. */
   send(text: string): void
   end(): void
@@ -353,6 +354,21 @@ test('terminal: an escape sequence split across chunks still reads as one arrow 
   input.send('\r')
   assert.deepEqual(await answer, { kind: 'chosen', values: ['0.0.0.0'] })
   terminal.close()
+})
+
+test('terminal: closing a TTY pauses it, so the process can exit after the file is written', async () => {
+  const input = fakeTty()
+  // A flowing stdin keeps the event loop alive: the wizard would write the
+  // file and then hang until Ctrl-C. `close()` has to hand the loop back.
+  const paused: string[] = []
+  input.pause = () => {
+    paused.push('pause')
+  }
+  const terminal = createTerminal(input, () => {})
+  terminal.close()
+  assert.deepEqual(paused, ['pause'])
+  assert.deepEqual(input.rawModes, [false])
+  assert.equal(input.listenerCount('data'), 0)
 })
 
 test('terminal: a TTY that ends mid-menu is reported as ended, not as a choice', async () => {

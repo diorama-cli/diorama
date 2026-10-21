@@ -110,7 +110,11 @@
     的 ignore 菜单按 `3` 会变成只有 `dist`，把用户没碰的两项静默删掉。
 11. **假 TTY 的 end 事件**：`select()` 在等键时 `input.end()` 必须 resolve 成 `undefined`，否则
     `node --test` 报 `Promise resolution is still pending` 并把后续用例全部 `cancelledByParent`。
-12. **`io.out` 会补换行，不能拿来画菜单**（真机上表现为「每按一次方向键就多一份标题」）：
+12. **TTY 下写完文件不退出**：`process.stdin` 一旦交付过 `data` 就是 *flowing* 状态，而 flowing 的
+    stdin 会把事件循环钉住——文件写完了，进程还在等 Ctrl-C。`close()` 只摘监听器不够，必须
+    `pause()`。管道模式之所以一直正常，是因为那里的 stdin 到 EOF 自己就结束了；**只测管道的 e2e
+    永远发现不了这条**，所以单测断言 `close()` 之后 `pause` 被调用。
+13. **`io.out` 会补换行，不能拿来画菜单**（真机上表现为「每按一次方向键就多一份标题」）：
     原地重绘是 `ESC[6A` + `ESC[J` + 帧三次**按字节**的写入，任何一次被追加 `\n`，行数就错，
     光标上移的落点随之偏移，于是每次移动都往下追加一帧。`CliIo` 因此加了 `raw(text)`（不加换行），
     终端只用它；`out` 保持「一条消息一行」，给编辑提示、变更摘要这些普通行用。

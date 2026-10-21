@@ -464,7 +464,16 @@ export function createTerminal(input: TerminalInput, write: (text: string) => vo
     },
     close() {
       input.removeAllListeners('data')
+      input.removeAllListeners('end')
+      input.removeAllListeners('close')
       input.setRawMode?.(false)
+      // A stream that has delivered `data` is *flowing*, and a flowing stdin
+      // keeps the event loop alive: `diorama config` would write the file and
+      // then sit there until Ctrl-C. Pausing hands the loop back.
+      ;(input as { pause?: () => void }).pause?.()
+      // A TTY stdin is the process's own, so it must not be destroyed (that
+      // would break anything reading it afterwards); a piped one can go.
+      if (input.isTTY !== true) (input as { destroy?: () => void }).destroy?.()
     },
   }
 }
