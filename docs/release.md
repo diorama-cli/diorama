@@ -141,6 +141,8 @@ cd packages/cli && npm publish --access public
 | **CI 里 `pnpm build` 报 `Failed to import module "unrun"`，本地却正常** | tsdown 按 `process.features.typescript` 选配置加载器：Node ≥ 22.18 用内置的 `native`，更早的版本回退到 `unrun`（一个 **可选** peerDependency，`pnpm install` 不会装它）。本地 Node 22.20 走了 native，CI 的 22.14 走了 unrun | `unrun` 写进根 `devDependencies`；CI 的 Node 也钉到 `22.20.0`，两边走同一条路 |
 | 发了同版本号两次 | npm 不允许覆盖已发布版本 | `concurrency` 按 ref 串行；重发只能升号 |
 | 文档里残留旧版本号 | 正则锚定错了（行尾、`> ` 前缀、全角标点） | `packages/cli/test/release.test.ts` 用真实文件断言"一处都不许剩" |
+| **`npm publish` 报 `ENEEDAUTH`，但 npmjs.com 上明明配了 trusted publisher** | npm 的 `oidc()` 把**所有**失败都吞掉（`log.silly` / `log.verbose` 级别），publish 随后看到没有凭证就报 `ENEEDAUTH`——"没配"与"配错了"给出同一个错误。且 npm < 11.5.1 完全没有 OIDC 代码（Node 22.20 自带 npm 10.9.3） | 先跑 workflow 里的 `Check the trusted-publishing prerequisites`：它手工做一次 id-token 交换并打印 HTTP 状态。`404 package not found` = npm 侧没有匹配的 publisher；`200` 但 publish 仍失败 = 别的问题 |
+| OIDC 交换返回 `404 {"message":"OIDC token exchange error - package not found"}` | trusted publisher 的四个字段与这次运行对不上。最常见的是 **Owner 填成个人账号而不是组织**（本仓库属于组织 `diorama-cli`，不是 `zimmem`） | Owner=`diorama-cli`、Repo=`diorama`、Workflow=`release.yml`（只写文件名）、Environment **留空**（workflow 里没有 `environment:`，填了反而匹配不上） |
 
 ## 8. 回滚
 
