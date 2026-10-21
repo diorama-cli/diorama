@@ -1,17 +1,125 @@
-/* diorama base styles (M0). Restrained, text-first: the viewport belongs to files. */
+/* diorama base styles (M0). Restrained, text-first: the viewport belongs to files.
+
+   ## One palette, two schemes, N themes (contract.md §3.10, docs/m9/spec.md)
+
+   Every colour in this file is a **token**, never a literal: the light values
+   below are the default, `[data-scheme='dark']` overrides them, and a theme a
+   piece registered (`ctx.theme.register`) overrides whatever it wants on top by
+   writing custom properties on `<html>`. That is the whole theming surface — a
+   theme cannot reach into a selector, so it can only recolour, never re-layout.
+
+   `--dio-*` names are the contract; adding a token means adding it here (light),
+   in the dark block, and nowhere else. `data-scheme` is written by the kernel
+   before the first paint (`apps/web/index.html` does it too, so a dark page
+   never flashes white). */
 :root {
   --dio-bg: #ffffff;
   --dio-panel: #f7f7f8;
+  --dio-surface-alt: #f6f7f9;
   --dio-border: #e3e3e6;
+  --dio-border-strong: #f5c2bf;
   --dio-text: #1f2328;
   --dio-muted: #6b7280;
   --dio-accent: #2f6feb;
   --dio-danger: #b42318;
   --dio-danger-bg: #fff4f3;
+
+  /* Composite surfaces: rows, selections, overlays. Keeping them as tokens is
+     what lets the dark scheme (and a theme) recolour them at all. */
+  --dio-hover: rgba(0, 0, 0, 0.045);
+  --dio-hover-strong: rgba(0, 0, 0, 0.08);
+  --dio-hover-faint: rgba(0, 0, 0, 0.05);
+  --dio-selected: rgba(47, 111, 235, 0.12);
+  --dio-selected-soft: rgba(47, 111, 235, 0.09);
+  --dio-accent-underline: rgba(47, 111, 235, 0.75);
+  --dio-backdrop: rgba(0, 0, 0, 0.28);
+  --dio-shadow: rgba(0, 0, 0, 0.22);
+  --dio-keycap: rgba(127, 127, 127, 0.08);
+
+  /* Syntax highlighting (the `code` piece) and diffs (the `git-changes` piece). */
+  --dio-syn-comment: #6a737d;
+  --dio-syn-keyword: #cf222e;
+  --dio-syn-string: #0a7a3f;
+  --dio-syn-number: #0550ae;
+  --dio-syn-title: #8250df;
+  --dio-syn-builtin: #953800;
+  --dio-added-bg: #eaffea;
+  --dio-diff-add-bg: #e9f7ec;
+  --dio-diff-add-text: #14532d;
+  --dio-diff-del-bg: #fdecea;
+  --dio-diff-del-text: #7f1d1d;
+  --dio-diff-hunk-bg: #eef3fd;
+  --dio-diff-hunk-text: #1e3a8a;
+
+  /* Status colours of the changes view. */
+  --dio-status-modified: #b07d00;
+  --dio-status-added: #2e7d32;
+
+  /* Search hits and the revealed line (contract.md §3.9). */
+  --dio-hit-bg: rgba(255, 200, 0, 0.45);
+  --dio-reveal-bg: rgba(255, 200, 0, 0.22);
+  --dio-reveal-border: rgba(200, 150, 0, 0.35);
+
+  /* The HTML preview's frame is a document of its own: it stays white unless
+     the file says otherwise, whatever the page's scheme is. */
+  --dio-frame-bg: #ffffff;
+
   --dio-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
     'Microsoft YaHei', sans-serif;
   --dio-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
   color-scheme: light;
+}
+
+/* The dark palette. `ctx.theme` (or the shell, before first paint) sets
+   `data-scheme` on `<html>`; nothing else in this file knows about dark mode. */
+:root[data-scheme='dark'] {
+  --dio-bg: #16181d;
+  --dio-panel: #1c1f26;
+  --dio-surface-alt: #1f232b;
+  --dio-border: #2e323b;
+  --dio-border-strong: #5a2b2b;
+  --dio-text: #e6e8ec;
+  --dio-muted: #9aa3b2;
+  --dio-accent: #6ea0ff;
+  --dio-danger: #ff8a80;
+  --dio-danger-bg: #3a1d1d;
+
+  --dio-hover: rgba(255, 255, 255, 0.06);
+  --dio-hover-strong: rgba(255, 255, 255, 0.12);
+  --dio-hover-faint: rgba(255, 255, 255, 0.05);
+  --dio-selected: rgba(110, 160, 255, 0.22);
+  --dio-selected-soft: rgba(110, 160, 255, 0.16);
+  --dio-accent-underline: rgba(110, 160, 255, 0.8);
+  --dio-backdrop: rgba(0, 0, 0, 0.55);
+  --dio-shadow: rgba(0, 0, 0, 0.55);
+  --dio-keycap: rgba(255, 255, 255, 0.08);
+
+  --dio-syn-comment: #8b949e;
+  --dio-syn-keyword: #ff7b72;
+  --dio-syn-string: #7ee787;
+  --dio-syn-number: #79c0ff;
+  --dio-syn-title: #d2a8ff;
+  --dio-syn-builtin: #ffa657;
+  --dio-added-bg: #12261a;
+  --dio-diff-add-bg: #12261a;
+  --dio-diff-add-text: #aff5b4;
+  --dio-diff-del-bg: #2d1416;
+  --dio-diff-del-text: #ffc0c0;
+  --dio-diff-hunk-bg: #141d33;
+  --dio-diff-hunk-text: #a5c3ff;
+
+  --dio-status-modified: #e3b341;
+  --dio-status-added: #7ee787;
+
+  --dio-hit-bg: rgba(255, 200, 0, 0.35);
+  --dio-reveal-bg: rgba(255, 200, 0, 0.18);
+  --dio-reveal-border: rgba(200, 150, 0, 0.4);
+
+  /* A previewed HTML file keeps its own (light) document by default: the file
+     is the content, not the page. */
+  --dio-frame-bg: #ffffff;
+
+  color-scheme: dark;
 }
 
 * {
@@ -68,7 +176,7 @@ code {
 .diorama-banner {
   padding: 6px 12px;
   background: var(--dio-danger-bg);
-  border-bottom: 1px solid #f5c2bf;
+  border-bottom: 1px solid var(--dio-border-strong);
   color: var(--dio-danger);
   font-size: 12px;
 }
@@ -121,7 +229,7 @@ code {
 }
 
 .diorama-sidebar__view:hover {
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--dio-hover-faint);
   opacity: 1;
 }
 
@@ -176,11 +284,11 @@ code {
 }
 
 .diorama-tree__row:hover {
-  background: rgba(0, 0, 0, 0.045);
+  background: var(--dio-hover);
 }
 
 .diorama-tree__row--selected {
-  background: rgba(47, 111, 235, 0.12);
+  background: var(--dio-selected);
 }
 
 .diorama-tree__caret {
@@ -226,7 +334,7 @@ code {
 }
 
 .diorama-tree__more:hover {
-  background: rgba(0, 0, 0, 0.045);
+  background: var(--dio-hover);
   color: inherit;
 }
 
@@ -263,7 +371,7 @@ code {
 .diorama-tabs__tab--active {
   background: var(--dio-bg);
   color: inherit;
-  box-shadow: inset 0 -2px 0 rgba(47, 111, 235, 0.75);
+  box-shadow: inset 0 -2px 0 var(--dio-accent-underline);
 }
 
 .diorama-tabs__label {
@@ -306,7 +414,7 @@ code {
 }
 
 .diorama-tabs__close:hover {
-  background: rgba(0, 0, 0, 0.08);
+  background: var(--dio-hover-strong);
   color: inherit;
 }
 
@@ -480,38 +588,38 @@ code {
 
 .diorama-code .hljs-comment,
 .diorama-code .hljs-quote {
-  color: #6a737d;
+  color: var(--dio-syn-comment);
 }
 
 .diorama-code .hljs-keyword,
 .diorama-code .hljs-selector-tag,
 .diorama-code .hljs-literal,
 .diorama-code .hljs-type {
-  color: #cf222e;
+  color: var(--dio-syn-keyword);
 }
 
 .diorama-code .hljs-string,
 .diorama-code .hljs-regexp,
 .diorama-code .hljs-addition {
-  color: #0a7a3f;
+  color: var(--dio-syn-string);
 }
 
 .diorama-code .hljs-number,
 .diorama-code .hljs-attr,
 .diorama-code .hljs-variable,
 .diorama-code .hljs-template-variable {
-  color: #0550ae;
+  color: var(--dio-syn-number);
 }
 
 .diorama-code .hljs-title,
 .diorama-code .hljs-name,
 .diorama-code .hljs-section {
-  color: #8250df;
+  color: var(--dio-syn-title);
 }
 
 .diorama-code .hljs-built_in,
 .diorama-code .hljs-symbol {
-  color: #953800;
+  color: var(--dio-syn-builtin);
 }
 
 .diorama-code .hljs-deletion {
@@ -519,7 +627,7 @@ code {
 }
 
 .diorama-code .hljs-addition {
-  background: #eaffea;
+  background: var(--dio-added-bg);
 }
 
 /* Command palette (a layout.overlay entry, M2) */
@@ -532,7 +640,7 @@ code {
 .diorama-palette__backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.28);
+  background: var(--dio-backdrop);
 }
 
 .diorama-palette__panel {
@@ -542,7 +650,7 @@ code {
   border: 1px solid var(--dio-border);
   border-radius: 8px;
   background: var(--dio-bg);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
+  box-shadow: 0 12px 32px var(--dio-shadow);
   overflow: hidden;
 }
 
@@ -578,7 +686,7 @@ code {
 }
 
 .diorama-palette__item--active {
-  background: rgba(47, 111, 235, 0.12);
+  background: var(--dio-selected);
 }
 
 .diorama-palette__id {
@@ -602,7 +710,7 @@ code {
 .diorama-help__backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.28);
+  background: var(--dio-backdrop);
 }
 
 .diorama-help__panel {
@@ -615,7 +723,7 @@ code {
   border: 1px solid var(--dio-border);
   border-radius: 8px;
   background: var(--dio-bg);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
+  box-shadow: 0 12px 32px var(--dio-shadow);
   outline: none;
 }
 
@@ -671,7 +779,7 @@ code {
   padding: 1px 6px;
   border: 1px solid var(--dio-border);
   border-radius: 4px;
-  background: rgba(127, 127, 127, 0.08);
+  background: var(--dio-keycap);
   font-family: inherit;
   font-size: 11.5px;
   white-space: nowrap;
@@ -730,11 +838,11 @@ code {
 }
 
 .diorama-changes__row:hover {
-  background: rgba(0, 0, 0, 0.045);
+  background: var(--dio-hover);
 }
 
 .diorama-changes__row--selected {
-  background: rgba(47, 111, 235, 0.09);
+  background: var(--dio-selected-soft);
 }
 
 .diorama-changes__badge {
@@ -747,12 +855,12 @@ code {
 }
 
 .diorama-changes__badge--modified {
-  color: #b07d00;
+  color: var(--dio-status-modified);
 }
 
 .diorama-changes__badge--added,
 .diorama-changes__badge--untracked {
-  color: #2e7d32;
+  color: var(--dio-status-added);
 }
 
 .diorama-changes__badge--deleted,
@@ -827,18 +935,18 @@ code {
 }
 
 .diorama-diff__line--add {
-  background: #e9f7ec;
-  color: #14532d;
+  background: var(--dio-diff-add-bg);
+  color: var(--dio-diff-add-text);
 }
 
 .diorama-diff__line--del {
-  background: #fdecea;
-  color: #7f1d1d;
+  background: var(--dio-diff-del-bg);
+  color: var(--dio-diff-del-text);
 }
 
 .diorama-diff__line--hunk {
-  background: #eef3fd;
-  color: #1e3a8a;
+  background: var(--dio-diff-hunk-bg);
+  color: var(--dio-diff-hunk-text);
 }
 
 .diorama-diff__line--meta {
@@ -964,7 +1072,7 @@ code {
   max-height: 30vh;
   overflow: auto;
   border-radius: 6px;
-  background: var(--dio-surface-alt, #f6f7f9);
+  background: var(--dio-surface-alt);
   font-family: var(--dio-mono);
   font-size: 12.5px;
   white-space: pre-wrap;
@@ -1149,7 +1257,7 @@ code {
   min-height: 0;
   width: 100%;
   border: 0;
-  background: #fff;
+  background: var(--dio-frame-bg);
 }
 
 .diorama-html__source {
@@ -1223,12 +1331,12 @@ code {
 }
 
 .diorama-search__toggle:hover {
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--dio-hover-faint);
 }
 
 .diorama-search__toggle--on {
   border-color: var(--dio-border);
-  background: rgba(47, 111, 235, 0.12);
+  background: var(--dio-selected);
   color: var(--dio-text);
 }
 
@@ -1285,7 +1393,7 @@ code {
 
 .diorama-search__file:hover,
 .diorama-search__match:hover {
-  background: rgba(0, 0, 0, 0.045);
+  background: var(--dio-hover);
 }
 
 .diorama-search__name {
@@ -1338,7 +1446,7 @@ code {
 }
 
 .diorama-search__hit {
-  background: rgba(255, 200, 0, 0.45);
+  background: var(--dio-hit-bg);
   color: inherit;
 }
 
@@ -1354,9 +1462,9 @@ code {
   left: 0;
   right: 0;
   pointer-events: none;
-  background: rgba(255, 200, 0, 0.22);
-  border-top: 1px solid rgba(200, 150, 0, 0.35);
-  border-bottom: 1px solid rgba(200, 150, 0, 0.35);
+  background: var(--dio-reveal-bg);
+  border-top: 1px solid var(--dio-reveal-border);
+  border-bottom: 1px solid var(--dio-reveal-border);
 }
 
 /* Icons (docs/m7/spec.md): button glyphs inherit the text colour, file glyphs

@@ -1,0 +1,57 @@
+{
+  "name": "diorama-plugin-theme",
+  "version": "0.0.2",
+  "private": true,
+  "description": "Diorama piece: theme commands (follow the system, light, dark) over ctx.theme",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "./lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.mjs"
+    },
+    "./client": {
+      "default": "./lib/client.cjs"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "src"
+  ],
+  "diorama": {
+    "contract": ">=0.0.2 <0.1.0",
+    "id": "theme",
+    "client": {
+      "entry": "./lib/client.cjs"
+    },
+    "requires": [
+      "slots"
+    ],
+    "displayName": "主题"
+  },
+  "scripts": {
+    "build": "vite build && tsc -p tsconfig.emit.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "cordis": "4.0.0-rc.11",
+    "diorama-kernel": "workspace:*",
+    "react": "^19.3.1"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "diorama-plugin-layout": "workspace:*",
+    "diorama-plugin-palette": "workspace:*",
+    "diorama-plugin-slots": "workspace:*",
+    "diorama-ui": "workspace:*",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.4"
+  }
+}

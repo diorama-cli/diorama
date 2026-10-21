@@ -12,6 +12,35 @@
       exactly once per page. The import map and the table bundle are injected
       by the kernel when it serves this file (packages/kernel/src/server/table.ts).
     -->
+    <!--
+      Theme bootstrap (contract.md §3.10): the one thing that must run *before*
+      the stylesheet paints. `ctx.theme` owns the state and repaints on every
+      change, but it lives in the bundle, which arrives after first paint —
+      without this block a dark page would flash white on every reload.
+
+      Keep the keys and the rules in step with `packages/kernel/src/client/theme.ts`
+      (`THEME_STORAGE_KEY` / `THEME_SCHEME_STORAGE_KEY` / `resolveTheme`). A
+      stored scheme is the answer the service itself last resolved (so a theme's
+      scheme is right too); with no stored answer, follow the OS.
+    -->
+    <script>
+      ;(function () {
+        var scheme
+        try {
+          scheme = window.localStorage.getItem('diorama.theme.scheme')
+        } catch (error) {
+          scheme = null
+        }
+        if (scheme !== 'dark' && scheme !== 'light') {
+          try {
+            scheme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+          } catch (error) {
+            scheme = 'light'
+          }
+        }
+        document.documentElement.setAttribute('data-scheme', scheme)
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

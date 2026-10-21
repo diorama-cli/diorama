@@ -1,6 +1,6 @@
 {
   "name": "diorama-plugin-help",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "private": true,
   "description": "Diorama piece: the shortcut sheet (a layout.overlay entry over ctx.commands)",
   "type": "module",
@@ -22,7 +22,7 @@
     "src"
   ],
   "diorama": {
-    "contract": ">=0.0.1 <0.1.0",
+    "contract": ">=0.0.2 <0.1.0",
     "id": "help",
     "client": {
       "entry": "./lib/client.cjs"

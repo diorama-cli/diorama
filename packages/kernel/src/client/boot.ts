@@ -20,6 +20,7 @@ import { Context } from 'cordis'
 import { collectCommandContext, createCommandsService, type CommandContext, type CommandContextSources } from './commands.ts'
 import { createMountHandle, type MountHandle, type MountManifest } from './mount.ts'
 import { browserHistory, createRouterService, type RouterService, type RouterTabs } from './router.ts'
+import { browserThemeHost, createThemeService, THEME_HASH_KEY } from './theme.ts'
 import {
   ensurePageBridge,
   installKernel,
@@ -146,6 +147,16 @@ export async function bootClient(options: BootOptions): Promise<BootResult> {
   // as soon as `tabs` activates (`attach()` below), not after the last plugin.
   const router = createKernelRouter(ctx, handle, log)
   ctx.provide('router', router.service)
+  // `ctx.theme` (contract.md §3.10) is kernel infrastructure as well: the page
+  // follows the system scheme until the reader picks one, remembers the choice,
+  // and lets pieces add themes. Provided before the pieces so the `theme`
+  // piece's commands can be registered against it.
+  const theme = createThemeService({
+    host: browserThemeHost(),
+    hash: router.service.state(THEME_HASH_KEY),
+    warn: message => log(`[diorama] ${message}`),
+  })
+  ctx.provide('theme', theme)
   const disposeKeyboard = options.attachKeyboard === false ? () => {} : installKeyboard(commands, focus)
 
   const failures = await loadManifest(ctx, options, log, handle ?? createMountHandle(options.manifest))
@@ -170,6 +181,7 @@ export async function bootClient(options: BootOptions): Promise<BootResult> {
     failures,
     dispose: async () => {
       disposeKeyboard()
+      theme.dispose()
       router.dispose()
       await ctx.fiber.dispose()
     },
@@ -248,7 +260,7 @@ interface CordisSurface {
 }
 
 /** Services a piece provides after the tree root exists. */
-const LATE_SERVICES = ['views', 'slots', 'slotRegistry', 'tabs', 'tree', 'fs', 'kernel', 'commands', 'router'] as const
+const LATE_SERVICES = ['views', 'slots', 'slotRegistry', 'tabs', 'tree', 'fs', 'kernel', 'commands', 'router', 'theme'] as const
 
 /** A context whose reads always go through core's `get` (see `bootClient`). */
 function createPageContext(ctx: KernelContext & CordisSurface): KernelContext & CordisSurface {

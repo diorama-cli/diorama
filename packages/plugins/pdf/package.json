@@ -1,6 +1,6 @@
 {
   "name": "diorama-plugin-pdf",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "private": true,
   "description": "Diorama piece: PDF renderer (blob URL in the browser viewer)",
   "type": "module",
@@ -22,7 +22,7 @@
     "src"
   ],
   "diorama": {
-    "contract": ">=0.0.1 <0.1.0",
+    "contract": ">=0.0.2 <0.1.0",
     "id": "pdf",
     "client": {
       "entry": "./lib/client.cjs"

@@ -214,6 +214,29 @@ diorama 是**只读查看器**：只浏览，不修改。这缩小了 API 面，
 - **代价**：浏览器保留键（如 `mod+w`）无法拦截，关闭 tab 一律走 `mod+alt+w` 或在 palette 里执行。
 - **副产品**：开/关/切 tab、聚焦文件树由快捷键覆盖，进一步坐实“不要工具栏”。
 
+### 15. 主题：一个内核状态 + 一套 token + 一个注册表
+
+配色不是插件的事，也不是“加个 CSS 变量”的事：它要跟随系统、记住选择、能分享、还不能在刷新时
+白闪。这四件事必须发生在**一个**地方，否则任意两件就会打架。
+
+- **状态在内核**（`ctx.theme`，与 `ctx.commands` / `ctx.router` 同级）：一个偏好（`system` /
+  `light` / `dark` / 主题 id），三个面（`localStorage` 记忆、URL hash 分享、`<html>` 属性给 CSS）。
+  `Themes.paint()` 是唯一同时更新三处的地方。
+- **颜色只有 token**：`diorama-ui/styles.css` 里没有颜色字面量，light 在 `:root`、dark 在
+  `:root[data-scheme='dark']`，两者成对维护。这是主题能成为“数据”的前提。
+- **主题是注册表条目，不是 CSS 文件**：`ctx.theme.register({ id, title, scheme, tokens })`。
+  第三方主题只覆盖 token，因此只能重新着色、不能改布局；内核与所有内置 piece 都不需要知道
+  任何主题的名字。命令面（`theme.use:<id>`）由内置 piece `theme` 从注册表同步出来。
+- **防白闪在壳里**：`index.html` 的内联脚本在样式表生效前读 `diorama.theme.scheme` 写
+  `data-scheme`；service 每次 paint 把解析结果写回该键。
+
+- **放弃**：CSS 滤镜反色（毁掉图片与语法高亮的色相）、`light-dark()` 一揽子切换（需要先 token 化，
+  且主题仍无处注册）、把主题做成插件（跟随系统与防白闪就不能由内核保证，去掉插件页面会坏）、
+  服务端持久化偏好（`ctx.storage` 签名未定，浏览器存储已经够用）。
+- **代价**：样式表多约 30 个 token，新颜色必须两处成对；`index.html` 与 `theme.ts` 有一份
+  必须同步的“解析规则”。
+- **留给以后**：`i18n`、服务端偏好同步（K14）、页面内常驻的主题按钮（O8 的开关归命令）。
+
 ## 开放问题
 
 - **O1**：服务端框架选型（Express / Fastify / Hono）。
@@ -223,3 +246,4 @@ diorama 是**只读查看器**：只浏览，不修改。这缩小了 API 面，
 - **O6**：gateway 单点的 supervisor 兜底（崩溃自拉起），还是先接受单点。
 - **O7**：mount degraded 后的恢复策略（自动重启该 mount？手动 `diorama rm` 再挂？）。
 - **O8**：渲染模式切换（源码/预览）、图片缩放、diff 并排——没有工具栏后放在哪，还是 v1 不做。**部分缓解**：现在有了命令 + 快捷键，这类“开关型”交互可以做成命令（§14）；但纯手势型（缩放）仍需单独设计。
+- **O9**：主题偏好的服务端同步（跨浏览器 / 跨 mount 一致）——等 `ctx.storage`（K14）签名定了再谈；目前只在浏览器 `localStorage`（§15）。

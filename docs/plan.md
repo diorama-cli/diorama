@@ -99,7 +99,7 @@
 | PDF 渲染器 | `.pdf`；Blob URL + `<iframe>`（浏览器 viewers） | ✅ 第二轮 |
 | 变更视图实时 | `fs.watch` 驱动重算（去掉 5 秒轮询） | ✅ 第二轮 |
 | Notebook 渲染器（`.ipynb`） | | **不做**（仍是「未来」） |
-| 主题 | | **不做**（`ctx.storage` 仍 🔲） |
+| 主题 | | 当时**不做**；后来单独做了一档（[m9/spec.md](m9/spec.md)：`ctx.theme` + `theme` piece），偏好存浏览器 `localStorage` |
 
 ## 里程碑之外、但必须同时做的
 

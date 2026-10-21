@@ -1,20 +1,22 @@
-# 插件契约 v0.0.1
+# 插件契约 v0.0.2
 
 > 记录于 2026-10-18；v0.3 记录于 2026-10-19；v0.4 记录于 2026-10-19；v0.5 记录于 2026-10-19；
-> v0.6 记录于 2026-10-20；v0.7 记录于 2026-10-20；v0.8 记录于 2026-10-20
+> v0.6 记录于 2026-10-20；v0.7 记录于 2026-10-20；v0.8 记录于 2026-10-20；v0.9 记录于 2026-10-20
 > （v0.1 草案已归档为 [contract-v0.1.md](contract-v0.1.md)）。
 >
 > **2026-10-20 首次发布**：契约号重编为 **`0.0.1`**（此前文档里的 `v0.8` 是开发期编号，
 > §12–§18 的历史清单保留原样、按里程碑阅读）。发布形态见 [m8/spec.md](m8/spec.md)。
+> **`0.0.2`**：主题切换（§19），见 [m9/spec.md](m9/spec.md)。
 > 契约先行：这份文档是内核与插件之间的唯一约定，改它 = 破环变更。
 >
-> **状态：v0.0.1 已定稿。** v0.1 → v0.2 的差异是 M1 决策（§12），v0.2 → v0.3 是 M2 决策（§13），
+> **状态：v0.0.2 已定稿。** v0.1 → v0.2 的差异是 M1 决策（§12），v0.2 → v0.3 是 M2 决策（§13），
 > v0.3 → v0.4 是 M3 决策（§14），v0.4 → v0.5 是补齐特性的决策（§15），
 > v0.5 → v0.6 是 git 历史视图、字节渲染器与 HTML 渲染器的决策（§16），
 > v0.6 → v0.7 是快捷键说明（`help`）与 `layout.overlay` 改 list 的决策（§17），
-> v0.7 → v0.8 是文件搜索（`ctx.search` + `search-view`）的决策（§18）。
-> 内核契约版本 `0.0.1`（首个发布版；pre-1.0 阶段每次破环只升 `0.0.x` 的数字），
-> 所有插件声明 `contract: ">=0.0.1 <0.1.0"`；内核**已启用**范围检查（§6）。
+> v0.7 → v0.8 是文件搜索（`ctx.search` + `search-view`）的决策（§18），
+> v0.8 → v0.9 是主题切换（`ctx.theme` + `theme` piece）的决策（§19）。
+> 内核契约版本 `0.0.2`（pre-1.0 阶段每次破环只升 `0.0.x` 的数字），
+> 所有插件声明 `contract: ">=0.0.2 <0.1.0"`；内核**已启用**范围检查（§6）。
 
 ## 0. 术语
 
@@ -36,7 +38,7 @@
   "name": "diorama-plugin-markdown",
   "version": "0.1.0",
   "diorama": {
-    "contract": ">=0.0.1 <0.1.0",                     // 必须：兼容的内核契约范围（§6）
+    "contract": ">=0.0.2 <0.1.0",                     // 必须：兼容的内核契约范围（§6）
     "id": "markdown",                              // 必须：全局唯一，短名；外部插件建议带前缀
     "displayName": "Markdown",
     "server": { "entry": "./lib/server.mjs" },     // 可选
@@ -560,10 +562,17 @@ interface CommandsService {
 | `sidebar.showHistory` | 侧栏：历史 | `mod+alt+3` | 侧栏有该视图 |
 | `help.toggle` | 快捷键说明 | `shift+?` | 焦点不在输入框（v0.7） |
 | `help.close` | 关闭快捷键说明 | `escape` | 说明开着（v0.7） |
+| `theme.cycle` | 主题：跟随系统 / 亮色 / 暗色 | `mod+alt+t` | 总可执行（v0.9） |
+| `theme.useSystem` | 主题：跟随系统 | 无（palette） | 总可执行（v0.9） |
+| `theme.useLight` | 主题：亮色 | 无（palette） | 总可执行（v0.9） |
+| `theme.useDark` | 主题：暗色 | 无（palette） | 总可执行（v0.9） |
+| `theme.use:<id>` | 主题：**`<title>`**（`<id>` 的已注册主题） | 无（palette） | 该主题已注册（v0.9） |
 
 命令的**来源插件**决定注册点：`tabs.*` 由 tabs 插件注册、`tree.*` 由 file-tree 注册、
 `palette.toggle` 由 palette 注册、`help.*` 由 help 注册、`view.*` 由 renderer-registry 注册（它持有
-文件内容缓存）、`sidebar.*` 由 layout 注册（它持有切换器的当前视图，§5.2）。
+文件内容缓存）、`sidebar.*` 由 layout 注册（它持有切换器的当前视图，§5.2）、`theme.*` 由 theme
+piece 注册（它只注册命令；**状态**在内核的 `ctx.theme`，§3.10）。第三方主题的 `theme.use:<id>`
+也是 theme piece 注册的——主题是注册表数据，piece 把注册表同步成命令，注册主题的插件不写任何 UI。
 
 `sidebar.show*` 是**固定三条**命令，不是“每个视图自动一条”：`layout` 只认识 `files` / `changes` /
 `history` 三个 id（与它画切换器时用的顺序一致）。新增视图**不自动获得快捷键**；要给它一条命令，
@@ -597,7 +606,8 @@ interface RouterService {
 |---|---|
 | 形式 | **path**：`<origin>/~/<RelPath>`，例如 `/~/src/app.js`；`/` 或 `/~/` = 无文件 |
 | 管什么 | **页面正在显示哪个文件**：活动 tab 的文件路径，**不论它的 view**。跟文件相关的视图（diff、某个提交的版本）是“关于这个文件的”，文件属于路径，**视图与参数才进 hash** |
-| **hash** | **插件可写的通用键值面**。跟文件相关的视图写**标记**（`#diff`，无值）；跟文件无关的状态（主题、搜索词）写在根页面（`/#theme=dark`）。内核不知道 `diff` / `theme` 是什么意思 |
+| **hash** | **插件可写的通用键值面**。跟文件相关的视图写**标记**（`#diff`，无值）；跟文件无关的状态（主题、搜索词）写在根页面（`/#theme=dark`）。内核不知道 `diff` 是什么意思；
+`theme` 是 §3.10 保留给自己的 hash 键 |
 | 保留前缀 | **`/~/`**。其余任何路径（`/plugin.json`、`/assets/`、`/plugins/`、`/__diorama__/`）都不被路由解释；以后新增的服务端路由也不会与它相撞 |
 | 编码 | 每段 `encodeURIComponent`（`/` 保留为分隔符） |
 | 历史 | 每次「活动文件」变化 `pushState`；浏览器前进/后退 `popstate` → 激活/打开那条路径 |
@@ -703,6 +713,89 @@ interface SearchService {
 - **插件与服务的 id 分开**：服务 id 是 `search`（内核 server 半边，每个 mount 都提供）；
   客户端 piece 是 `search-view`（侧栏「搜索」视图 + `mod+p` 快速打开覆盖层），同 `git` /
   `git-changes` 的拆分。
+
+### 3.10 `ctx.theme`（client）✅ v0.9 定
+
+页面的配色方案：跟随系统、指定亮色 / 暗色，以及**第三方插件注册主题**的入口。像 `ctx.commands`
+与 `ctx.router` 一样是**内核内置**（注入到页面的 root ctx），不是可选插件的服务：一个不能跟随
+系统、记不住选择、又挡不住白屏闪烁的页面，不是插件该修的事。
+
+```ts
+type ThemeScheme = 'light' | 'dark'
+
+/** 第三方主题：一组 CSS 自定义属性，叠在样式表定义的调色板之上。 */
+interface ThemeDefinition {
+  /** 全局唯一；`[A-Za-z0-9_.-]+`（它同时是 hash 值与命令 id 的一部分），建议带插件前缀。 */
+  readonly id: string
+  /** 展示名（palette 行、诊断信息）。 */
+  readonly title: string
+  /** 该主题所属的配色；选中它即锁定这个 scheme。 */
+  readonly scheme: ThemeScheme
+  /**
+   * 选中时写到 `<html>` 上的自定义属性，如 `{ '--dio-bg': '#101418' }`。
+   * **只收 `--` 开头的键**（其余键被忽略）：主题是数据，不是 CSS 文件——
+   * 它只能重新着色，改不了布局。缺省的键沿用样式表里该 scheme 的值。
+   */
+  readonly tokens: Readonly<Record<string, string>>
+  /** 主题清单里的顺序（palette 行的次序），缺省 100。 */
+  readonly order?: number
+}
+
+interface ThemeSnapshot {
+  /** `'system' | 'light' | 'dark'`，或某个已注册主题的 id。 */
+  preference: string
+  /** 当前正在用的 scheme（`system` 与主题解析之后的结果）。 */
+  scheme: ThemeScheme
+  /** 当前生效的第三方主题 id；未启用主题时为 `undefined`。 */
+  theme: string | undefined
+}
+
+interface ThemeService {
+  getSnapshot(): ThemeSnapshot                            // 不可变，仅变化时替换
+  subscribe(listener: () => void): () => void
+  /** 设定偏好；`'system'` / `'light'` / `'dark'` / 已注册主题的 id。 */
+  set(preference: string): void
+  /** system → light → dark → system（在某个主题上时，下一步回到 `system`）。 */
+  cycle(): string
+  /** 注册一个主题；返回 disposer，注销时恢复。id 重复 **抛错**（fail loud）。 */
+  register(definition: ThemeDefinition): () => void
+  /** 已注册主题，按 `order` 再按 `id` 排序。 */
+  themes(): readonly ThemeDefinition[]
+  has(id: string): boolean
+  /** 主题注册表变化（有主题出现 / 消失）时通知。 */
+  subscribeThemes(listener: () => void): () => void
+}
+```
+
+**规则：**
+
+- **默认 `system`**：跟随 `prefers-color-scheme`，**操作系统切换时页面实时重绘**（`matchMedia`
+  的 `change` 事件），不需要刷新。`light` / `dark` 是**锁定**：锁定的 scheme 不随系统变。
+- **三处状态，一个来源**：
+  - `localStorage` 键 **`diorama.theme`** 记住偏好；**`diorama.theme.scheme`** 记住它解析出的
+    scheme（主题锁定的 scheme 也在这里），页面壳（`index.html`）在**首帧之前**读后者写
+    `data-scheme`——没有它暗色页面每次刷新都白闪。两个键与 `resolveTheme` 的判定规则
+    在 `packages/kernel/src/client/theme.ts`，壳里的脚本必须与它保持一致。
+  - URL hash 键 **`theme`**（§3.8 的通用键值面）让选择可分享：`/#theme=dark`、
+    `/#theme=<主题id>`。`system` 是**没有这个键**（不写 `#theme=system`）。hash 变化
+    （前进 / 后退、手工改 URL）同样驱动页面。
+  - `<html>` 的 **`data-scheme="light|dark"`** 与 **`data-theme="<id>"`** 是 CSS 看到的面；
+    主题的 tokens 以内联 `style` 写在 `<html>` 上（切换主题时清掉上一主题的）。
+- **优先级**：boot 时 hash > storage > `system`；运行中最后一次 `set()` 赢。
+- **主题是注册表项，不是文件**：任何插件 `ctx.theme.register({ id, title, scheme, tokens })`
+  即可；id 重复抛错（与 `ctx.slots` / `ctx.commands` 的全局 id 同一条规则）。**偏好可以走在
+  注册前面**：`set('night-owl')` 时该主题还没注册，页面先跟随系统并 `warn` 一次，主题注册后
+  立即生效——palette 与覆盖层都是后到的。
+- **第三方主题只是重新着色**：tokens 只收自定义属性（`--dio-*`），且只覆盖**样式表里声明过的**
+  token 才有意义。样式表（`diorama-ui/styles.css`）持有 light / dark 两套调色板：
+  `:root` 是 light，`:root[data-scheme='dark']` 覆盖之，主题再覆盖在两者之上。
+  **新增 token = 在 light 与 dark 两处一起加**。
+- **内置 UI 走 palette**：内置 piece `theme`（§5 内置插件表）注册 `theme.cycle`
+  （`mod+alt+t`）、`theme.useSystem` / `theme.useLight` / `theme.useDark`，并为**每个已注册
+  主题**各注册一条 `theme.use:<id>`——第三方主题不写任何 UI 就有 palette 行；主题注销时命令
+  一并注销。去掉 `theme` piece 只是没有命令与快捷键，跟随系统与第三方主题照常工作。
+- **纯客户端**：不经过 RPC，不落盘到 `$DIORAMA_HOME`（页面各自的浏览器存储即所见即所得；
+  `ctx.storage`（K14）落地后可以讨论服务端同步，签名未定之前不动）。
 
 ## 4. RPC / 通信 ✅ v0.2 定 / v0.3 补事件 session 与 §4.1 配置
 
@@ -839,6 +932,33 @@ maxDirectories = 64         # 每个目录同时监听的目录数上限（§3.1
 - **没有 toolbar**：只读工具没有“要对文件做的事”，v1 不提供 `file.toolbar` / `tabs.actions`（O8）。
 - **回退链**：`file.renderer` 的条目按 §5.1 排序，命中者渲染；渲染抛错 → 标记失败 → **尝试下一个**；matcher 全不命中 → 兜底条目（plaintext）；一个条目都没有 → 「无可用渲染器」。
 
+### 5.3 主题 token（v0.9 定，配合 §3.10）
+
+页面里**所有**颜色都是 `diorama-ui/styles.css` 里的一个自定义属性（token）；选择器里不出现
+颜色字面量。这是主题能工作的全部前提：
+
+| token | 用途 |
+|---|---|
+| `--dio-bg` / `--dio-panel` / `--dio-surface-alt` / `--dio-frame-bg` | 页面背景 / 面板（侧栏、tab 条、头部）/ 次级面板（提交正文）/ 预览 iframe 的底色 |
+| `--dio-border` / `--dio-border-strong` | 常规分隔线 / 强调分隔线（degraded 横幅） |
+| `--dio-text` / `--dio-muted` | 正文 / 弱化文字 |
+| `--dio-accent` / `--dio-danger` / `--dio-danger-bg` | 强调（链接、活动态）/ 危险 / 危险底 |
+| `--dio-hover` / `--dio-hover-strong` / `--dio-hover-faint` / `--dio-selected` / `--dio-selected-soft` / `--dio-accent-underline` / `--dio-backdrop` / `--dio-shadow` / `--dio-keycap` | 复合表面：行 hover、选中、活动 tab 下划线、覆盖层背板与阴影、键帽 |
+| `--dio-syn-comment` / `--dio-syn-keyword` / `--dio-syn-string` / `--dio-syn-number` / `--dio-syn-title` / `--dio-syn-builtin` | 语法高亮六色（`code` piece） |
+| `--dio-added-bg` / `--dio-diff-add-*` / `--dio-diff-del-*` / `--dio-diff-hunk-*` | diff 的加 / 删 / hunk 行（`git-changes`） |
+| `--dio-status-modified` / `--dio-status-added` | 变更视图的 M / A 徽标色 |
+| `--dio-hit-bg` / `--dio-reveal-bg` / `--dio-reveal-border` | 搜索命中与跳转高亮带（§3.9） |
+| `--dio-font` / `--dio-mono` | 字体（不算颜色，同属主题可覆盖的 token） |
+
+规则：
+
+- **light 与 dark 成对**：`:root` 定义 light；`:root[data-scheme='dark']` 整块覆盖。新增 token
+  两处一起加，漏掉 dark 会在暗色下掉回 light 的值（CSS 继承不会报错）。
+- **主题只覆盖 token**（§3.10）：`--dio-*` 之外的自定义属性照样能写（第三方组件可以用），但
+  内置 UI 只认这张表。
+- **预览 iframe 不跟主题**：预览的 HTML 是「文件是内容」，默认白底（`--dio-frame-bg`），
+  文件自己的样式说了算。
+
 ### 5.2 `sidebar.views`（v0.5 定）
 
 侧栏是**一条栏、多个视图**，由 `layout` 拥有与绘制：
@@ -966,11 +1086,11 @@ interface FileRendererProps {
 
 ## 6. contract version 规则 ✅ v0.2 起强制
 
-- 内核版本 `0.0.x` 期间：**任何改动都可能破环**，插件写窄范围（`>=0.0.1 <0.1.0`）。
+- 内核版本 `0.0.x` 期间：**任何改动都可能破环**，插件写窄范围（`>=0.0.2 <0.1.0`）。
   破环 = 升 `0.0.x` 的数字（`0.0.1` → `0.0.2`），契约与插件一起升。
 - **检查时间**：读 manifest 时（加载前）。不满足 → 拒绝加载该插件，并解释原因（终端 + 浏览器控制台）。
 - 内置插件同样检查：旧范围的 manifest 会被新内核拒绝，所以每次升版都把全部内置插件一起升到
-  当前范围（`0.0.1` 起为 `>=0.0.1 <0.1.0`）。**内核与半边必须一起重新构建**（builtin manifest 与 kernel
+  当前范围（`0.0.2` 起为 `>=0.0.2 <0.1.0`）。**内核与半边必须一起重新构建**（builtin manifest 与 kernel
   的 `CONTRACT_VERSION` 来自同一份构建）。
 - M2 起**没有**外部插件（§9），因此"UI 显示「插件 X 因契约不兼容未加载」"的展示面随外部插件一起推迟；
   拒绝本身仍然 fail loud（CLI 退出码非 0 / boot 图里不出现）。
@@ -1362,12 +1482,33 @@ RPC 广播 `{ topic: 'mount.state', payload: MountStatus }`。
 **没有变的东西**：`ctx.fs` / `ctx.git` / `ctx.router` / `ctx.commands` 的签名、`tabs` 的键、
 渲染器派发与 `file.renderer` 的匹配规则、`sidebar.views` 的座位形态（仍是 keyed，只是多一个 key）。
 
+## 19. v0.8 → v0.9 变更清单（破环，故升 minor）
+
+> 2026-10-20。用户要求：**实现主题切换（跟随系统或指定暗黑/亮色），并预留第三方插件增加主题的能力**。
+> 新增 `ctx.theme`（§3.10）是**新增内核服务**，命令表多了五条、内置插件多了一个、样式表从此只认
+> token（§5.3）——按 §6 的规则升版。
+
+| 条款 | v0.8 | v0.9 |
+|---|---|---|
+| §3.10 `ctx.theme` | 无 | 新增内核服务（页面级，不 RPC）：偏好 `system`/`light`/`dark`/主题 id；`register()` 主题注册表；`data-scheme` / `data-theme` 写在 `<html>`；`localStorage`（`diorama.theme`、`diorama.theme.scheme`）+ hash（`#theme=…`）双持久化 |
+| §3.10 主题形态 | 无 | 主题 = `{ id, title, scheme, tokens, order? }`，tokens 是**样式表调色板的子集覆盖**（§5.3）；偏好可先于注册（暂跟随系统并 warn，注册即生效） |
+| 首帧 | 无 | 页面壳 `index.html` 在样式表生效前读 `diorama.theme.scheme` 写 `data-scheme`（暗色刷新不再白闪）；键与判定规则必须与 `theme.ts` 保持一致 |
+| §5.3 token 化 | 颜色字面量散在各选择器 | **全部颜色收敛为 `--dio-*` token**（约 30 个）：light 在 `:root`、dark 在 `:root[data-scheme='dark']`、主题再覆盖其上；第三方主题只覆盖 token |
+| §3.7 命令表 | 15 条 | 另加 `theme.cycle`（`mod+alt+t`）、`theme.useSystem` / `theme.useLight` / `theme.useDark`，以及每个已注册主题一条 `theme.use:<id>`，由 `theme` piece 注册 |
+| §5 内置插件 | 15 个 | 16 个：新增 `theme`（客户端 piece，只注册命令），进默认清单（§4.1）与 boot 顺序（`help` 之后、`git-changes` 之前） |
+| P9（features）/ U12 | 主题明确不做 | **本档推翻**：主题做了；`ctx.storage`（K14）签名仍待定，偏好暂存浏览器 `localStorage` |
+| contract version | `0.0.1` / `>=0.0.1 <0.1.0` | `0.0.2` / `>=0.0.2 <0.1.0`（全部内置插件 + kernel 包自己的 manifest） |
+
+**没有变的东西**：slot 清单（无新座位——主题不是 slot，是页面属性）、`ctx.fs` / `ctx.git` /
+`ctx.search` / `ctx.router` / `ctx.commands` 的签名、`tabs` 的键、渲染器派发、RPC 与控制面协议。
+样式表只把字面量换成同名 token（§5.3），视觉上 light 与 v0.8 一致。
+
 ## 待定清单（v0.4 后仍 🔲）
 
 - [x] `ctx.git` 具体签名（只读：diff / status / log）— v0.5 定（§3.2）
 - [x] git history 视图（`show` / 提交列表在左栏的落点）— v0.6 定（§3.2、§5、§5.2）
 - [ ] `ctx.layout` 的服务面（overlay 走 slot）
-- [ ] `ctx.storage` 签名（主题 / 偏好持久化）— 待定
+- [ ] `ctx.storage` 签名（跨 mount 的偏好同步）— 待定（主题偏好在 v0.9 已落浏览器 `localStorage`，§3.10；服务端同步留给 K14）
 - [ ] 插件异步任务托管 API — 待定
 - [ ] O8：渲染模式切换 / 图片缩放 / diff 并排的落点（命令化已缓解“开关型”；git diff 已是行内形态）
 - [ ] URL 里是否记多 tab（刷新恢复整组）— 与 U10 一起定

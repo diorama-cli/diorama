@@ -62,6 +62,23 @@ export {
   type RouterTabs,
 } from './router.ts'
 export { createTabsService, TabsService, type TabsSnapshot } from './tabs.ts'
+export {
+  browserThemeHost,
+  createThemeService,
+  inertThemeHost,
+  nextPreference,
+  resolveTheme,
+  THEME_HASH_KEY,
+  THEME_STORAGE_KEY,
+  type ResolvedTheme,
+  type ThemeDefinition,
+  type ThemeHost,
+  type ThemePaint,
+  type ThemePreference,
+  type ThemeScheme,
+  type ThemeService,
+  type ThemeSnapshot,
+} from './theme.ts'
 export { createTreeService, TreeService, type TreeSnapshot } from './tree.ts'
 export { bootClient, provideRecord } from './boot.ts'
 export {

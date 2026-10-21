@@ -33,6 +33,7 @@ test('config: defaults match contract §4.1', () => {
     'html',
     'palette',
     'help',
+    'theme',
     'git-changes',
     'search-view',
   ])

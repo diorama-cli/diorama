@@ -18,6 +18,7 @@ Diorama 是一个**只读的文件查看器**：在任意目录执行一条命�
 - **git 只读视图**：左栏「变更」实时显示工作区 diff（由文件 watch 驱动重算）；「历史」浏览提交列表，点开看提交详情、文件清单与「改动 / 提交时的内容」对比。
 - **搜索**：按内容（字面量 / 正则、大小写、全字匹配）或按文件名（子序列，VS Code `Ctrl+P` 口径）；点结果直接打开文件并跳到那一行。`mod+p` 随时快速打开文件。不做索引，每次现场扫描，遵守 `ignore` 规则。
 - **命令与快捷键**：命令面板（`mod+k`）与快捷键共用一套命令注册表；按 `?` 查看全部快捷键速查。
+- **主题**：默认跟随系统明暗（系统切换即时生效），`mod+alt+t` 或命令面板里锁定亮色 / 暗色；选择记在浏览器里、写进 URL（`#theme=dark`），刷新与分享都不闪。第三方插件可以用 `ctx.theme.register({ id, title, scheme, tokens })` 加主题——一组 CSS 自定义属性，不用写 UI 就出现在命令面板里。
 - **实时刷新**：文件变化自动更新树与内容（300ms 合并，可在页面里关闭自动刷新）。
 - **URL 深链**：`/~/<路径>` 直接打开某个文件，刷新后恢复活动标签；git 视图的 `#diff`、`#history=<sha>` 同样可分享。
 
@@ -36,7 +37,7 @@ diorama .
 diorama serving /path/to/your/project
   http://127.0.0.1:54321/
   config: none (defaults)
-  [mount:78853ab4] plugins: slots, layout, file-tree, tabs, renderer-registry, plaintext, markdown, code, image, pdf, html, palette, help, git-changes, search-view
+  [mount:78853ab4] plugins: slots, layout, file-tree, tabs, renderer-registry, plaintext, markdown, code, image, pdf, html, palette, help, theme, git-changes, search-view
   hidden: .git, node_modules
 ```
 
@@ -123,12 +124,13 @@ scripts/                  生成器（图标表；pnpm icons 重新生成）
 | `markdown` / `code` / `image` / `pdf` / `html` | 各文件类型的渲染器 |
 | `palette` | 命令面板（`mod+k`），只列当前可执行的命令 |
 | `help` | 快捷键速查表（`?`），列出全部绑定 |
+| `theme` | 主题命令（跟随系统 / 亮色 / 暗色，`mod+alt+t`）与每个已注册主题的 `theme.use:<id>` |
 | `git-changes` | 左栏「变更」与「历史」视图、diff 与提交详情座位 |
 | `search-view` | 左栏「搜索」视图与 `mod+p` 快速打开 |
 
 ### 写插件
 
-一个插件是一个 npm 包，`package.json` 里带 `diorama` 字段声明全局唯一的 `id`、兼容的契约版本范围（当前 `>=0.0.1 <0.1.0`）与依赖（`requires`）。一个包可以同时有 **server 半边**（注册服务，有文件系统权限，通过 RPC 暴露给页面）与 **client 半边**（注册座位条目与渲染组件）；两边不共享内存，只通过 RPC 通信。加载时内核校验契约版本，不匹配就拒绝加载并说明原因；任何失败都是 fail loud——大声报错，但只影响它负责的那一块，渲染器有回退链兜底。
+一个插件是一个 npm 包，`package.json` 里带 `diorama` 字段声明全局唯一的 `id`、兼容的契约版本范围（当前 `>=0.0.2 <0.1.0`）与依赖（`requires`）。一个包可以同时有 **server 半边**（注册服务，有文件系统权限，通过 RPC 暴露给页面）与 **client 半边**（注册座位条目与渲染组件）；两边不共享内存，只通过 RPC 通信。加载时内核校验契约版本，不匹配就拒绝加载并说明原因；任何失败都是 fail loud——大声报错，但只影响它负责的那一块，渲染器有回退链兜底。
 
 关键约束：**文件访问只能走 `ctx.fs`**（只读），插件里禁止 `import 'node:fs'`；协作只走座位（slot）与 Cordis 服务，不做跨插件的值导入。完整的签名、座位清单与匹配规则见 [docs/contract.md](docs/contract.md)；设计动机与已拍板的取舍见 [docs/architecture.md](docs/architecture.md)；能力档位（✅ / 待定 / 明确不做）见 [docs/features.md](docs/features.md)。
 
@@ -163,11 +165,11 @@ diorama-beta .
 | [docs/architecture.md](docs/architecture.md) | **为什么**：已拍板的决定、放弃项与代价 |
 | [docs/features.md](docs/features.md) | **有什么**：能力清单与档位（✅ / 待定 / 明确不做） |
 | [docs/plan.md](docs/plan.md) | 阶段性排期与各里程碑的验收标准 |
-| [docs/m0…m8/spec.md](docs/) | 每一档的实施说明与踩坑记录 |
+| [docs/m0…m9/spec.md](docs/) | 每一档的实施说明与踩坑记录 |
 
 ## 状态与许可
 
-- 契约版本 `0.0.1`（pre-1.0 线：破坏性变更以 `0.0.x` 递增表达；插件声明 `>=0.0.1 <0.1.0`）。
-- 已实现：文件树、多标签、五类渲染器、git 变更与历史、文件搜索、命令面板与快捷键体系、watch、URL 深链、图标、gateway 多目录挂载、`diorama.toml` 配置。167 条单测 + 89 条端到端全部通过。
-- 尚未做：外部插件加载（`~/.diorama/plugins` 与 npm 来源）、主题、编辑能力（永远不会做——这是只读查看器）。
+- 契约版本 `0.0.2`（pre-1.0 线：破坏性变更以 `0.0.x` 递增表达；插件声明 `>=0.0.2 <0.1.0`）。
+- 已实现：文件树、多标签、五类渲染器、git 变更与历史、文件搜索、命令面板与快捷键体系、watch、URL 深链、图标、明暗主题（跟随系统 / 锁定 / 第三方主题注册）、gateway 多目录挂载、`diorama.toml` 配置。179 条单测 + 94 条端到端全部通过。
+- 尚未做：外部插件加载（`~/.diorama/plugins` 与 npm 来源）、界面语言（i18n）、编辑能力（永远不会做——这是只读查看器）。
 - [MIT](LICENSE)

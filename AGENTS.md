@@ -2,15 +2,18 @@
 
 > 给在本仓库里工作的 agent（以及新加入的人）。读完这一页再改代码。
 > 只写**每次都要知道的事实**，不写流程叙事；细节在链接的文档里。
+> 当前契约 **v0.0.2**（§19 是主题切换的变更清单）。
 
 ## 1. 先读什么
 
 | 顺序 | 文档 | 读它为了 |
 |---|---|---|
-| 1 | [docs/contract.md](docs/contract.md) | **能不能**：内核与插件的唯一约定，带版本号（当前 **v0.8**）。改任何 `ctx.*` / slot 签名都算改契约 |
+| 1 | [docs/contract.md](docs/contract.md) | **能不能**：内核与插件的唯一约定，带版本号（当前 **v0.0.2**）。改任何 `ctx.*` / slot 签名都算改契约 |
 | 2 | [docs/architecture.md](docs/architecture.md) | **为什么**：已拍板的决定、放弃项、代价。不要重新讨论已拍板的事 |
 | 3 | [docs/features.md](docs/features.md) | **有什么**：能力清单与档位（✅ / v1 / 未来 / 不做） |
 | 4 | 最近一档的 `docs/mN/spec.md` | **怎么实现的** + **§6.2 的坑**（见下面 §5） |
+
+最近一档是 [docs/m9/spec.md](docs/m9/spec.md)（主题切换，`ctx.theme`）。
 
 `docs/plan.md` 是**阶段性排期**，会退役；不要把它当长期真源，也不要在新代码里引用它。
 一次会话的最小读法：`contract.md` 目录 → `features.md` 表 → 最近 spec 的「坑」一节。
@@ -58,8 +61,10 @@ scripts/                  生成器（图标表；`pnpm icons` 重新生成）
 | `ctx.tabs` / `ctx.tree` | `kernel/src/client/tabs.ts`、`client/tree.ts` |
 | `ctx.git`（仓库探测、status/diff/log/show/showCommit/blob、上限） | `kernel/src/server/git.ts`、`kernel/src/shared/types.ts`、`kernel/src/client/git.ts` |
 | `ctx.fs` 的大小上限（两端共用一个数） | `kernel/src/shared/limits.ts` |
+| 页面配色 token（light / dark 调色板、主题覆盖的集合） | `ui/src/styles.css`（`:root` 与 `[data-scheme='dark']` 两处**一起改**）；防白闪脚本在 `apps/web/index.html` |
 | `ctx.search`（文件名 / 内容搜索、上限、reveal store） | `kernel/src/server/search.ts`、`kernel/src/shared/search.ts`、`kernel/src/client/search.ts`、`ui/src/reveal.ts` |
 | `ctx.router`（`/~/` URL 与活动 tab） | `kernel/src/client/router.ts`、`kernel/src/server/http.ts`（`/~/` 回壳） |
+| `ctx.theme`（配色偏好、主题注册表、`data-scheme`） | `kernel/src/client/theme.ts` |
 | 插件图、boot 顺序、`settle`、mount fork / `onMount` | `kernel/src/server/plugins.ts`、`client/boot.ts`、`server/plan.ts` |
 | gateway 的 mount 表、端口、degraded 状态机 | `kernel/src/server/gateway.ts` |
 | 控制面协议（帧、方法、错误码） | `kernel/src/shared/control.ts`、`kernel/src/server/control.ts` |
@@ -70,8 +75,8 @@ scripts/                  生成器（图标表；`pnpm icons` 重新生成）
 
 ### 加一个内置插件：7 处要一起改
 
-1. `packages/plugins/<id>/` 新包：`package.json`（`diorama.id` / `contract: ">=0.8 <0.9"` / `client.entry` / `requires`）、`vite.config.ts`、`tsconfig.json`、`tsconfig.emit.json`（从任意现有插件复制）。
-2. `packages/kernel/src/server/plan.ts` 的 `BUILTIN_PLUGIN_IDS`（顺序 = boot 顺序）。**插件的 id 不能与内核服务 id 相同**（`KERNEL_SERVICE_IDS`：`fs` / `git` / `search`）——同名会让 `halves` 表出现重复键，服务被静默覆盖；照 `git` / `git-changes` 的样子分开命名。
+1. `packages/plugins/<id>/` 新包：`package.json`（`diorama.id` / `contract: ">=0.0.2 <0.1.0"` / `client.entry` / `requires`）、`vite.config.ts`、`tsconfig.json`、`tsconfig.emit.json`（从任意现有插件复制）。
+2. `packages/kernel/src/server/plan.ts` 的 `BUILTIN_PLUGIN_IDS`（顺序 = boot 顺序）。**插件的 id 不能与内核服务 id 相同**（`KERNEL_SERVICE_IDS`：`fs` / `git` / `search`；`theme` 这个 id 也已被内置 piece 占用）——同名会让 `halves` 表出现重复键，服务被静默覆盖；照 `git` / `git-changes` 的样子分开命名。
 3. `packages/cli/src/plugins-server.ts` 的 `halves` 映射（server 半边）。
 4. `packages/cli/package.json` 的 `dependencies` 加 `workspace:*`。
 5. 根 `package.json` 的 `build` 脚本加一条 `pnpm --filter diorama-plugin-<id> run build`（放在依赖它的包之前）。
@@ -119,6 +124,9 @@ scripts/                  生成器（图标表；`pnpm icons` 重新生成）
 | 新服务在 `onMount` 里报「no "fs" on this mount」 | `onMount` 跑在 mount fiber 还在 `apply` 的时候，`provide` 是 effect，要等 fiber 激活 | 需要别的 mount 服务的服务插件：要么在子 fiber 里 `provide`（`gitHalf`），要么把查找**推迟到第一次使用**（`SearchService` 收 `() => FsService`）|
 | 浏览器报 `does not declare the expected name "x" (got y)`，整个插件被跳过 | 模块的 `name` 导出必须等于 manifest 的 `diorama.id` | 改 id 时三处一起改：`package.json` 的 `diorama.id`、`src` 里的 `export const name`、`BUILTIN_PLUGIN_IDS` |
 | RPC 对某个内核服务一直 `ESERVICE`，日志没有报错 | 服务的 server 半边没被 CLI 选中（`selectPlugins` 的固定清单漏了它） | 新内核服务的四处接线见 §4「新内核服务的『每 mount 一份』接线」 |
+| 改了 `index.html`（或颜色）后 e2e 行为像没生效，`data-scheme` 是 `null` | e2e 的壳来自 `packages/cli/web/`（组装产物），`pnpm build` 不刷新它 | 改了壳 / 样式后跑 `node scripts/assemble-package.mjs` 再测（m9/spec §5.1） |
+| 新 token 只加了 light，暗色下掉回奇怪的颜色 | `:root` 与 `:root[data-scheme='dark']` 两处必须成对 | 颜色一律进 token 表（contract §5.3）；两处一起加 |
+| 主题「注册了但 palette 里没有」 | `theme` piece 不在 boot 图（`--plugins` 没选它），或注册发生在 piece 同步之后又被 dispose | 命令由 `theme` piece 从注册表同步；确认 piece 在图中、注册方没有立刻注销 |
 
 ## 6. 边界（不要越过的线）
 
