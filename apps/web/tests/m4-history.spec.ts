@@ -173,6 +173,11 @@ test('history: the switcher has shortcuts, and a view that is not there is not r
   server = await startDiorama(directory.root)
   await page.goto(server.url)
   await expect(page.getByTestId('sidebar-pane').first()).toBeVisible()
+  // Wait for the views to be *registered*, not just for the column to exist:
+  // a view command's `when` reads the switcher's registry, which `git-changes`
+  // fills in asynchronously. Pressing before that is a no-op by design
+  // (contract.md §3.7), and the assertion then fails on a race, not a bug.
+  await expect(page.getByTestId('sidebar-switcher').getByRole('tab', { name: '变更' })).toBeVisible()
 
   // mod+alt+2 → changes, mod+alt+3 → history, mod+alt+1 → files.
   await page.keyboard.press(`${MOD}+Alt+2`)
