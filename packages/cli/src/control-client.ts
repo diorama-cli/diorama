@@ -25,8 +25,17 @@ export const START_TIMEOUT_MS = 10_000
 export const STOP_TIMEOUT_MS = 5_000
 
 export interface CliIo {
-  /** stdout sink. */
+  /** stdout sink: one message, one line. */
   out(message: string): void
+  /**
+   * stdout sink **without** a trailing newline.
+   *
+   * The interactive wizard draws in place: `ESC[nA`, `ESC[J` and the frame are
+   * three writes whose byte positions matter. Sending them through `out()`
+   * appends a newline to each, which breaks the line accounting and makes every
+   * redraw append a frame instead of replacing one.
+   */
+  raw(text: string): void
   /** stderr sink. */
   err(message: string): void
   env: NodeJS.ProcessEnv
@@ -42,6 +51,7 @@ export function cliName(io: { name?: string }): string {
 export function defaultIo(): CliIo {
   return {
     out: message => process.stdout.write(`${message}\n`),
+    raw: text => process.stdout.write(text),
     err: message => process.stderr.write(`${message}\n`),
     env: process.env,
   }

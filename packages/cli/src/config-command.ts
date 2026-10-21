@@ -492,7 +492,9 @@ export async function wizard(
   if (existing !== '') io.out(existing.replace(/\n$/, ''))
   io.out('Enter keeps a value, "-" clears it.')
 
-  const terminal = createTerminal(options.stdin ?? process.stdin, text => io.out(text.trimEnd()))
+  // The terminal writes bytes, not lines: escape sequences and frames must land
+  // exactly where they are meant to, so this sink never adds a newline.
+  const terminal = createTerminal(options.stdin ?? process.stdin, text => io.raw(text))
   let result: { config: FileConfig; changed: boolean; changes: Change[] }
   try {
     result = await runWizard(file, terminal, {

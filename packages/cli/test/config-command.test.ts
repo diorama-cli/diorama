@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { EventEmitter } from 'node:events'
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -34,7 +35,9 @@ function recorder(env: NodeJS.ProcessEnv = {}): { io: CliIo; lines: string[] } {
   return {
     lines,
     io: {
-      out: (message: string) => lines.push(message),
+      // Mirrors `defaultIo`: `out` is one line, `raw` is exact bytes.
+      out: (message: string) => lines.push(`${message}\n`),
+      raw: (text: string) => lines.push(text),
       err: (message: string) => lines.push(`!${message}`),
       env,
     },
@@ -228,6 +231,54 @@ test('terminal: lines arrive one at a time, CRLF is trimmed, the end is a value'
   assert.deepEqual(asked, ['first: ', 'second: ', 'third: '])
 })
 
+/** Wait until the recorded output satisfies `predicate` (the wizard is async). */
+async function until(lines: readonly string[], predicate: (text: string) => boolean): Promise<string> {
+  for (let attempt = 0; attempt < 200; attempt++) {
+    const text = lines.join('')
+    if (predicate(text)) return text
+    await new Promise(done => setImmediate(done))
+  }
+  throw new Error(`condition never met; output was:\n${lines.join('')}`)
+}
+
+test('wizard: drawing goes through the raw sink, so a redraw replaces a frame', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'diorama-config-'))
+  const project = mkdtempSync(join(tmpdir(), 'diorama-project-'))
+  try {
+    const { io, lines } = recorder({ DIORAMA_HOME: home })
+    const input = new EventEmitter() as unknown as TerminalInput & { send(text: string): void; end(): void }
+    input.isTTY = true
+    input.setRawMode = () => {}
+    input.send = text => (input as unknown as EventEmitter).emit('data', Buffer.from(text, 'utf8'))
+    input.end = () => (input as unknown as EventEmitter).emit('end')
+
+    const running = configCommand(io, ['--dir', project], { stdin: input })
+    await until(lines, text => text.includes('host — where the page listens'))
+    // Move down once: the frame is redrawn, not appended.
+    input.send('\x1b[B')
+    await until(lines, text => text.split('host — where the page listens').length > 2)
+    // Then keep every field, and decline the write once the preview asks.
+    for (const key of ['\r', '\r', '\r', '\r', '\r', '\r', '\r', 'n\r']) {
+      input.send(key)
+      await new Promise(done => setImmediate(done))
+    }
+    assert.equal(await running, 0)
+
+    const written = lines.join('')
+    // One cursor-up per redraw, and the title is written once per frame — the
+    // bug was `io.out` adding a newline after every escape, which made each
+    // frame land below the last one.
+    const frames = written.split('host — where the page listens').length - 1
+    assert.equal(frames, 2, `expected 2 frames (initial + one redraw), got ${frames}`)
+    assert.match(written, /\x1b\[\d+A\x1b\[J/, 'a redraw must move up before erasing')
+    // No stray newline between the cursor-up and the erase.
+    assert.ok(!/\x1b\[\d+A\n/.test(written), 'escape sequences must not be split by a newline')
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+    rmSync(project, { recursive: true, force: true })
+  }
+})
+
 test('config set: writes the named file, leaving the rest of it alone', async () => {
   const home = mkdtempSync(join(tmpdir(), 'diorama-config-'))
   try {
@@ -285,7 +336,7 @@ test('config set: --dry-run prints the file and writes nothing', async () => {
   try {
     const { io, lines } = recorder({ DIORAMA_HOME: home })
     assert.equal(await configCommand(io, ['set', '--port', '8080', '--dry-run']), 0)
-    assert.ok(lines.includes('port = 8080'))
+    assert.ok(lines.some(line => line === 'port = 8080\n'))
     assert.ok(lines.some(line => line.startsWith('dry run: not writing ')))
     assert.throws(() => readFileSync(join(home, 'diorama.toml'), 'utf8'), /ENOENT/)
   } finally {
@@ -354,8 +405,8 @@ test('config show: the effective configuration, with its source', async () => {
 
     const text = recorder({ DIORAMA_HOME: home })
     assert.equal(await configCommand(text.io, ['show', project]), 0)
-    assert.equal(text.lines[0], `config file: ${join(real, 'diorama.toml')}`)
-    assert.ok(text.lines.includes('  port = 4321'))
+    assert.equal(text.lines[0], `config file: ${join(real, 'diorama.toml')}\n`)
+    assert.ok(text.lines.includes('  port = 4321\n'))
   } finally {
     rmSync(home, { recursive: true, force: true })
     rmSync(project, { recursive: true, force: true })
