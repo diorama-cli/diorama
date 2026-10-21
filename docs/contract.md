@@ -1301,6 +1301,29 @@ diorama serving <realpath>
 
 重复挂载已存在的目录：额外一行 `already mounted (use "diorama gateway restart" to reload)`。
 
+**`--json`（`diorama [dir] --json`、`diorama restart <dir> --json`）**：把同一次挂载输出成
+**一个** JSON 文档，stdout 只有它（没有人类可读的行），便于其它程序直接取 URL：
+
+```json
+{
+  "url": "http://127.0.0.1:54321/",
+  "root": "/Users/me/proj",
+  "mountId": "abc12345",
+  "created": true,
+  "mount": { "mountId": "abc12345", "root": "/Users/me/proj", "port": 54321, "url": "…", "state": "ok", "since": 1760000000000, "plugins": ["…"], "hidden": [".git", "node_modules"] }
+}
+```
+
+- `url` / `root` / `mountId` 是顶层便捷键（与 `mount` 里的同名字段**同值**）；`mount` 是 §7.3 的
+  `MountStatus` 原文，不再裁剪。`created` 与人类可读形式的 `already mounted` 同义。
+- 服务端报了插件故障时另有 `pluginFailures: string`（与人类可读形式的 stderr 行同源）；
+  此时退出码仍是 1（§7.6 的表不变）。
+- `restart` 另加 `remounted: <旧 mountId> | null`。
+- 失败（参数、目录、配置、端口、连不上）照常走 stderr 与对应退出码，**stdout 不输出任何东西**
+  ——调用方不会把错误当成一次挂载。
+- `--foreground` 可以与 `--json` 同用：文档照常打印在 stdout，进程随后照常**不退出**（§7.5）。
+  包一层进程的调用方读第一行即可，子进程的生命周期由它自己管。
+
 `diorama ls`（表头固定；URL 一列**必须有**；非 TTY 不加颜色，不截断）：
 
 ```text
@@ -1592,6 +1615,22 @@ RPC 广播 `{ topic: 'mount.state', payload: MountStatus }`。
 
 **没有变的东西**：`diorama.toml` 的字段与默认值（§4.1）、优先级（CLI > toml > 默认）、
 `EffectiveConfig` 的形状、`/plugin.json` 的下发、控制面 `mount` 的语义。
+
+## 21. `0.0.2` 之后：挂载的 JSON 输出（未发版，与 §20 同一档）
+
+> 2026-10-21。用户要求：**加参数控制 diorama 在目录启动后输出 JSON，方便其它程序调用后取 URL**。
+> 契约号不动（§6）：只加 CLI 输出形态，不改 `ctx.*`、slot、RPC 与控制面协议。
+
+| 条款 | `0.0.2` | 本档 |
+|---|---|---|
+| §7.6 `diorama [dir]` 输出 | 五行人类可读文本 | 另加 `--json`：**一个** JSON 文档（顶层 `url` / `root` / `mountId` / `created`，`mount` 为 §7.3 的 `MountStatus` 原文；故障时另有 `pluginFailures`）；默认输出不变 |
+| §7.6 `diorama restart <dir>` | 三行文本 | 同样接受 `--json`，另加 `remounted` |
+| §7.6 `--json` 的边界 | — | `--foreground` 可同用（打印后照常不退出）；失败时 stdout 为空、照常走 stderr 与退出码 |
+| §7.6 退出码表 | 不变 | 不变（`pluginFailures` 仍为 1） |
+
+**没有变的东西**：五行文本（e2e 靠它抓 URL）、`ls --json` 的形状、`diorama.toml`、控制面 `mount`
+的语义、`MountStatus` 的字段。`--json` 不新增任何服务端行为——它只是把 gateway 已经回答的
+`MountStatus` 原样交给调用方。
 
 ## 待定清单（v0.4 后仍 🔲）
 

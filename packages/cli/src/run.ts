@@ -27,8 +27,10 @@ import {
   type BootManifest,
   type ConfigOrigin,
   type EffectiveConfig,
+  type MountStatus,
   type RpcDispatcher,
 } from 'diorama-kernel/server'
+import { mountDocument, mountLines } from './mount-output.ts'
 import { loadServerHalf } from './plugins-server.ts'
 
 export interface CliOptions {
@@ -49,6 +51,8 @@ export interface CliOptions {
   dumpPlan: boolean
   /** Print the effective configuration and exit. */
   dumpConfig: boolean
+  /** `--json`: print one machine-readable document instead of the five lines. */
+  json: boolean
 }
 
 export interface ParsedArgs {
@@ -73,6 +77,7 @@ $DIORAMA_HOME) and is overridden by these options:
                           Simulate a broken plugin, e.g. "plaintext:name"
   --dump-plan             Print the plugin boot plan as JSON and exit
   --dump-config           Print the effective configuration as JSON and exit
+  --json                  Print the mount as one JSON document (for scripts)
   -h, --help              Show this help
 
 Environment:
@@ -91,6 +96,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
   let breakPlugin: string | undefined
   let dumpPlan = false
   let dumpConfig = false
+  let json = false
 
   const current = (): CliOptions => ({
     dir: '',
@@ -102,6 +108,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
     ...(breakPlugin === undefined ? {} : { breakPlugin }),
     dumpPlan,
     dumpConfig,
+    json,
   })
 
   const takeValue = (index: number, flag: string): [string, number] | string => {
@@ -119,6 +126,10 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
     }
     if (arg === '--dump-config') {
       dumpConfig = true
+      continue
+    }
+    if (arg === '--json') {
+      json = true
       continue
     }
     if (arg === '--all') {
@@ -352,11 +363,22 @@ export async function main(argv: readonly string[], env: NodeJS.ProcessEnv = pro
 
   const displayHost = config.host === '0.0.0.0' || config.host === '::' ? '127.0.0.1' : config.host
   const url = `http://${displayHost.includes(':') ? `[${displayHost}]` : displayHost}:${port}/`
-  process.stdout.write(`diorama serving ${root}\n`)
-  process.stdout.write(`  ${url}\n`)
-  process.stdout.write(`  config: ${origin.path ?? 'none (defaults)'}\n`)
-  process.stdout.write(`  [mount:${mountId}] plugins: ${config.plugins.join(', ') || '(none)'}\n`)
-  if (config.ignore.length > 0) process.stdout.write(`  hidden: ${config.ignore.join(', ')}\n`)
+  const mount: MountStatus = {
+    mountId,
+    root,
+    port,
+    url,
+    state: 'ok',
+    since: Date.now(),
+    ...(origin.path === undefined ? {} : { configFile: origin.path }),
+    plugins: config.plugins,
+    hidden: config.ignore,
+  }
+  if (options.json) {
+    process.stdout.write(`${JSON.stringify(mountDocument({ mount, created: true }))}\n`)
+  } else {
+    for (const line of mountLines({ mount, created: true })) process.stdout.write(`${line}\n`)
+  }
 
   if (tree.failures.length > 0) {
     process.stderr.write(

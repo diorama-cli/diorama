@@ -27,6 +27,7 @@ import {
 } from './control-client.ts'
 import { configCommand } from './config-command.ts'
 import { runGateway, socketPath } from './gateway-command.ts'
+import { mountDocument, mountLines, type MountOutput } from './mount-output.ts'
 import { main as serveMain, parseArgs, USAGE, usage } from './run.ts'
 
 export { USAGE, parseArgs, usage }
@@ -36,7 +37,7 @@ export function controlUsage(name = 'diorama'): string {
   return `Usage:
   ${name} [dir] [options]        mount a directory (starts the gateway if needed)
   ${name} ls [--json]            list mounts: directory, URL, status
-  ${name} restart <mount|dir>    unmount and mount again
+  ${name} restart <mount|dir>    unmount and mount again (--json for scripts)
   ${name} config [show|set|unset]  read or edit a diorama.toml (see "${name} config --help")
   ${name} gateway start|stop|status|restart
   ${name} gateway run            run the gateway in the foreground
@@ -44,6 +45,7 @@ export function controlUsage(name = 'diorama'): string {
 
 Options for "${name} [dir]":
   --foreground                   run the gateway in this process (no daemon)
+  --json                         print the mount as one JSON document (for scripts)
   --port / --host / --plugins / --config / --all / --break-plugin
   --dump-plan / --dump-config    print the resolved plan/configuration and exit
 
@@ -174,6 +176,10 @@ export async function restartMount(io: CliIo, argv: readonly string[]): Promise<
       config: merged.config,
       ...(merged.origin.path === undefined ? {} : { configFile: merged.origin.path }),
     })) as MountStatus & { created: boolean }
+    if (argv.includes('--json')) {
+      io.out(JSON.stringify({ ...mountDocument({ mount: mounted, created: true }), remounted: removed.mountId || null }))
+      return 0
+    }
     io.out(`diorama serving ${mounted.root}`)
     io.out(`  ${mounted.url}`)
     io.out(`  remounted ${removed.mountId || '(none)'} → ${mounted.mountId}`)
@@ -236,8 +242,7 @@ async function mountCommand(io: CliIo, argv: readonly string[]): Promise<number>
       ...(configFile === undefined ? {} : { configFile }),
       ...(options.breakPlugin === undefined ? {} : { breakPlugin: options.breakPlugin }),
     })) as MountStatus & { created: boolean; pluginFailures?: string }
-    printMount(io, mounted)
-    if (mounted.created === false) io.out(`already mounted (run "${cliName(io)} restart <dir>" to reload)`)
+    printMount(io, { mount: mounted, created: mounted.created, ...(mounted.pluginFailures === undefined ? {} : { pluginFailures: mounted.pluginFailures }) }, { json: options.json })
     if (mounted.pluginFailures !== undefined) {
       io.err(`${cliName(io)}: ${mounted.pluginFailures}`)
       return 1
@@ -302,7 +307,11 @@ async function foreground(io: CliIo, argv: readonly string[]): Promise<number> {
       ...(configFile === undefined ? {} : { configFile }),
       ...(options.breakPlugin === undefined ? {} : { breakPlugin: options.breakPlugin }),
     })) as MountStatus & { created: boolean; pluginFailures?: string }
-    printMount(io, mounted)
+    printMount(
+      io,
+      { mount: mounted, created: mounted.created, ...(mounted.pluginFailures === undefined ? {} : { pluginFailures: mounted.pluginFailures }) },
+      { json: options.json },
+    )
     if (mounted.pluginFailures !== undefined) io.err(`${cliName(io)}: ${mounted.pluginFailures}`)
   } catch (failure) {
     await gateway.close()
@@ -318,13 +327,19 @@ async function foreground(io: CliIo, argv: readonly string[]): Promise<number> {
   return new Promise<number>(() => {})
 }
 
-/** The five lines `diorama <dir>` prints (contract.md §7.6). */
-function printMount(io: CliIo, mounted: MountStatus): void {
-  io.out(`diorama serving ${mounted.root}`)
-  io.out(`  ${mounted.url}`)
-  io.out(`  config: ${mounted.configFile ?? 'none (defaults)'}`)
-  io.out(`  [mount:${mounted.mountId}] plugins: ${mounted.plugins.join(', ') || '(none)'}`)
-  if (mounted.hidden.length > 0) io.out(`  hidden: ${mounted.hidden.join(', ')}`)
+/**
+ * Print the mount: the five lines (contract.md §7.6), or **one** JSON document
+ * with `--json` so another program can read the URL without parsing prose.
+ *
+ * Everything goes to stdout in both forms: stdout carries the answer, stderr
+ * carries failures (`pluginFailures` is both a JSON field and a stderr line).
+ */
+function printMount(io: CliIo, output: MountOutput, options: { json?: boolean } = {}): void {
+  if (options.json) {
+    io.out(JSON.stringify(mountDocument(output)))
+    return
+  }
+  for (const line of mountLines(output, cliName(io))) io.out(line)
 }
 
 /** The directory behind a user-supplied path (realpath'd, must be a directory). */

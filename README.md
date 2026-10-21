@@ -67,7 +67,21 @@ diorama --version
 | `--config <path>` | 指定 `diorama.toml`，跳过默认查找 |
 | `--all` | 不隐藏任何条目（等价 `ignore = []`） |
 | `--dump-config` / `--dump-plan` | 打印合成后的配置 / 插件启动计划（JSON），用于排查 |
+| `--json` | 把挂载输出成**一个** JSON 文档（`url` / `root` / `mountId` / `created` + 完整 `mount`），给脚本用 |
 | `--foreground` | 在当前进程前台运行 gateway（调试、测试用） |
+
+### 给其它程序用：`--json`
+
+```bash
+$ diorama . --json
+{"url":"http://127.0.0.1:54321/","root":"/path/to/project","mountId":"78853ab4","created":true,"mount":{"mountId":"78853ab4",...}}
+```
+
+stdout 只有这一个文档，没有人类可读的行；`jq -r .url` 即可拿到地址。`created: false` 表示这个
+目录本来就已经挂载（同一 URL），`pluginFailures` 只在插件启动失败时出现（此时退出码 1）。
+`diorama restart <dir> --json` 同样可用，另带 `remounted`（被替换掉的旧 mountId）。
+失败时 stdout 为空、错误照常走 stderr 与对应退出码——调用方不会把错误当成一次挂载。
+`--foreground` 也能配 `--json`：文档照常打印，进程随后照常前台不退出，由包一层的调用方读第一行。
 
 退出码：成功 `0`；参数错误、目录不存在、配置写错为 `2`；端口被占、插件加载失败、连接超时为 `1`；未运行 gateway 时执行 `stop` 是成功的空操作。
 
@@ -190,6 +204,6 @@ diorama-beta .
 ## 状态与许可
 
 - 契约版本 `0.0.2`（pre-1.0 线：破坏性变更以 `0.0.x` 递增表达；插件声明 `>=0.0.2 <0.1.0`）。
-- 已实现：文件树、多标签、五类渲染器、git 变更与历史、文件搜索、命令面板与快捷键体系、watch、URL 深链、图标、明暗主题（跟随系统 / 锁定 / 第三方主题注册）、gateway 多目录挂载、`diorama.toml` 配置。179 条单测 + 94 条端到端全部通过。
+- 已实现：文件树、多标签、五类渲染器、git 变更与历史、文件搜索、命令面板与快捷键体系、watch、URL 深链、图标、明暗主题（跟随系统 / 锁定 / 第三方主题注册）、gateway 多目录挂载、`diorama.toml` 配置、挂载的 `--json` 输出。241 条单测 + 108 条端到端全部通过。
 - 尚未做：外部插件加载（`~/.diorama/plugins` 与 npm 来源）、界面语言（i18n）、编辑能力（永远不会做——这是只读查看器）。
 - [MIT](LICENSE)

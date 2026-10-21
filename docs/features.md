@@ -20,9 +20,10 @@
 | C5 | `--host <ip>` | ✅ M0→M2 | 默认 `127.0.0.1`；`diorama.toml` 可设 |
 | C9 | `diorama.toml`（`host`/`port`/`plugins`/`ignore`/`[watch]`） | ✅ M2 | 目录 → `$DIORAMA_HOME` 查找；CLI > toml > 默认；写错 fail loud；`--config`、`--all`、`--dump-config` |
 | C10 | `diorama config`（读写 `diorama.toml`） | ✅ 本档 | 交互式逐项编辑（回车保留 / `-` 清除 / 预览 + 确认）；`config show [--json]`、`config set --<key> <value>`、`config unset <key>`；**默认写 `$DIORAMA_HOME/diorama.toml`**，`--dir` / `--config` 才写项目文件（contract §4.2）；`--dry-run` / `--yes` |
+| C11 | `diorama [dir] --json` / `diorama restart <dir> --json` | ✅ 本档 | 把挂载输出成**一个** JSON 文档（`url` / `root` / `mountId` / `created` + 完整 `mount: MountStatus`），供其它程序直接取 URL；可与 `--foreground` 同用（打印后照常不退出，contract §7.6） |
 | C6 | 随机端口自动重试 | ✅ M3 | 随机端口上限 20 次；显式端口冲突直接 `EADDRINUSE`（退出码 1）|
 | C7 | realpath 挂载键 + 别名提示 | ✅ M3 | 挂载键 = realpath（同一真实目录幂等）；打印的目录是 realpath 后的 |
-| C8 | 单测/集成测试 | ✅ M0→本轮 | `apps/web/tests/`：94 条端到端（20 个 spec，真实 CLI/gateway + Chromium）；`pnpm test:unit`：179 条单测 |
+| C8 | 单测/集成测试 | ✅ M0→本轮 | `apps/web/tests/`：108 条端到端（23 个 spec，真实 CLI/gateway + Chromium）；`pnpm test:unit`：241 条单测 |
 
 ## 二、Gateway
 
