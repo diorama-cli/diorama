@@ -1,6 +1,6 @@
 {
   "name": "diorama-plugin-plaintext",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "private": true,
   "description": "Diorama piece: fallback renderer (monospace, no highlighting)",
   "type": "module",
@@ -22,7 +22,7 @@
     "src"
   ],
   "diorama": {
-    "contract": ">=0.0.2 <0.1.0",
+    "contract": ">=0.0.3 <0.1.0",
     "id": "plaintext",
     "client": {
       "entry": "./lib/client.cjs"
