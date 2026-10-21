@@ -22,7 +22,7 @@
 
 - **契约**回答"能不能"，**架构**回答"为什么"，**features** 回答"有什么"，**spec** 回答"当时怎么做的"。
 - 不要用里程碑编号（M1/M2/M4）作为**长期引用**。契约与架构里写"未排期""v1 之外"，不写"M4"——排期会变，能力不会。
-- 契约变更 = 升 `contract` 版本 + 更新内置插件 manifest 的 `contract` 范围 + 在 `contract.md` §13 记一条变更。
+- **契约号只在发版时升**（contract.md §6）：日常开发改 `ctx.*` / slot / 加插件都**不动** `CONTRACT_VERSION`，只照常改 `contract.md` 正文与变更清单；发版才升号，并一次性把全部内置 manifest 的 `contract` 范围升到新值。
 
 ## 3. 验证（改完必跑，顺序固定）
 
@@ -141,7 +141,7 @@ scripts/                  生成器（图标表；`pnpm icons` 重新生成）
 
 - 一个能力一块提交，提交信息写清"做了什么 + 为什么"。
 - 每块完成前跑 §3 四件套；**M0/M1 的验收用例必须保持绿**（它们是多 tab / 命令 / watch 改动的回归）。
-- 契约或座位类型变了：同步 `contract.md`（含 §13）与 `docs/features.md` 的档位。
+- 契约或座位类型变了：同步 `contract.md` 的正文与变更清单、`docs/features.md` 的档位——但**不升契约号**（§2、contract §6）。
 - 演示脚本：`node packages/cli/bin/diorama-beta <dir>`（或 `./link.sh` 后直接用 `diorama-beta`）。短命 CLI：确保 gateway → 挂载 → 打印 URL；输出里的 `config:` 与 `hidden:` 两行能直接看出 `diorama.toml` 是否生效。其它：`diorama-beta ls`、`diorama-beta gateway start|stop|status|restart`、`diorama-beta restart <dir>`。
 - **两个入口、两条通道**：`bin/diorama`（发布名）与 `bin/diorama-beta`（`DIORAMA_CHANNEL=beta`，link 进来的 checkout 用）。beta 的 socket/pid/日志都带 `-beta`，所以与已安装的 `diorama` 可以并存；`link.sh` 只创建 `diorama-beta`。e2e 一律走 `diorama-beta`。
 - **测试隔离**：e2e 每个用例用自己的 `DIORAMA_HOME`（临时目录）与自己的 gateway；不要把测试指向真实的 `~/.diorama`。
