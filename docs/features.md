@@ -23,7 +23,7 @@
 | C11 | `diorama [dir] --json` / `diorama restart <dir> --json` | ✅ 本档 | 把挂载输出成**一个** JSON 文档（`url` / `root` / `mountId` / `created` + 完整 `mount: MountStatus`），供其它程序直接取 URL；可与 `--foreground` 同用（打印后照常不退出，contract §7.6） |
 | C6 | 随机端口自动重试 | ✅ M3 | 随机端口上限 20 次；显式端口冲突直接 `EADDRINUSE`（退出码 1）|
 | C7 | realpath 挂载键 + 别名提示 | ✅ M3 | 挂载键 = realpath（同一真实目录幂等）；打印的目录是 realpath 后的 |
-| C8 | 单测/集成测试 | ✅ M0→本轮 | `apps/web/tests/`：108 条端到端（23 个 spec，真实 CLI/gateway + Chromium）；`pnpm test:unit`：241 条单测 |
+| C8 | 单测/集成测试 | ✅ M0→本轮 | `apps/web/tests/`：112 条端到端（24 个 spec，真实 CLI/gateway + Chromium）；`pnpm test:unit`：248 条单测 |
 
 ## 二、Gateway
 
@@ -70,7 +70,7 @@
 | P2 | `file-tree` | ✅ M0 | 左侧导航；目录点击=导航，文件点击=打开 |
 | P3 | `tabs` | ✅ M2 | 多 tab：每文件一个 tab、keyed 座位、关闭回退、每 tab 独立滚动；**不提供编辑** |
 | P4 | `renderer-registry` | ✅ M0→M1 | matcher 三档（ext → mime → probe）+ 兜底 + 失败回退（contract §5.1）|
-| P5 | `markdown` | ✅ M1 | `.md` → HTML（marked + DOMPurify 消毒）|
+| P5 | `markdown` | ✅ M1 | `.md` → HTML（marked + DOMPurify 消毒）；**链接留在页面内**（本站文件开 tab、`#fragment` 滚动、外部链接开新标签页、越界链接不动作；标题带 `id` 供锚点落点）——见 [m12/spec.md](m12/spec.md) |
 | P6 | `code` | ✅ M1 | highlight.js 按语言注册；`.md` 不在其中（归 markdown），`.html` / `.htm` 也不在其中（归 html）|
 | P7 | `plaintext` | ✅ M0 | 兜底渲染器 |
 | P8 | `palette` | ✅ M2 | 插件，`layout.overlay` 条目，`mod+k`；只列可执行命令 |

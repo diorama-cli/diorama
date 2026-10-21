@@ -569,8 +569,20 @@ code {
   border: 1px solid var(--dio-border);
 }
 
+/* A link inside a rendered document opens in the page (docs/m1/spec.md §7):
+   it is a tab, not a navigation, so it keeps the accent colour and an
+   underline that reads as "this is a link" without a hover to discover it. */
 .diorama-markdown a {
   color: var(--dio-accent);
+  text-decoration: underline;
+  text-decoration-color: var(--dio-accent-underline);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+/* A heading's `id` is a link target: leave room when scrolled to. */
+.diorama-markdown [id] {
+  scroll-margin-top: 8px;
 }
 
 /* Code piece (M1) */
