@@ -62,6 +62,12 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      # Playwright downloads its browsers separately from npm packages; the
+      # e2e step fails with "Executable doesn't exist" without this. The
+      # `--with-deps` variant also installs the OS libraries Chromium needs.
+      - name: Install the browser for e2e
+        run: pnpm --filter diorama-web exec playwright install --with-deps chromium
+
       # The version is the tag, and the tag must be the commit that was
       # reviewed. Both halves of that are checked before anything is built.
       - name: Verify the tag matches every manifest
