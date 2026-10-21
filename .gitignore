@@ -9,8 +9,10 @@ test-results/
 playwright-report/
 
 # Assembled for `npm pack` only (scripts/assemble-package.mjs): the published
-# tarball carries the plugin manifests/client halves and the page shell, but in
-# a checkout they are build outputs.
+# tarball carries the plugin manifests/client halves, the page shell, the
+# README (links rewritten for npmjs.com) and the LICENSE, but in a checkout
+# they are build outputs.
 packages/cli/plugins/
 packages/cli/web/
+packages/cli/README.md
 packages/cli/LICENSE

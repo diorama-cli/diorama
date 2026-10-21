@@ -11,17 +11,24 @@
  * | `plugins/<id>/client.cjs` | `GET /plugins/<id>.js` | the browser loads each half as its own `<script>`; they are closure factories, not modules |
  * | `web/` | `assetsRoot()` | the page shell is a Vite build (`index.html` + `assets/`), served as static files |
  *
+ * It also copies the repository `README.md` in, because npm only shows a
+ * package's own README — without one the registry page reads "No README data
+ * found". Its relative links are rewritten to the repository first: npmjs.com
+ * renders the file at a URL where `docs/contract.md` does not exist.
+ *
  * Run after `pnpm build` (`pnpm pack:prepare`). It is idempotent: every target
  * directory is replaced, so a removed plugin does not linger.
  */
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { rewriteReadme, unresolvedLinks } from './readme-for-npm.mjs'
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const cliDir = join(repo, 'packages/cli')
 const pluginsOut = join(cliDir, 'plugins')
 const webOut = join(cliDir, 'web')
+const readmeOut = join(cliDir, 'README.md')
 
 /** Read the ids from the kernel's own list, so this cannot drift from the boot graph. */
 function builtinPluginIds() {
@@ -80,4 +87,21 @@ dropMaps(webOut)
 const assets = readdirSync(join(webOut, 'assets'))
 process.stdout.write(`  web/ (index.html + ${assets.length} assets)\n`)
 
-console.log(`assembled ${ids.length} plugin manifests and the page shell into packages/cli`)
+// `README.md` and `LICENSE` are npm's "always included" files, but only from
+// the package directory: the repository keeps them at the root, so without
+// this the registry page has no README and the tarball no licence.
+const cliManifest = JSON.parse(readFileSync(join(cliDir, 'package.json'), 'utf8'))
+const source = readFileSync(join(repo, 'README.md'), 'utf8')
+const published = rewriteReadme(source, {
+  repositoryUrl: cliManifest.repository.url,
+  branch: process.env.DIORAMA_README_BRANCH ?? 'main',
+})
+const unresolved = unresolvedLinks(published)
+if (unresolved.length > 0) {
+  throw new Error(`README.md: relative links survived the rewrite: ${unresolved.join(', ')}`)
+}
+writeFileSync(readmeOut, published)
+cpSync(join(repo, 'LICENSE'), join(cliDir, 'LICENSE'))
+process.stdout.write(`  README.md (${source.length} → ${published.length} bytes, links absolute) + LICENSE\n`)
+
+console.log(`assembled ${ids.length} plugin manifests, the page shell, README and LICENSE into packages/cli`)

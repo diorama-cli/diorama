@@ -173,9 +173,9 @@ scripts/                  生成器（图标表；pnpm icons 重新生成）
 ```bash
 pnpm install
 pnpm build                 # 全量构建（含各包的类型声明产出）
-pnpm test:unit             # node --test，248 条单测
+pnpm test:unit             # node --test，257 条单测
 pnpm -r --no-sort run typecheck   # 注意：不要用 pnpm typecheck（任务图成环，会失败）
-pnpm --filter diorama-web exec playwright test   # 89 条端到端，真实 CLI + Chromium
+pnpm --filter diorama-web exec playwright test   # 112 条端到端，真实 CLI + Chromium
 ```
 
 端到端测试跑的是构建产物（`packages/*/lib`、`apps/web/dist`），改了源码先 `pnpm build` 再跑；每个用例使用独立的 `DIORAMA_HOME` 与 gateway，不碰真实的 `~/.diorama`。
@@ -189,7 +189,7 @@ diorama-beta .
 
 `link.sh` 通过 `npm link` 把本仓库接到全局，但命令名是 **`diorama-beta`**，永远不会覆盖已安装的 `diorama`。两条通道互不干扰：beta 的 socket、pid、日志文件都带 `-beta` 后缀，`diorama-beta ls` 看不到发布版的挂载，反之亦然。也可以不 link，直接 `node packages/cli/bin/diorama-beta <dir>`，或 `source ./link.sh` 只给当前 shell 加 PATH。
 
-发布：`pnpm pack:prepare`（= 全量构建 + 组装单包）后在 `packages/cli` 里 `npm publish`，产物是 `@diorama-cli/diorama`。
+发布：`pnpm pack:prepare`（= 全量构建 + 组装单包）后在 `packages/cli` 里 `npm publish`，产物是 `@diorama-cli/diorama`。组装会把根 `README.md` 拷进包目录（npm 只认包目录里的 README），并把其中的相对链接改写成仓库地址——npmjs.com 上渲染的那一页没有 `docs/` 目录。
 
 ### 文档索引
 
@@ -204,6 +204,6 @@ diorama-beta .
 ## 状态与许可
 
 - 契约版本 `0.0.2`（pre-1.0 线：破坏性变更以 `0.0.x` 递增表达；插件声明 `>=0.0.2 <0.1.0`）。
-- 已实现：文件树、多标签、五类渲染器、git 变更与历史、文件搜索、命令面板与快捷键体系、watch、URL 深链、图标、明暗主题（跟随系统 / 锁定 / 第三方主题注册）、gateway 多目录挂载、`diorama.toml` 配置、挂载的 `--json` 输出。248 条单测 + 112 条端到端全部通过。
+- 已实现：文件树、多标签、五类渲染器、git 变更与历史、文件搜索、命令面板与快捷键体系、watch、URL 深链、图标、明暗主题（跟随系统 / 锁定 / 第三方主题注册）、gateway 多目录挂载、`diorama.toml` 配置、挂载的 `--json` 输出。257 条单测 + 112 条端到端全部通过。
 - 尚未做：外部插件加载（`~/.diorama/plugins` 与 npm 来源）、界面语言（i18n）、编辑能力（永远不会做——这是只读查看器）。
 - [MIT](LICENSE)
