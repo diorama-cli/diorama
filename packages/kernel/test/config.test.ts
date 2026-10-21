@@ -2,10 +2,16 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   ConfigError,
+  configWritePath,
   defaultConfig,
+  formatFileConfig,
   mergeConfig,
   parseConfigFile,
+  patchFileConfig,
+  readFileConfig,
   resolveConfig,
+  writeFileConfig,
+  type FileConfig,
   type ResolveOptions,
 } from '../src/server/config.ts'
 
@@ -126,4 +132,111 @@ test('config: --config points at one file and must exist', () => {
   const options = { ...files({ '/etc/dio.toml': 'host = "10.0.0.1"' }), configPath: '/etc/dio.toml' }
   assert.equal(resolveConfig(options).config.host, '10.0.0.1')
   assert.throws(() => resolveConfig({ ...files({}), configPath: '/nope.toml' }), /no such file/)
+})
+
+// --- writing (contract.md §4.2) --------------------------------------------
+
+test('config: a patch touches only the keys it names', () => {
+  const base = parseConfigFile(
+    ['host = "0.0.0.0"', 'port = 4000', '[watch]', 'debounceMs = 50', 'enabled = false'].join('\n'),
+    'test',
+  )
+  const patched = patchFileConfig(base, { port: 8080, 'watch.enabled': true })
+  assert.deepEqual(patched, {
+    host: '0.0.0.0',
+    port: 8080,
+    // The untouched watch field survives; the table is not replaced wholesale.
+    watch: { debounceMs: 50, enabled: true },
+  })
+  // The input is not mutated: `set` reads a file and writes another one.
+  assert.equal(base.port, 4000)
+  assert.equal(base.watch?.enabled, false)
+})
+
+test('config: `undefined` deletes a key, and an emptied watch table disappears', () => {
+  const base: FileConfig = { host: '0.0.0.0', watch: { enabled: false } }
+  assert.deepEqual(patchFileConfig(base, { host: undefined }), { watch: { enabled: false } })
+  assert.deepEqual(patchFileConfig(base, { 'watch.enabled': undefined }), { host: '0.0.0.0' })
+  assert.deepEqual(patchFileConfig(base, { 'watch.enabled': undefined, host: undefined }), {})
+})
+
+test('config: a patch is held to the file schema, and unknown keys name the known ones', () => {
+  assert.throws(() => patchFileConfig({}, { port: 70_000 }), /"port" must be an integer 0–65535/)
+  assert.throws(() => patchFileConfig({}, { host: '' }), /"host" must be a non-empty string/)
+  assert.throws(() => patchFileConfig({}, { 'watch.nope': 1 }), /unknown key "watch.nope".*watch\.debounceMs/)
+  assert.throws(() => patchFileConfig({}, { plugin: [] }), /unknown key "plugin"/)
+  // An empty array is a value, not a deletion: `ignore = []` hides nothing.
+  assert.deepEqual(patchFileConfig({ ignore: ['.git'] }, { ignore: [] }), { ignore: [] })
+})
+
+test('config: the written file keeps the documented key order and round-trips', () => {
+  const config: FileConfig = {
+    watch: { maxDirectories: 8 },
+    ignore: [],
+    plugins: ['slots', 'layout'],
+    port: 8080,
+    host: '127.0.0.1',
+  }
+  const text = formatFileConfig(config)
+  assert.equal(
+    text,
+    ['host = "127.0.0.1"', 'port = 8080', 'plugins = [ "slots", "layout" ]', 'ignore = []', '', '[watch]', 'maxDirectories = 8', ''].join('\n'),
+  )
+  // What we write, we can read: the same values come back.
+  assert.deepEqual(parseConfigFile(text, 'written'), {
+    host: '127.0.0.1',
+    port: 8080,
+    plugins: ['slots', 'layout'],
+    ignore: [],
+    watch: { maxDirectories: 8 },
+  })
+  // Nothing chosen → nothing written (not a file full of defaults).
+  assert.equal(formatFileConfig({}), '')
+  assert.equal(formatFileConfig({ watch: {} }), '')
+})
+
+test('config: writing creates the parent directory and reports a write failure by name', () => {
+  const made: string[] = []
+  const written: { path: string; text: string }[] = []
+  const result = writeFileConfig({
+    path: '/home/u/.diorama/diorama.toml',
+    config: { port: 1 },
+    mkdir: path => made.push(path),
+    writeFile: (path, text) => written.push({ path, text }),
+  })
+  assert.deepEqual(made, ['/home/u/.diorama'])
+  assert.deepEqual(written, [{ path: '/home/u/.diorama/diorama.toml', text: 'port = 1\n' }])
+  assert.equal(result.text, 'port = 1\n')
+
+  assert.throws(
+    () => writeFileConfig({ path: '/nope/x.toml', config: {}, mkdir: () => {}, writeFile: () => { throw new Error('EACCES: denied') } }),
+    /\/nope\/x\.toml: cannot write \(EACCES: denied\)/,
+  )
+})
+
+test('config: a missing file reads as an empty config, a broken one fails loud', () => {
+  assert.deepEqual(readFileConfig({ path: '/none.toml', exists: () => false }), {})
+  assert.deepEqual(readFileConfig({ path: '/x.toml', exists: () => true, readFile: () => 'port = 9' }), { port: 9 })
+  assert.throws(() => readFileConfig({ path: '/x.toml', exists: () => true, readFile: () => 'port = ' }), /\/x\.toml: invalid TOML/)
+})
+
+test('config: writes default to $DIORAMA_HOME, and only a named directory or file moves them', () => {
+  assert.equal(configWritePath({ home: '/home/u/.diorama' }), '/home/u/.diorama/diorama.toml')
+  assert.equal(configWritePath({ home: '/home/u/.diorama', root: '/srv/project' }), '/srv/project/diorama.toml')
+  assert.equal(configWritePath({ home: '/home/u/.diorama', root: '/srv/project', configPath: '/etc/dio.toml' }), '/etc/dio.toml')
+})
+
+test('config: a written file is what serving picks up next', () => {
+  const path = '/srv/project/diorama.toml'
+  const written = writeFileConfig({ path, config: { host: '0.0.0.0', ignore: [] }, mkdir: () => {}, writeFile: () => {} })
+  const resolved = resolveConfig({
+    root: '/srv/project',
+    home: '/home/u/.diorama',
+    exists: candidate => candidate === path,
+    readFile: () => written.text,
+  })
+  assert.equal(resolved.origin.path, path)
+  assert.equal(resolved.config.host, '0.0.0.0')
+  assert.deepEqual(resolved.config.ignore, [])
+  assert.equal(resolved.config.port, 0)
 })

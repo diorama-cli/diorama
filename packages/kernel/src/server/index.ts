@@ -92,18 +92,30 @@ export {
 } from './gateway.ts'
 export {
   CONFIG_FILE,
+  CONFIG_KEYS,
+  WATCH_CONFIG_KEYS,
   ConfigError,
+  configWritePath,
   defaultConfig,
   dioramaHome,
+  formatFileConfig,
+  knownKeys,
   loadFileConfig,
   mergeConfig,
   parseConfigFile,
+  patchFileConfig,
+  readConfigValue,
+  readFileConfig,
   resolveConfig,
   validateFileConfig,
+  writeFileConfig,
+  type ConfigKey,
   type ConfigOrigin,
+  type ConfigPatch,
   type EffectiveConfig,
   type FileConfig,
   type ResolveOptions,
+  type WatchConfigKey,
 } from './config.ts'
 export { createIgnore, DEFAULT_IGNORE, type IgnoreRules } from '../shared/ignore.ts'
 export { createDispatcher, handleFrame, RpcChannel, RPC_PATH, type RpcDispatcher } from './rpc.ts'

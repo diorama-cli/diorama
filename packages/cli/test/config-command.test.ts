@@ -1,0 +1,291 @@
+import assert from 'node:assert/strict'
+import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { test } from 'node:test'
+import { defaultConfig, parseConfigFile } from 'diorama-kernel/server'
+import {
+  configCommand,
+  displayValue,
+  parseConfigValue,
+  parseList,
+  runWizard,
+  streamPrompter,
+  UsageError,
+} from '../src/config-command.ts'
+import type { CliIo } from '../src/control-client.ts'
+
+/**
+ * `diorama config` (contract.md §4.2): the value grammar, the wizard's
+ * questions, and the file the command leaves behind. The wizard is driven by a
+ * scripted `ask`, so no test needs a terminal.
+ */
+
+/** An IO pair that records what the user would see. */
+function recorder(env: NodeJS.ProcessEnv = {}): { io: CliIo; lines: string[] } {
+  const lines: string[] = []
+  return {
+    lines,
+    io: {
+      out: (message: string) => lines.push(message),
+      err: (message: string) => lines.push(`!${message}`),
+      env,
+    },
+  }
+}
+
+/** Answers in order; running out is a test bug, not a hang. */
+function scripted(answers: readonly string[]): (question: string) => Promise<string | undefined> {
+  let index = 0
+  return async () => answers[index++]
+}
+
+test('config value grammar: lists split on commas, empty means empty', () => {
+  assert.deepEqual(parseList('slots, layout ,tabs'), ['slots', 'layout', 'tabs'])
+  assert.deepEqual(parseList(''), [])
+  assert.deepEqual(parseList(' , '), [])
+  assert.deepEqual(parseConfigValue('ignore', '.git, *.log'), ['.git', '*.log'])
+})
+
+test('config value grammar: numbers are integers inside their documented range', () => {
+  assert.equal(parseConfigValue('port', '8080'), 8080)
+  assert.equal(parseConfigValue('port', '0'), 0)
+  assert.equal(parseConfigValue('watch.debounceMs', '0'), 0)
+  assert.equal(parseConfigValue('watch.maxDirectories', '4096'), 4096)
+  for (const [key, raw] of [
+    ['port', '70000'],
+    ['port', '1.5'],
+    ['port', 'eighty'],
+    ['watch.debounceMs', '-1'],
+    ['watch.maxDirectories', '0'],
+  ] as const) {
+    assert.throws(() => parseConfigValue(key, raw), UsageError, `${key}=${raw} must be rejected`)
+  }
+})
+
+test('config value grammar: booleans accept the usual spellings, nothing else', () => {
+  for (const raw of ['true', 'yes', 'on', '1']) assert.equal(parseConfigValue('watch.enabled', raw), true)
+  for (const raw of ['false', 'no', 'off', '0']) assert.equal(parseConfigValue('watch.enabled', raw), false)
+  assert.throws(() => parseConfigValue('watch.enabled', 'maybe'), /must be true or false/)
+})
+
+test('config value grammar: unknown keys are rejected with the known list', () => {
+  assert.throws(() => parseConfigValue('colour', 'red'), /unknown key "colour".*watch\.maxDirectories/)
+  assert.throws(() => parseConfigValue('host', '  '), /must not be empty/)
+})
+
+test('display: arrays read as a comma list, absent values say so', () => {
+  assert.equal(displayValue(['.git', 'node_modules']), '.git, node_modules')
+  assert.equal(displayValue([]), '')
+  assert.equal(displayValue(8080), '8080')
+  assert.equal(displayValue(undefined), '(unset)')
+})
+
+test('wizard: Enter keeps a field, a typed value replaces it, "-" clears it', async () => {
+  const seen: string[] = []
+  const result = await runWizard(
+    { port: 4000, ignore: ['dist'] },
+    scripted(['', '8080', '', '-', 'no', '', '']),
+    { defaults: defaultConfig(), out: message => seen.push(message) },
+  )
+  assert.deepEqual(result.config, {
+    port: 8080,
+    // `ignore` was cleared by "-", `host` was never set: both are gone.
+    watch: { enabled: false },
+  })
+  assert.equal(result.changed, true)
+  assert.ok(seen.some(line => line.includes('ignore: cleared')))
+})
+
+test('wizard: a value the file would reject re-asks instead of aborting', async () => {
+  const seen: string[] = []
+  const questions: string[] = []
+  let index = 0
+  const answers = ['', 'eighty', '9090', '', '', '', '', '']
+  const result = await runWizard({}, async (question) => {
+    questions.push(question)
+    return answers[index++]
+  }, { defaults: defaultConfig(), out: message => seen.push(message) })
+
+  assert.equal(result.config.port, 9090)
+  assert.ok(seen.some(line => line.includes('--port must be an integer 0–65535')))
+  // The port question was asked twice: the bad answer did not move on.
+  assert.equal(questions.filter(question => question.startsWith('  port')).length, 2)
+})
+
+test('wizard: nothing typed writes nothing', async () => {
+  const result = await runWizard({ port: 4000 }, scripted(['', '', '', '', '', '', '']), {
+    defaults: defaultConfig(),
+    out: () => {},
+  })
+  assert.equal(result.changed, false)
+  assert.deepEqual(result.config, { port: 4000 })
+})
+
+test('wizard: input that ends mid-way is an error, never a half-written file', async () => {
+  await assert.rejects(
+    runWizard({}, scripted(['', '']), { defaults: defaultConfig(), out: () => {} }),
+    /input ended before the wizard finished/,
+  )
+})
+
+test('wizard: prompts show the file value and where it came from', async () => {
+  const questions: string[] = []
+  await runWizard({ port: 4000 }, async (question) => {
+    questions.push(question)
+    return ''
+  }, { defaults: defaultConfig(), out: () => {} })
+  assert.match(questions[1] as string, /port \[4000\] \(file, 0 = a free port\)/)
+  assert.match(questions[0] as string, /host \[127\.0\.0\.1\] \(default/)
+  // Long lists are summarized: the answer must stay on the same line.
+  assert.match(questions[2] as string, /plugins \[16 items\]/)
+})
+
+test('prompter: lines arrive one at a time, CRLF is trimmed, the end is a value', async () => {
+  const { Readable } = await import('node:stream')
+  const input = Readable.from(['8080\r\n', 'a,', 'b\n', 'tail'])
+  const asked: string[] = []
+  const prompter = streamPrompter(input, text => asked.push(text))
+  assert.equal(await prompter.ask('first: '), '8080')
+  assert.equal(await prompter.ask('second: '), 'a,b')
+  // A final line without a newline is still an answer.
+  assert.equal(await prompter.ask('third: '), 'tail')
+  // Then the stream is over: `undefined`, not a promise that never settles.
+  assert.equal(await prompter.ask('fourth: '), undefined)
+  prompter.close()
+  assert.deepEqual(asked, ['first: ', 'second: ', 'third: ', 'fourth: '])
+})
+
+test('config set: writes the named file, leaving the rest of it alone', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'diorama-config-'))
+  try {
+    const { io, lines } = recorder({ DIORAMA_HOME: home })
+    const code = await configCommand(io, ['set', '--port', '8080', '--ignore', '', '--watch.enabled', 'false'])
+    assert.equal(code, 0)
+    const text = readFileSync(join(home, 'diorama.toml'), 'utf8')
+    assert.equal(text, 'port = 8080\nignore = []\n\n[watch]\nenabled = false\n')
+    assert.deepEqual(parseConfigFile(text, 'written'), {
+      port: 8080,
+      ignore: [],
+      watch: { enabled: false },
+    })
+    assert.ok(lines.some(line => line.startsWith('wrote ')))
+
+    // A second `set` edits the same file rather than replacing it.
+    const again = recorder({ DIORAMA_HOME: home })
+    assert.equal(await configCommand(again.io, ['set', '--host', '0.0.0.0']), 0)
+    assert.equal(
+      readFileSync(join(home, 'diorama.toml'), 'utf8'),
+      'host = "0.0.0.0"\nport = 8080\nignore = []\n\n[watch]\nenabled = false\n',
+    )
+
+    // `--all` is the documented spelling of `ignore = []`.
+    const all = recorder({ DIORAMA_HOME: home })
+    assert.equal(await configCommand(all.io, ['unset', 'ignore']), 0)
+    assert.equal(await configCommand(all.io, ['set', '--all']), 0)
+    assert.equal(readFileSync(join(home, 'diorama.toml'), 'utf8'), 'host = "0.0.0.0"\nport = 8080\nignore = []\n\n[watch]\nenabled = false\n')
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('config set: --dir names the project file, and --config names any file', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'diorama-config-'))
+  const project = mkdtempSync(join(tmpdir(), 'diorama-project-'))
+  try {
+    const { io } = recorder({ DIORAMA_HOME: home })
+    assert.equal(await configCommand(io, ['set', '--dir', project, '--port', '1234']), 0)
+    assert.equal(readFileSync(join(project, 'diorama.toml'), 'utf8'), 'port = 1234\n')
+
+    const elsewhere = join(home, 'nested', 'dio.toml')
+    assert.equal(await configCommand(io, ['set', '--config', elsewhere, '--host', '10.0.0.1']), 0)
+    assert.equal(readFileSync(elsewhere, 'utf8'), 'host = "10.0.0.1"\n')
+    // The default location was not touched by either.
+    assert.throws(() => readFileSync(join(home, 'diorama.toml'), 'utf8'), /ENOENT/)
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+    rmSync(project, { recursive: true, force: true })
+  }
+})
+
+test('config set: --dry-run prints the file and writes nothing', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'diorama-config-'))
+  try {
+    const { io, lines } = recorder({ DIORAMA_HOME: home })
+    assert.equal(await configCommand(io, ['set', '--port', '8080', '--dry-run']), 0)
+    assert.ok(lines.includes('port = 8080'))
+    assert.ok(lines.some(line => line.startsWith('dry run: not writing ')))
+    assert.throws(() => readFileSync(join(home, 'diorama.toml'), 'utf8'), /ENOENT/)
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('config unset: removing the last key leaves an empty file, not a defaults dump', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'diorama-config-'))
+  try {
+    const { io } = recorder({ DIORAMA_HOME: home })
+    assert.equal(await configCommand(io, ['set', '--port', '8080']), 0)
+    assert.equal(await configCommand(io, ['unset', 'port']), 0)
+    assert.equal(readFileSync(join(home, 'diorama.toml'), 'utf8'), '')
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('config set: usage errors exit 2 and write nothing', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'diorama-config-'))
+  try {
+    for (const argv of [
+      ['set'],
+      ['set', '--port', 'nope'],
+      ['set', '--colour', 'red'],
+      ['set', '--port'],
+      ['set', 'positional'],
+      ['unset'],
+      ['show', '/definitely/not/a/directory'],
+      ['nonsense'],
+      // A flag that would silently do nothing is a usage error, not a no-op.
+      ['show', '--dry-run'],
+      ['unset', 'port', '--all'],
+      ['set', '--json', '--port', '1'],
+    ]) {
+      const { io, lines } = recorder({ DIORAMA_HOME: home })
+      assert.equal(await configCommand(io, argv), 2, argv.join(' '))
+      assert.ok(lines.some(line => line.startsWith('!')), argv.join(' '))
+    }
+    assert.throws(() => readFileSync(join(home, 'diorama.toml'), 'utf8'), /ENOENT/)
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('config show: the effective configuration, with its source', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'diorama-config-'))
+  const project = mkdtempSync(join(tmpdir(), 'diorama-project-'))
+  try {
+    const { io, lines } = recorder({ DIORAMA_HOME: home })
+    assert.equal(await configCommand(io, ['show', project]), 0)
+    assert.ok(lines[0]?.includes('none (defaults)'))
+    assert.ok(lines.some(line => line.includes('watch.maxDirectories = 64')))
+
+    const written = recorder({ DIORAMA_HOME: home })
+    assert.equal(await configCommand(written.io, ['set', '--dir', project, '--port', '4321']), 0)
+
+    const shown = recorder({ DIORAMA_HOME: home })
+    assert.equal(await configCommand(shown.io, ['show', project, '--json']), 0)
+    const parsed = JSON.parse(shown.lines.join('\n')) as { config: { port: number }; configFile: string }
+    assert.equal(parsed.config.port, 4321)
+    // `show` resolves the directory the way serving does (realpath first).
+    const real = realpathSync(project)
+    assert.equal(parsed.configFile, join(real, 'diorama.toml'))
+
+    const text = recorder({ DIORAMA_HOME: home })
+    assert.equal(await configCommand(text.io, ['show', project]), 0)
+    assert.equal(text.lines[0], `config file: ${join(real, 'diorama.toml')}`)
+    assert.ok(text.lines.includes('  port = 4321'))
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+    rmSync(project, { recursive: true, force: true })
+  }
+})

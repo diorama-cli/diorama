@@ -53,6 +53,7 @@ diorama ls [--json]            # 列出所有挂载：目录、URL、状态、�
 diorama restart <mount|dir>    # 卸载后重新挂载（加载新配置或从故障中恢复）
 diorama gateway start|stop|status|restart
 diorama gateway run            # 前台运行 gateway
+diorama config [show|set|unset]  # 读 / 改 / 交互式生成 diorama.toml
 diorama --version
 ```
 
@@ -86,6 +87,22 @@ debounceMs = 300            # 文件事件合并窗口（0–60000）
 enabled = true              # false 时完全关闭 watch
 maxDirectories = 64         # 每个目录同时监听的目录数上限（1–4096）
 ```
+
+### 改配置：`diorama config`
+
+不想手写 TOML 时，用子命令读、改、或者逐项问：
+
+```bash
+diorama config                      # 交互式：逐项问，回车保留，"-" 清除，最后确认写入
+diorama config show [<dir>] [--json]   # diorama <dir> 会用的配置与来源
+diorama config set --port 8080 --ignore ".git,*.log" --watch.enabled false
+diorama config unset port            # 删掉一个字段，回到默认
+```
+
+- **默认写到 `$DIORAMA_HOME/diorama.toml`**（全局默认）；要写项目里的文件，点名 `--dir <dir>`
+  或 `--config <path>`。浏览一个目录永远不往里写东西。
+- **只写你选过的字段**，其余行原样保留；写完不会重启正在跑的 mount，生效用 `diorama restart <dir>`。
+- 值不合法、或目标文件本身写坏了（语法错、未知键）→ 报错退出 2，**一个字节都不写**。
 
 ## 进程模型与安全
 

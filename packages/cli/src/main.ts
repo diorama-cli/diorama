@@ -25,6 +25,7 @@ import {
   stopGateway,
   type CliIo,
 } from './control-client.ts'
+import { configCommand } from './config-command.ts'
 import { runGateway, socketPath } from './gateway-command.ts'
 import { main as serveMain, parseArgs, USAGE, usage } from './run.ts'
 
@@ -36,6 +37,7 @@ export function controlUsage(name = 'diorama'): string {
   ${name} [dir] [options]        mount a directory (starts the gateway if needed)
   ${name} ls [--json]            list mounts: directory, URL, status
   ${name} restart <mount|dir>    unmount and mount again
+  ${name} config [show|set|unset]  read or edit a diorama.toml (see "${name} config --help")
   ${name} gateway start|stop|status|restart
   ${name} gateway run            run the gateway in the foreground
   ${name} --version              print the version (from this package's manifest)
@@ -66,10 +68,16 @@ export async function main(argv: readonly string[], env: NodeJS.ProcessEnv = pro
   }
 
   if (command === 'restart') return restartMount(io, rest)
+  if (command === 'config') return configCommand(io, rest)
   if (command === 'gateway') return gatewayCommand(io, rest)
 
   if (command === '--help' || command === '-h') {
     io.out(usage(cliName(io)))
+    return 0
+  }
+
+  if (command === 'help') {
+    io.out(controlUsage(cliName(io)))
     return 0
   }
 

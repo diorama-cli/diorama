@@ -901,6 +901,48 @@ maxDirectories = 64         # 每个目录同时监听的目录数上限（§3.1
   （`'ok' | 'degraded'`）与 `lastError`（degraded 时）。M2 起只有文件树/palette 读 `ignore`，
   但它们走 `fs.list`——页面不需要再过滤。
 
+### 4.2 `diorama config`：读写 `diorama.toml`（未发版，下一个 `0.0.x`）
+
+配置**只有一种格式**（§4.1 的 TOML），也**只有一个读法**（`resolveConfig`）。`config` 子命令是它的
+编辑器：读的那一半与 `--dump-config` 是同一段代码，写的那一半把结果重新过一遍 `validateFileConfig`
+——**写进去的文件必须是读者会接受的文件**，否则什么都不写、退出码 2。
+
+| 子命令 | 做什么 | 退出码 |
+|---|---|---|
+| `diorama config` | **交互式**：逐项问 `host` / `port` / `plugins` / `ignore` / `watch.enabled` / `watch.debounceMs` / `watch.maxDirectories`，然后确认写入 | 0 / 2 |
+| `diorama config show [<dir>] [--json]` | 打印 `diorama <dir>` **会用的**配置与来源（与 `--dump-config` 同一合并） | 0 / 2 |
+| `diorama config set --<key> <value> …` | 写字段，**文件里其余的行不动**（读-改-写） | 0 / 2 |
+| `diorama config unset <key> …` | 删字段（回到默认） | 0 / 2 |
+
+**写到哪个文件**（默认值是安全的那一个）：
+
+| 给了什么 | 写入 |
+|---|---|
+| 都没给 | `$DIORAMA_HOME/diorama.toml`（全局默认，§4.1 的第 2 顺位） |
+| `--dir <dir>` | `<dir>/diorama.toml` |
+| `--config <path>` | 就是那个文件（父目录不存在时 `mkdir -p`） |
+
+- **被浏览的目录默认不写**（architecture §8、AGENTS §6）：浏览是只读的，所以「项目级配置」必须由
+  用户**点名**（`--dir` / `--config`），而不是从「当前目录」推断。
+- **键就是 §4.1 的字段**：`host` / `port` / `plugins` / `ignore` / `watch.enabled` /
+  `watch.debounceMs` / `watch.maxDirectories`。`set` 的拼写是 `--<key> <value>`；`watch.*` 用点号
+  写全（`--watch.enabled false`）。未知键是用法错误（列出已知键），不是静默忽略。
+- **值的语法**（CLI 与交互式共用一份解析）：`plugins` / `ignore` 是逗号分隔（**空串 = 空数组**，
+  所以 `--ignore ""` 就是「不隐藏任何东西」，与 `--all` 同义）；布尔收 `true/false/yes/no/on/off/1/0`；
+  整数按 §4.1 的范围校验（`port` 0–65535、`debounceMs` 0–60000、`maxDirectories` 1–4096）。
+- **只写选过的字段**：文件里不出现默认值。写出来的键按 §4.1 示例的顺序（`host, port, plugins,
+  ignore, [watch]`），空表不写；`ignore = []` / `plugins = []` 是**显式的空数组**，保留（丢掉它
+  会把「显示全部」变回「隐藏 .git」）。所有键都删光 → 文件是空的（0 字节），不是一份默认值快照。
+- **交互式**：回车保留、输入值替换、`-` 清除（回到默认）；不合法就重问那一项；提示里显示
+  「当前值（来源：file/default）」。长列表（`plugins` 16 项）在提示里显示为 `16 items`，完整清单
+  只出现在待写入的预览里。最后预览 + `write this file? [Y/n]`；**拒绝或 stdin 提前结束都不写**
+  （提前结束是退出码 2，不会留下半个文件）。`--dry-run` 只预览；`--yes` 跳过确认。
+- **写盘**：`mkdir -p` 父目录后整体写（先读旧文件、合并、再写）；读旧文件失败（语法错、未知键）
+  就**不写**并报原文——编辑器不替你猜一个坏文件的意思。
+- **不重启任何东西**：写配置只改文件。正在跑的 mount 用旧配置，要生效得 `diorama restart <dir>`
+  （§11.1 的手动恢复路径）；下一次 `diorama <dir>` 自然读到新文件。
+- **失败与展示**：与 §4.1 相同——打印文件名与原因、退出码 2。成功打印 `wrote <path>`。
+
 ## 5. slot 清单
 
 | slot | 类型 | 声明者 | 条目 | 说明 |
@@ -1259,6 +1301,9 @@ def67890   54322  degraded   /Users/me/notes           http://127.0.0.1:54322/  
   （`ls` 是查询，不是错误）。
 - `--json`：输出 `{ gateway: StatusResult, mounts: MountStatus[] }`（字段与 §7.3 一致）。
 
+`diorama config …` 的行为与退出码见 §4.2：成功 0，用法错误 / 文件写错 2（`config show` 在目录
+不可读时也是 2）。它**不**连 gateway，也不要求 gateway 在跑。
+
 ## 8. 客户端模块表 ✅ v0.2 定（M0 §10.3/§10.6 的空洞）
 
 **规则（实现即契约）：**
@@ -1518,6 +1563,21 @@ RPC 广播 `{ topic: 'mount.state', payload: MountStatus }`。
 **没有变的东西**：slot 清单（无新座位——主题不是 slot，是页面属性）、`ctx.fs` / `ctx.git` /
 `ctx.search` / `ctx.router` / `ctx.commands` 的签名、`tabs` 的键、渲染器派发、RPC 与控制面协议。
 样式表只把字面量换成同名 token（§5.3），视觉上 light 与 v0.8 一致。
+
+## 20. `0.0.2` 之后（未发版，下一个 `0.0.x`）
+
+> 2026-10-21。用户要求：**支持命令行交互式配置，以及把命令行参数写进配置**。
+> 契约号不动（§6）：这一档只**加** CLI 行为，不改 `ctx.*`、slot、RPC 与控制面协议。
+
+| 条款 | `0.0.2` | 本档 |
+|---|---|---|
+| §4.2（新） | 无 | `diorama config` / `config show` / `config set` / `config unset`：交互式逐项编辑、读-改-写、写前校验、默认写 `$DIORAMA_HOME` |
+| §7.6 | 只有 mount / ls / restart / gateway | 另加 `config` 的退出码与「不连 gateway」 |
+| 写盘边界 | `~/.diorama/` 是唯一写盘位置 | 仍以它**为默认**；`--dir` / `--config` 是用户点名的例外（不改变「被浏览的目录永远不写」的默认行为） |
+| 内核 | `loadFileConfig` / `mergeConfig` / `validateFileConfig` | 另加 `patchFileConfig` / `formatFileConfig` / `readFileConfig` / `writeFileConfig` / `configWritePath` / `readConfigValue` / `knownKeys`（纯函数，注入式 IO） |
+
+**没有变的东西**：`diorama.toml` 的字段与默认值（§4.1）、优先级（CLI > toml > 默认）、
+`EffectiveConfig` 的形状、`/plugin.json` 的下发、控制面 `mount` 的语义。
 
 ## 待定清单（v0.4 后仍 🔲）
 

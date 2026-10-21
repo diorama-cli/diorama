@@ -7,10 +7,10 @@
  * every toml value silently. Errors are fail loud: a syntax error, an unknown
  * key, or a wrong type prints the file and the reason and the CLI exits 2.
  */
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
-import { parse as parseToml } from 'smol-toml'
+import { dirname, join, resolve } from 'node:path'
+import { parse as parseToml, stringify as stringifyToml } from 'smol-toml'
 import { DEFAULT_IGNORE } from '../shared/ignore.ts'
 import { BUILTIN_PLUGIN_IDS } from './plan.ts'
 
@@ -216,4 +216,155 @@ export function mergeConfig(file: FileConfig, cli: ResolveOptions['cli'] = {}): 
 export function resolveConfig(options: ResolveOptions): { config: EffectiveConfig; origin: ConfigOrigin } {
   const { config, origin } = loadFileConfig(options)
   return { config: mergeConfig(config, options.cli), origin }
+}
+
+// --- Writing a `diorama.toml` (contract.md §4.2) ---------------------------
+
+/**
+ * The keys a written file may carry, in the order they are emitted: the order
+ * of the example in contract.md §4.1, so a written file reads like the docs.
+ */
+export const CONFIG_KEYS = ['host', 'port', 'plugins', 'ignore', 'watch'] as const
+export const WATCH_CONFIG_KEYS = ['debounceMs', 'enabled', 'maxDirectories'] as const
+
+export type ConfigKey = (typeof CONFIG_KEYS)[number]
+export type WatchConfigKey = (typeof WATCH_CONFIG_KEYS)[number]
+
+/**
+ * One field to write. `watch.*` is addressed as a dotted key (`watch.enabled`),
+ * the same spelling `--dump-config` and the docs use.
+ */
+export type ConfigPatch = Record<string, unknown>
+
+/** Read one field from a file config (dotted keys address `watch.*`). */
+export function readConfigValue(config: FileConfig, key: string): unknown {
+  const [head, tail] = key.split('.')
+  if (tail !== undefined) {
+    if (head !== 'watch') return undefined
+    return (config.watch as Record<string, unknown> | undefined)?.[tail]
+  }
+  return (config as Record<string, unknown>)[head as string]
+}
+
+/**
+ * Apply a patch to a file config, leaving every other field alone.
+ *
+ * `undefined` **deletes** the key: a written file only says what the user
+ * chose, so unsetting a field is the way back to the default. The result is
+ * validated with the same rules a file read goes through — a CLI value that
+ * cannot be written is rejected before anything touches the disk.
+ */
+export function patchFileConfig(base: FileConfig, patch: ConfigPatch, where = 'config'): FileConfig {
+  const next: Record<string, unknown> = { ...base }
+  if (next.watch !== undefined) next.watch = { ...(next.watch as Record<string, unknown>) }
+  for (const [key, value] of Object.entries(patch)) {
+    const [head, tail] = key.split('.')
+    if (tail !== undefined) {
+      if (head !== 'watch' || !(WATCH_CONFIG_KEYS as readonly string[]).includes(tail)) {
+        throw new ConfigError(`${where}: unknown key "${key}" (known: ${knownKeys().join(', ')})`)
+      }
+      const watch = { ...((next.watch as Record<string, unknown> | undefined) ?? {}) }
+      if (value === undefined) delete watch[tail]
+      else watch[tail] = value
+      if (Object.keys(watch).length === 0) delete next.watch
+      else next.watch = watch
+      continue
+    }
+    if (!(CONFIG_KEYS as readonly string[]).includes(head as string)) {
+      throw new ConfigError(`${where}: unknown key "${key}" (known: ${knownKeys().join(', ')})`)
+    }
+    if (value === undefined) delete next[head as string]
+    else next[head as string] = value
+  }
+  return validateFileConfig(next, where)
+}
+
+/** Every addressable key, for messages: `host, port, plugins, ignore, watch.debounceMs, …`. */
+export function knownKeys(): string[] {
+  return [...CONFIG_KEYS.filter(key => key !== 'watch'), ...WATCH_CONFIG_KEYS.map(key => `watch.${key}`)]
+}
+
+/**
+ * Serialize a file config as TOML, in `CONFIG_KEYS` order. Empty tables are
+ * dropped: the file says only what was chosen, and a half-filled `[watch]`
+ * table is noise the reader has to explain.
+ *
+ * Empty **arrays** are kept on purpose: `ignore = []` is the documented way to
+ * hide nothing (contract.md §4.1), so dropping it would silently turn "show
+ * everything" back into "hide .git and node_modules". A `plugins = []` is
+ * likewise an explicit "load no client pieces".
+ */
+export function formatFileConfig(config: FileConfig): string {
+  const table: Record<string, unknown> = {}
+  if (config.host !== undefined) table.host = config.host
+  if (config.port !== undefined) table.port = config.port
+  if (config.plugins !== undefined) table.plugins = [...config.plugins]
+  if (config.ignore !== undefined) table.ignore = [...config.ignore]
+  const watch: Record<string, unknown> = {}
+  for (const key of WATCH_CONFIG_KEYS) {
+    const value = config.watch?.[key]
+    if (value !== undefined) watch[key] = value
+  }
+  if (Object.keys(watch).length > 0) table.watch = watch
+  if (Object.keys(table).length === 0) return ''
+  // smol-toml already ends with a newline; a file should not end with a blank line.
+  return `${stringifyToml(table).replace(/\n+$/, '')}\n`
+}
+
+/** Read a config file as a patchable object; a missing file is an empty config. */
+export function readFileConfig(options: {
+  path: string
+  exists?: (path: string) => boolean
+  readFile?: (path: string) => string
+}): FileConfig {
+  const exists = options.exists ?? existsSync
+  if (!exists(options.path)) return {}
+  const read = options.readFile ?? ((path: string) => readFileSync(path, 'utf8'))
+  let text: string
+  try {
+    text = read(options.path)
+  } catch (error) {
+    throw new ConfigError(`${options.path}: cannot read (${(error as Error).message})`)
+  }
+  return parseConfigFile(text, options.path)
+}
+
+/**
+ * Write a file config. `mkdir -p` on the parent, then an atomic replace: a
+ * reader (or a crash) never sees half a file. Injected writers keep this
+ * testable without touching a disk.
+ */
+export function writeFileConfig(options: {
+  path: string
+  config: FileConfig
+  writeFile?: (path: string, text: string) => void
+  mkdir?: (path: string) => void
+}): { path: string; text: string } {
+  const text = formatFileConfig(options.config)
+  const dir = dirname(options.path)
+  const mkdir = options.mkdir ?? ((path: string) => mkdirSync(path, { recursive: true }))
+  const write = options.writeFile ?? ((path: string, body: string) => writeFileSync(path, body, 'utf8'))
+  try {
+    mkdir(dir)
+    write(options.path, text)
+  } catch (error) {
+    throw new ConfigError(`${options.path}: cannot write (${(error as Error).message})`)
+  }
+  return { path: options.path, text }
+}
+
+/**
+ * Where a `diorama config` write goes: an explicit `--config` wins; a served
+ * directory means *its* `diorama.toml`; otherwise `$DIORAMA_HOME/diorama.toml`.
+ * The third case is the default on purpose — browsing a directory never writes
+ * into it unless the user names it (architecture.md §8, contract.md §4.2).
+ */
+export function configWritePath(options: {
+  home?: string
+  configPath?: string
+  root?: string
+}): string {
+  if (options.configPath !== undefined) return resolve(options.configPath)
+  if (options.root !== undefined) return join(resolve(options.root), CONFIG_FILE)
+  return join(options.home ?? dioramaHome(), CONFIG_FILE)
 }
