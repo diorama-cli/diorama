@@ -128,6 +128,12 @@ test('7d. the command registry is kernel-provided and shared', async ({ page }) 
 })
 
 test('7e. shortcuts survive macOS Option composition (composed event.key)', async ({ page }) => {
+  // The bug this pins is macOS-only: on other platforms `mod` resolves to Ctrl
+  // (see `isApplePlatform`), so a `metaKey: true` event matches nothing and the
+  // assertions below would fail for a reason that has nothing to do with the
+  // code under test. Linux CI therefore skips it; a macOS run still covers it.
+  test.skip(process.platform !== 'darwin', 'Option composition is a macOS behaviour')
+
   const directory = fixture()
   const server = await startDiorama(directory.root)
   try {
