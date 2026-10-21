@@ -82,7 +82,9 @@ test('1. config set writes the project file, and the next mount uses it', async 
     // And a real mount reports it, with the ignored directory gone from the tree.
     const server = await startDiorama(directory.root)
     try {
-      expect(server.output()).toContain(`config: ${join(directory.realRoot, 'diorama.toml')}`)
+      // `startDiorama` resolves on the URL line; the `config:` line follows it,
+      // so poll rather than assume the process has finished printing.
+      await expect.poll(() => server.output()).toContain(`config: ${join(directory.realRoot, 'diorama.toml')}`)
       // The page's own boot payload carries the effective configuration: this
       // is the same object the file tree's `ignore` comes from.
       const manifest = (await (await fetch(`${server.url}plugin.json`)).json()) as {
@@ -138,23 +140,71 @@ test('3. config unset drops a field; an emptied file means defaults again', asyn
   }
 })
 
-test('4. the wizard asks field by field, and only the typed fields land in the file', async () => {
+test('4. the wizard offers candidates and only the answered fields land in the file', async () => {
   const home = stateHome()
   const directory = fixture()
   try {
-    // Answers in prompt order: host, port, plugins, ignore, watch.enabled,
-    // watch.debounceMs, watch.maxDirectories, then the confirmation.
-    const answers = ['0.0.0.0', '', '', 'docs, *.log', 'no', '', '', 'y', ''].join('\n')
+    // Answers in order: host (menu → row 2, "every IPv4 interface"), port
+    // (typed), plugins (menu, keep), ignore (menu, free text), watch.enabled
+    // (menu → row 2), the two numbers (typed), then the confirmation.
+    const answers = ['2', '', '', 'docs, *.log', '2', '', '', 'y', ''].join('\n')
     const wizard = await diorama(home, ['config', '--dir', directory.root], { input: answers })
     expect(wizard.code).toBe(0)
-    expect(wizard.stdout).toContain('host [127.0.0.1]')
-    // Long lists are summarized so the answer stays on the question's line.
-    expect(wizard.stdout).toContain('plugins [16 items]')
-    expect(wizard.stdout).toContain('ignore [2 items]')
+    // The menu shows the loopback default and the "every interface" row.
+    expect(wizard.stdout).toContain('host — where the page listens')
+    expect(wizard.stdout).toContain('127.0.0.1')
+    expect(wizard.stdout).toContain('0.0.0.0')
+    // Numeric fields stay plain questions: a typed number is the value.
+    expect(wizard.stdout).toContain('watch.debounceMs [300]')
+    expect(wizard.stdout).toContain('changes:')
+    // `mergeConfig` is what the reader sees today: the default host is the
+    // "before" of the first change, so the summary reads as a transition.
+    expect(wizard.stdout).toMatch(/host: 127\.0\.0\.1 .* 0\.0\.0\.0/)
     expect(wizard.stdout).toContain(`wrote ${join(directory.realRoot, 'diorama.toml')}`)
 
     const written = readFileSync(join(directory.root, 'diorama.toml'), 'utf8')
     expect(written).toBe('host = "0.0.0.0"\nignore = [ "docs", "*.log" ]\n\n[watch]\nenabled = false\n')
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+    directory.dispose()
+  }
+})
+
+test('4b. the menus list this machine\'s addresses and toggle pieces by number', async () => {
+  const home = stateHome()
+  const directory = fixture()
+  try {
+    // host: keep. port: keep. plugins: toggle rows 1 and 2 off. ignore: "none".
+    // watch.enabled: keep. numbers: keep. confirm.
+    const answers = ['', '', '1,2', 'none', '', '', '', 'y', ''].join('\n')
+    const wizard = await diorama(home, ['config', '--dir', directory.root], { input: answers })
+    expect(wizard.code).toBe(0)
+    expect(wizard.stdout).toContain('plugins — client pieces, in boot order')
+    expect(wizard.stdout).toContain('slots')
+
+    const written = readFileSync(join(directory.root, 'diorama.toml'), 'utf8')
+    // Toggling the first two pieces off leaves the rest in boot order.
+    expect(written).toContain('plugins = [ "file-tree"')
+    expect(written).not.toContain('"slots"')
+    expect(written).not.toContain('"layout"')
+    // "none" is the explicit empty list, which means "hide nothing".
+    expect(written).toContain('ignore = []')
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+    directory.dispose()
+  }
+})
+
+test('4c. a number that is not on the menu is a typo, and the wizard re-asks', async () => {
+  const home = stateHome()
+  const directory = fixture()
+  try {
+    // host: 99 (not on the list) then 2; the rest keep.
+    const answers = ['99', '2', '', '', '', '', '', '', 'y', ''].join('\n')
+    const wizard = await diorama(home, ['config', '--dir', directory.root], { input: answers })
+    expect(wizard.code).toBe(0)
+    expect(wizard.stdout).toContain('is not on this list')
+    expect(readFileSync(join(directory.root, 'diorama.toml'), 'utf8')).toBe('host = "0.0.0.0"\n')
   } finally {
     rmSync(home, { recursive: true, force: true })
     directory.dispose()

@@ -10,15 +10,22 @@ import {
   parseConfigValue,
   parseList,
   runWizard,
-  streamPrompter,
   UsageError,
 } from '../src/config-command.ts'
 import type { CliIo } from '../src/control-client.ts'
+import {
+  createTerminal,
+  interpretInput,
+  type MenuConfig,
+  type MenuOutcome,
+  type TerminalInput,
+} from '../src/config-terminal.ts'
 
 /**
  * `diorama config` (contract.md §4.2): the value grammar, the wizard's
  * questions, and the file the command leaves behind. The wizard is driven by a
- * scripted `ask`, so no test needs a terminal.
+ * scripted terminal (and, for the whole command, a scripted stdin), so no test
+ * needs a real TTY; the menus themselves are covered by `config-menus.test.ts`.
  */
 
 /** An IO pair that records what the user would see. */
@@ -34,10 +41,29 @@ function recorder(env: NodeJS.ProcessEnv = {}): { io: CliIo; lines: string[] } {
   }
 }
 
-/** Answers in order; running out is a test bug, not a hang. */
-function scripted(answers: readonly string[]): (question: string) => Promise<string | undefined> {
+/**
+ * A scripted terminal: one answer per question, in order. Free-text questions
+ * take the next answer; menus take the next answer as typed input. Running out
+ * is a test bug, not a hang.
+ */
+function scripted(answers: readonly string[], questions: string[] = []): {
+  line(question: string): Promise<string | undefined>
+  select(config: MenuConfig): Promise<MenuOutcome>
+  questions: string[]
+} {
   let index = 0
-  return async () => answers[index++]
+  return {
+    questions,
+    async line(question) {
+      questions.push(question)
+      return answers[index++]
+    },
+    async select(config) {
+      questions.push(config.title)
+      // The same grammar the terminal uses: a number picks, text is free.
+      return interpretInput(config, answers[index++] ?? '')
+    },
+  }
 }
 
 test('config value grammar: lists split on commas, empty means empty', () => {
@@ -85,7 +111,7 @@ test('wizard: Enter keeps a field, a typed value replaces it, "-" clears it', as
   const seen: string[] = []
   const result = await runWizard(
     { port: 4000, ignore: ['dist'] },
-    scripted(['', '8080', '', '-', 'no', '', '']),
+    scripted(['', '8080', '', '-', '2', '', '']),
     { defaults: defaultConfig(), out: message => seen.push(message) },
   )
   assert.deepEqual(result.config, {
@@ -93,19 +119,39 @@ test('wizard: Enter keeps a field, a typed value replaces it, "-" clears it', as
     // `ignore` was cleared by "-", `host` was never set: both are gone.
     watch: { enabled: false },
   })
+
   assert.equal(result.changed, true)
-  assert.ok(seen.some(line => line.includes('ignore: cleared')))
+  // Clearing shows up in the change list the command prints before writing.
+  assert.deepEqual(
+    result.changes.map(change => change.key),
+    ['port', 'ignore', 'watch.enabled'],
+  )
+  assert.equal(result.changes[1]?.cleared, true)
+  assert.deepEqual(seen, [])
 })
 
 test('wizard: a value the file would reject re-asks instead of aborting', async () => {
   const seen: string[] = []
-  const questions: string[] = []
-  let index = 0
+  // host(menu) '', port 'eighty' then '9090', plugins(menu) '', ignore(menu) '',
+  // watch.enabled(menu) '', debounce '', maxDirectories ''.
   const answers = ['', 'eighty', '9090', '', '', '', '', '']
-  const result = await runWizard({}, async (question) => {
-    questions.push(question)
-    return answers[index++]
-  }, { defaults: defaultConfig(), out: message => seen.push(message) })
+  let index = 0
+  const questions: string[] = []
+  const result = await runWizard(
+    {},
+    {
+      line: async (question) => {
+        questions.push(question)
+        return answers[index++]
+      },
+      // Each menu consumes one answer, exactly like the real terminal.
+      select: async () => {
+        index++
+        return { kind: 'keep' }
+      },
+    },
+    { defaults: defaultConfig(), out: message => seen.push(message) },
+  )
 
   assert.equal(result.config.port, 9090)
   assert.ok(seen.some(line => line.includes('--port must be an integer 0–65535')))
@@ -129,31 +175,57 @@ test('wizard: input that ends mid-way is an error, never a half-written file', a
   )
 })
 
-test('wizard: prompts show the file value and where it came from', async () => {
-  const questions: string[] = []
-  await runWizard({ port: 4000 }, async (question) => {
-    questions.push(question)
-    return ''
-  }, { defaults: defaultConfig(), out: () => {} })
-  assert.match(questions[1] as string, /port \[4000\] \(file, 0 = a free port\)/)
-  assert.match(questions[0] as string, /host \[127\.0\.0\.1\] \(default/)
-  // Long lists are summarized: the answer must stay on the same line.
-  assert.match(questions[2] as string, /plugins \[16 items\]/)
+test('wizard: numeric fields ask for a number; only listed fields open a menu', async () => {
+  const asked: string[] = []
+  const result = await runWizard(
+    { port: 4000 },
+    {
+      line: async (question) => {
+        asked.push(question)
+        return ''
+      },
+      select: async (config) => {
+        asked.push(config.title)
+        return { kind: 'keep' }
+      },
+    },
+    { defaults: defaultConfig(), out: () => {} },
+  )
+  // The four fields with sensible candidates are menus; the three numeric ones
+  // stay plain questions — a typed number is a number, never "item N".
+  assert.deepEqual(asked, [
+    'host — where the page listens',
+    '  port [4000] (file, 0 = a free port): ',
+    'plugins — client pieces, in boot order',
+    'ignore — hidden patterns (gitignore syntax)',
+    'watch.enabled — false = no file watching at all',
+    '  watch.debounceMs [300] (default, 0–60000): ',
+    '  watch.maxDirectories [64] (default, 1–4096): ',
+  ])
+  assert.equal(result.changed, false)
 })
 
-test('prompter: lines arrive one at a time, CRLF is trimmed, the end is a value', async () => {
-  const { Readable } = await import('node:stream')
-  const input = Readable.from(['8080\r\n', 'a,', 'b\n', 'tail'])
+test('terminal: lines arrive one at a time, CRLF is trimmed, the end is a value', async () => {
+  const { EventEmitter } = await import('node:events')
+  const input = new EventEmitter() as unknown as TerminalInput & {
+    send(text: string): void
+    end(): void
+  }
+  input.send = text => (input as unknown as EventEmitter).emit('data', Buffer.from(text, 'utf8'))
+  input.end = () => (input as unknown as EventEmitter).emit('end')
   const asked: string[] = []
-  const prompter = streamPrompter(input, text => asked.push(text))
-  assert.equal(await prompter.ask('first: '), '8080')
-  assert.equal(await prompter.ask('second: '), 'a,b')
-  // A final line without a newline is still an answer.
-  assert.equal(await prompter.ask('third: '), 'tail')
+  const terminal = createTerminal(input, text => asked.push(text))
+  const first = terminal.line('first: ')
+  input.send('8080\r\n')
+  assert.equal(await first, '8080')
+  const second = terminal.line('second: ')
+  input.send('tail')
+  input.end()
+  assert.equal(await second, 'tail')
   // Then the stream is over: `undefined`, not a promise that never settles.
-  assert.equal(await prompter.ask('fourth: '), undefined)
-  prompter.close()
-  assert.deepEqual(asked, ['first: ', 'second: ', 'third: ', 'fourth: '])
+  assert.equal(await terminal.line('third: '), undefined)
+  terminal.close()
+  assert.deepEqual(asked, ['first: ', 'second: ', 'third: '])
 })
 
 test('config set: writes the named file, leaving the rest of it alone', async () => {

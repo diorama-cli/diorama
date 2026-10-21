@@ -93,7 +93,7 @@ maxDirectories = 64         # 每个目录同时监听的目录数上限（1–4
 不想手写 TOML 时，用子命令读、改、或者逐项问：
 
 ```bash
-diorama config                      # 交互式：逐项问，回车保留，"-" 清除，最后确认写入
+diorama config                      # 交互式：逐项问，能选的给编号菜单，回车保留，"-" 清除
 diorama config show [<dir>] [--json]   # diorama <dir> 会用的配置与来源
 diorama config set --port 8080 --ignore ".git,*.log" --watch.enabled false
 diorama config unset port            # 删掉一个字段，回到默认
@@ -103,6 +103,9 @@ diorama config unset port            # 删掉一个字段，回到默认
   或 `--config <path>`。浏览一个目录永远不往里写东西。
 - **只写你选过的字段**，其余行原样保留；写完不会重启正在跑的 mount，生效用 `diorama restart <dir>`。
 - 值不合法、或目标文件本身写坏了（语法错、未知键）→ 报错退出 2，**一个字节都不写**。
+- **交互式会列候选**：`host` 直接从本机网卡解析（`127.0.0.1` / `0.0.0.0` / 各网卡 IPv4），
+  `plugins` / `ignore` / `watch.enabled` 是勾选菜单（方向键 + 空格，或直接打编号）；`port` 这类
+  数字项只收数字。候选只是省打字，**打任何值都照常收**。
 
 ## 进程模型与安全
 

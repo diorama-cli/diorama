@@ -933,10 +933,23 @@ maxDirectories = 64         # 每个目录同时监听的目录数上限（§3.1
 - **只写选过的字段**：文件里不出现默认值。写出来的键按 §4.1 示例的顺序（`host, port, plugins,
   ignore, [watch]`），空表不写；`ignore = []` / `plugins = []` 是**显式的空数组**，保留（丢掉它
   会把「显示全部」变回「隐藏 .git」）。所有键都删光 → 文件是空的（0 字节），不是一份默认值快照。
-- **交互式**：回车保留、输入值替换、`-` 清除（回到默认）；不合法就重问那一项；提示里显示
-  「当前值（来源：file/default）」。长列表（`plugins` 16 项）在提示里显示为 `16 items`，完整清单
-  只出现在待写入的预览里。最后预览 + `write this file? [Y/n]`；**拒绝或 stdin 提前结束都不写**
-  （提前结束是退出码 2，不会留下半个文件）。`--dry-run` 只预览；`--yes` 跳过确认。
+- **交互式**：回车保留、输入值替换、`-` 清除（回到默认）；不合法就重问那一项。最后预览 +
+  `write this file? [Y/n]`；**拒绝或 stdin 提前结束都不写**（提前结束是退出码 2，不会留下半个
+  文件）。`--dry-run` 只预览；`--yes` 跳过确认。
+- **候选（v0.9 后的本档新增）**：`host` / `plugins` / `ignore` / `watch.enabled` 这四项有固定
+  候选，交互式里是**编号菜单**；`port` / `watch.debounceMs` / `watch.maxDirectories` **没有候选**
+  ——它们收的是数字，`8080` 就是 8080，不会与「第 8080 项」混淆。**候选是提示，不是限制**：任何
+  不是列表编号的输入都按字面值走同一条校验。
+  - `host` 的候选来自**本机网卡**：`127.0.0.1`（默认）→ `0.0.0.0` → 每个非 internal 的 IPv4
+    （标注网卡名）→ `::`（本机有外部 IPv6 时）。**`fe80::` 链路本地不列**：URL 需要 zone id
+    （`[fe80::1%en0]`），写进 toml 不可移植。文件里的地址若已不在本机，仍列在最后（标
+    `current value`），因为要写什么必须看得见。选了非 loopback 的地址会多一行提醒。
+  - `plugins` / `ignore` 是**多选**：编号 = 切换（与屏幕上的 `[x]` 一致），`all` / `none` 是全选 /
+    清空，其余文字仍是逗号分隔的字面值。`ignore` 菜单把文件里的自定义 pattern 排在最前面，才能
+    被取消勾选。写出的顺序 = 候选顺序（插件即 boot 顺序）。
+  - TTY 下菜单可用方向键 + 空格 + 回车，管道下是「打印一次列表 + 读一行」，两套画法同一个语法。
+  - 写盘前多一段 `changes:` 摘要（`host: 127.0.0.1 → 0.0.0.0`、`ignore: +dist -*.log`），按
+    `mergeConfig` 的结果（读者今天看到的）对比，不是按文件内容对比。
 - **写盘**：`mkdir -p` 父目录后整体写（先读旧文件、合并、再写）；读旧文件失败（语法错、未知键）
   就**不写**并报原文——编辑器不替你猜一个坏文件的意思。
 - **不重启任何东西**：写配置只改文件。正在跑的 mount 用旧配置，要生效得 `diorama restart <dir>`
@@ -1572,6 +1585,7 @@ RPC 广播 `{ topic: 'mount.state', payload: MountStatus }`。
 | 条款 | `0.0.2` | 本档 |
 |---|---|---|
 | §4.2（新） | 无 | `diorama config` / `config show` / `config set` / `config unset`：交互式逐项编辑、读-改-写、写前校验、默认写 `$DIORAMA_HOME` |
+| §4.2 候选 | 无 | `host` / `plugins` / `ignore` / `watch.enabled` 在交互式里给编号菜单（host 的候选由本机网卡解析，含 `0.0.0.0` 与各外部 IPv4）；数字字段**不给**候选；候选不限制取值 |
 | §7.6 | 只有 mount / ls / restart / gateway | 另加 `config` 的退出码与「不连 gateway」 |
 | 写盘边界 | `~/.diorama/` 是唯一写盘位置 | 仍以它**为默认**；`--dir` / `--config` 是用户点名的例外（不改变「被浏览的目录永远不写」的默认行为） |
 | 内核 | `loadFileConfig` / `mergeConfig` / `validateFileConfig` | 另加 `patchFileConfig` / `formatFileConfig` / `readFileConfig` / `writeFileConfig` / `configWritePath` / `readConfigValue` / `knownKeys`（纯函数，注入式 IO） |

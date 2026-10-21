@@ -16,6 +16,7 @@
  * i.e. the same rules a hand-written file is held to: a value the reader would
  * reject is rejected before anything touches the disk.
  */
+import { networkInterfaces } from 'node:os'
 import { resolve } from 'node:path'
 import {
   ConfigError,
@@ -24,6 +25,7 @@ import {
   dioramaHome,
   formatFileConfig,
   knownKeys,
+  mergeConfig,
   patchFileConfig,
   readConfigValue,
   readFileConfig,
@@ -33,71 +35,21 @@ import {
   type FileConfig,
 } from 'diorama-kernel/server'
 import { cliName, type CliIo } from './control-client.ts'
+import {
+  booleanCandidates,
+  hostCandidates,
+  IGNORE_CANDIDATES,
+  isExposed,
+  type CandidateSource,
+  type InterfaceMap,
+} from './config-candidates.ts'
+import { createTerminal, type MenuConfig, type Terminal, type TerminalInput } from './config-terminal.ts'
 
 /** A usage problem: printed with the usage block, exit code 2. */
 export class UsageError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'UsageError'
-  }
-}
-
-/** One answer from the terminal. `undefined` = stdin ended. */
-export interface Prompter {
-  ask(question: string): Promise<string | undefined>
-  close(): void
-}
-
-/**
- * A line reader over a stream. Written by hand instead of `readline/promises`
- * so that "stdin ended" is a value rather than a promise that never settles:
- * `diorama config < /dev/null` must fail loudly, not hang.
- */
-export function streamPrompter(input: NodeJS.ReadableStream, write: (text: string) => void): Prompter {
-  let buffer = ''
-  const pending: string[] = []
-  const waiters: ((line: string | undefined) => void)[] = []
-  let ended = false
-
-  const deliver = (): void => {
-    while (waiters.length > 0 && (pending.length > 0 || ended)) {
-      const settle = waiters.shift() as (line: string | undefined) => void
-      settle(pending.shift())
-    }
-  }
-  input.on('data', (chunk: Buffer | string) => {
-    buffer += typeof chunk === 'string' ? chunk : chunk.toString('utf8')
-    let index = buffer.indexOf('\n')
-    while (index !== -1) {
-      pending.push(buffer.slice(0, index).replace(/\r$/, ''))
-      buffer = buffer.slice(index + 1)
-      index = buffer.indexOf('\n')
-    }
-    deliver()
-  })
-  input.on('end', () => {
-    if (buffer !== '') {
-      pending.push(buffer)
-      buffer = ''
-    }
-    ended = true
-    deliver()
-  })
-  input.on('close', () => {
-    ended = true
-    deliver()
-  })
-  return {
-    async ask(question) {
-      write(question)
-      return await new Promise<string | undefined>((settle) => {
-        waiters.push(settle)
-        deliver()
-      })
-    },
-    close() {
-      input.removeAllListeners('data')
-    },
   }
 }
 
@@ -183,6 +135,64 @@ interface WizardField {
    * it in full would push the answer off the line, so the prompt shows a count.
    */
   show?: (value: unknown) => string
+  /**
+   * Fields with a fixed set of sensible values offer them as a numbered menu
+   * (contract.md §4.2). Numbers still work as plain text everywhere else:
+   * `port` / `debounceMs` / `maxDirectories` take a typed number, no menu.
+   */
+  menu?: CandidateSource
+}
+
+/** What a menu offers, given the value the file currently implies. */
+function menuFor(field: WizardField, current: unknown, defaults: EffectiveConfig, interfaces: InterfaceMap): MenuConfig {
+  switch (field.menu) {
+    case 'host': {
+      const value = String(current ?? field.fallback(defaults))
+      return {
+        title: 'host — where the page listens',
+        candidates: hostCandidates(interfaces, value),
+        multi: false,
+        selected: [value],
+        footer: `choose a number, type an address, "-" clears, Enter keeps [${value}]`,
+      }
+    }
+    case 'plugins': {
+      const value = (current ?? field.fallback(defaults)) as readonly string[]
+      const all = (field.fallback(defaults) as readonly string[]).map(id => ({ value: id }))
+      return {
+        title: 'plugins — client pieces, in boot order',
+        candidates: all,
+        multi: true,
+        selected: value,
+        footer: `toggle by number ("3,7"), "all", "none", Enter keeps [${showList(value)}]`,
+      }
+    }
+    case 'ignore': {
+      const value = (current ?? field.fallback(defaults)) as readonly string[]
+      // Patterns the file already carries come first, so a custom rule is
+      // always visible and can be toggled off like any other.
+      const extra = value.filter(pattern => !IGNORE_CANDIDATES.some(candidate => candidate.value === pattern))
+      return {
+        title: 'ignore — hidden patterns (gitignore syntax)',
+        candidates: [...extra.map(pattern => ({ value: pattern, detail: 'in this file' })), ...IGNORE_CANDIDATES],
+        multi: true,
+        selected: value,
+        footer: `toggle by number, type a pattern to add, "none", Enter keeps [${showList(value)}]`,
+      }
+    }
+    case 'boolean': {
+      const value = String(current ?? field.fallback(defaults))
+      return {
+        title: `watch.enabled — ${field.hint}`,
+        candidates: booleanCandidates(value === 'true'),
+        multi: false,
+        selected: [value],
+        footer: `choose 1-2, Enter keeps [${value}]`,
+      }
+    }
+    default:
+      throw new Error(`field ${field.key} has no menu`)
+  }
 }
 
 /** `16 plugins` instead of sixteen ids; the full list stays in the file. */
@@ -198,6 +208,7 @@ const FIELDS: readonly WizardField[] = [
     hint: 'loopback only; widen it on purpose',
     fallback: defaults => defaults.host,
     parse: raw => parseConfigValue('host', raw),
+    menu: 'host',
   },
   {
     key: 'port',
@@ -211,6 +222,7 @@ const FIELDS: readonly WizardField[] = [
     fallback: defaults => defaults.plugins,
     parse: raw => parseConfigValue('plugins', raw),
     show: showList,
+    menu: 'plugins',
   },
   {
     key: 'ignore',
@@ -218,12 +230,14 @@ const FIELDS: readonly WizardField[] = [
     fallback: defaults => defaults.ignore,
     parse: raw => parseConfigValue('ignore', raw),
     show: showList,
+    menu: 'ignore',
   },
   {
     key: 'watch.enabled',
     hint: 'false = no file watching at all',
     fallback: defaults => defaults.watch.enabled,
     parse: raw => parseConfigValue('watch.enabled', raw),
+    menu: 'boolean',
   },
   {
     key: 'watch.debounceMs',
@@ -239,41 +253,91 @@ const FIELDS: readonly WizardField[] = [
   },
 ]
 
+/** One change the wizard made, for the summary printed before writing. */
+export interface Change {
+  key: string
+  /** `undefined` = the field was cleared. */
+  value: unknown
+  cleared: boolean
+}
+
 /** What the wizard asks, given the file being edited. Pure enough to test. */
 export async function runWizard(
   file: FileConfig,
-  ask: (question: string) => Promise<string | undefined>,
-  options: { defaults?: EffectiveConfig; out: (message: string) => void },
-): Promise<{ config: FileConfig; changed: boolean }> {
+  terminal: Pick<Terminal, 'line' | 'select'>,
+  options: { defaults?: EffectiveConfig; out: (message: string) => void; interfaces?: InterfaceMap },
+): Promise<{ config: FileConfig; changed: boolean; changes: Change[] }> {
   const defaults = options.defaults ?? defaultConfig()
+  const interfaces = options.interfaces ?? {}
   let next = file
-  let changed = false
+  const changes: Change[] = []
+
+  const clear = (field: WizardField, current: unknown): void => {
+    // `current` is read from the file as it was before this run: clearing a
+    // field that is not there would only rewrite the file with nothing new.
+    if (current === undefined) {
+      options.out(`  ${field.key}: already the default`)
+      return
+    }
+    next = patchFileConfig(next, { [field.key]: undefined }, 'config')
+    changes.push({ key: field.key, value: undefined, cleared: true })
+  }
+
+  const apply = (field: WizardField, value: unknown): void => {
+    next = patchFileConfig(next, { [field.key]: value }, 'config')
+    changes.push({ key: field.key, value, cleared: false })
+    if (field.key === 'host' && typeof value === 'string' && isExposed(value)) {
+      options.out('  ! reachable from other machines on this network')
+    }
+  }
+
   for (const field of FIELDS) {
     const current = readConfigValue(file, field.key)
     const fallback = field.fallback(defaults)
-    const shown = (field.show ?? displayValue)(current ?? fallback)
     const origin = current === undefined ? 'default' : 'file'
+
+    if (field.menu !== undefined) {
+      const menu = menuFor(field, current, defaults, interfaces)
+      for (;;) {
+        const answer = await terminal.select(menu)
+        if (answer === undefined) throw new UsageError('input ended before the wizard finished')
+        if (answer.kind === 'keep' || answer.kind === 'eof') break
+        const text = answer.kind === 'free' ? answer.text : answer.values.join(',')
+        const trimmed = text.trim()
+        if (trimmed === '') break
+        if (trimmed === '-') {
+          clear(field, current)
+          break
+        }
+        // The two whole-list words the menu advertises (multi-select only).
+        if (menu.multi && (trimmed.toLowerCase() === 'all' || trimmed.toLowerCase() === 'none')) {
+          apply(field, trimmed.toLowerCase() === 'all' ? menu.candidates.map(candidate => candidate.value) : [])
+          break
+        }
+        try {
+          apply(field, field.parse(trimmed))
+          break
+        } catch (failure) {
+          if (!(failure instanceof UsageError) && !(failure instanceof ConfigError)) throw failure
+          options.out(`  ! ${failure.message}`)
+        }
+      }
+      continue
+    }
+
+    // A plain field: one line, the value read as typed (numbers are numbers).
+    const shown = (field.show ?? displayValue)(current ?? fallback)
     for (;;) {
-      const answer = await ask(`  ${field.key} [${shown}] (${origin}, ${field.hint}): `)
+      const answer = await terminal.line(`  ${field.key} [${shown}] (${origin}, ${field.hint}): `)
       if (answer === undefined) throw new UsageError('input ended before the wizard finished')
       const trimmed = answer.trim()
       if (trimmed === '') break
       if (trimmed === '-') {
-        // `current` is read from the file as it was before this run: clearing a
-        // field that is not there would only rewrite the file with nothing new.
-        if (current === undefined) {
-          options.out(`  ${field.key}: already the default`)
-          break
-        }
-        next = patchFileConfig(next, { [field.key]: undefined }, 'config')
-        changed = true
-        options.out(`  ${field.key}: cleared (back to the default)`)
+        clear(field, current)
         break
       }
       try {
-        const value = field.parse(trimmed)
-        next = patchFileConfig(next, { [field.key]: value }, 'config')
-        changed = true
+        apply(field, field.parse(trimmed))
         break
       } catch (failure) {
         if (!(failure instanceof UsageError) && !(failure instanceof ConfigError)) throw failure
@@ -281,7 +345,29 @@ export async function runWizard(
       }
     }
   }
-  return { config: next, changed }
+  return { config: next, changed: changes.length > 0, changes }
+}
+
+/** `host: 127.0.0.1 → 0.0.0.0`, `ignore: +dist -*.log`, one line per field. */
+export function summarizeChanges(changes: readonly Change[], before: FileConfig | EffectiveConfig): string[] {
+  return changes.map(change => {
+    const previous = readConfigValue(before, change.key)
+    if (change.cleared) return `${change.key}: cleared (was ${displayValue(previous)})`
+    const next = change.value
+    if (Array.isArray(next)) {
+      const value: unknown[] = next
+      const beforeItems: unknown[] = Array.isArray(previous) ? previous : []
+      const added = value.filter(item => !beforeItems.includes(item))
+      const removed = beforeItems.filter(item => !value.includes(item))
+      if (value.length === 0) return `${change.key}: empty`
+      if (added.length === 0 && removed.length === 0) return `${change.key}: (unchanged)`
+      const parts = [...added.map(item => `+${String(item)}`), ...removed.map(item => `-${String(item)}`)]
+      return `${change.key}: ${parts.join(' ')}`
+    }
+    // A field the file did not mention has no "before": say what it becomes.
+    if (previous === undefined) return `${change.key}: set to ${displayValue(next)}`
+    return `${change.key}: ${displayValue(previous)} → ${displayValue(next)}`
+  })
 }
 
 // --- the command ----------------------------------------------------------
@@ -387,8 +473,15 @@ async function writeTarget(args: ConfigArgs, io: CliIo): Promise<{ path: string;
   return { path, ...(root === undefined ? {} : { root }) }
 }
 
-/** `diorama config [--dir <dir> | --config <path>]`: the interactive editor. */
-async function wizard(io: CliIo, args: ConfigArgs): Promise<number> {
+/**
+ * `diorama config [--dir <dir> | --config <path>]`: the interactive editor.
+ * `options` injects the stdin stream and the interface list (tests).
+ */
+export async function wizard(
+  io: CliIo,
+  args: ConfigArgs,
+  options: { stdin?: TerminalInput; interfaces?: InterfaceMap } = {},
+): Promise<number> {
   if (args.positional.length > 0) {
     throw new UsageError(`unexpected argument "${args.positional[0]}" (use --dir <dir> to edit <dir>/diorama.toml)`)
   }
@@ -399,15 +492,25 @@ async function wizard(io: CliIo, args: ConfigArgs): Promise<number> {
   if (existing !== '') io.out(existing.replace(/\n$/, ''))
   io.out('Enter keeps a value, "-" clears it.')
 
-  const prompter = streamPrompter(process.stdin, text => io.out(text.trimEnd()))
-  let result: { config: FileConfig; changed: boolean }
+  const terminal = createTerminal(options.stdin ?? process.stdin, text => io.out(text.trimEnd()))
+  let result: { config: FileConfig; changed: boolean; changes: Change[] }
   try {
-    result = await runWizard(file, question => prompter.ask(question), { out: message => io.out(message) })
+    result = await runWizard(file, terminal, {
+      out: message => io.out(message),
+      // The machine's own addresses: the whole point of the `host` menu.
+      interfaces: options.interfaces ?? (networkInterfaces() as InterfaceMap),
+    })
     if (!result.changed) {
       io.out('no changes')
       return 0
     }
     const text = formatFileConfig(result.config)
+    io.out('')
+    io.out('changes:')
+    // Summarize against what the reader sees today (defaults ← file), not
+    // against the file alone: "ignore: +dist" beats "set to 16 patterns".
+    const before = mergeConfig(file)
+    for (const line of summarizeChanges(result.changes, before)) io.out(`  ${line}`)
     io.out('')
     io.out(text === '' ? '(the file will be empty: every setting is back to its default)' : text.replace(/\n$/, ''))
     if (args.dryRun) {
@@ -415,7 +518,7 @@ async function wizard(io: CliIo, args: ConfigArgs): Promise<number> {
       return 0
     }
     if (!args.yes) {
-      const answer = await prompter.ask('write this file? [Y/n] ')
+      const answer = await terminal.line('write this file? [Y/n] ')
       if (answer === undefined) throw new UsageError('input ended before the confirmation')
       if (!/^(y|yes)?$/i.test(answer.trim())) {
         io.out(`not written: ${path}`)
@@ -423,7 +526,7 @@ async function wizard(io: CliIo, args: ConfigArgs): Promise<number> {
       }
     }
   } finally {
-    prompter.close()
+    terminal.close()
   }
   writeFileConfig({ path, config: result.config })
   io.out(`wrote ${path}`)
@@ -501,7 +604,11 @@ function write(io: CliIo, args: ConfigArgs, path: string, config: FileConfig): n
 }
 
 /** `diorama config …`: dispatch on the verb. */
-export async function configCommand(io: CliIo, argv: readonly string[]): Promise<number> {
+export async function configCommand(
+  io: CliIo,
+  argv: readonly string[],
+  options: { stdin?: TerminalInput; interfaces?: InterfaceMap } = {},
+): Promise<number> {
   const [verb, ...rest] = argv
   // `diorama config --dir <dir>` (no verb) is the wizard: options may come
   // before the word "show"/"set"/"unset" would.
@@ -510,7 +617,7 @@ export async function configCommand(io: CliIo, argv: readonly string[]): Promise
   try {
     switch (head) {
       case undefined:
-        return await wizard(io, parseConfigArgs(wizardArgs, 'edit'))
+        return await wizard(io, parseConfigArgs(wizardArgs, 'edit'), options)
       case 'show':
         return await show(io, parseConfigArgs(rest, 'show'))
       case 'set':
