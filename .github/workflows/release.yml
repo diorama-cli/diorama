@@ -49,15 +49,19 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          # Trusted publishing needs npm >= 11.5.1 (Node 22.14+). This also
-          # pins the version CI *builds* with: tsdown picks its config loader
-          # from `process.features.typescript`, which only exists on Node
-          # >= 22.18 — older Nodes fall back to the `unrun` peer, which is why
-          # `unrun` is a real devDependency (see docs/release.md §7).
+          # Node 22.20 is what tsdown needs (see the npm note below), and it is
+          # what the maintainers run locally.
           node-version: 22.20.0
           cache: pnpm
           # No `registry-url`: that writes an `.npmrc` with a token placeholder,
           # which would make npm try token auth instead of OIDC.
+
+      # Trusted publishing is an npm CLI feature (>= 11.5.1). Node 22.20 ships
+      # npm 10.9.3, which has no OIDC support at all: `npm publish` ignores the
+      # id-token, finds no token, and fails with ENEEDAUTH — which looks
+      # exactly like a missing trusted-publisher configuration on npmjs.com.
+      - name: Update npm for trusted publishing
+        run: npm install --global npm@11
 
       - name: Install
         run: pnpm install --frozen-lockfile
