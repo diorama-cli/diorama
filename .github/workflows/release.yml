@@ -121,6 +121,10 @@ jobs:
           # means npmjs.com has no trusted publisher matching this repository,
           # workflow file and ref — that is a configuration problem on npm, not
           # a workflow problem.
+          #
+          # Success is **201 Created**, not 200: the exchange creates a token.
+          # (The first version of this check accepted only 200 and failed a
+          # release that had actually succeeded.)
           status=$(curl -s -o "$RUNNER_TEMP/oidc.json" -w '%{http_code}' \
             -X POST \
             -H "Authorization: Bearer $(curl -s \
@@ -129,12 +133,24 @@ jobs:
               | node -p 'JSON.parse(require("fs").readFileSync(0,"utf8")).value')" \
             "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/@diorama-cli%2Fdiorama")
           echo "token exchange: HTTP $status"
-          if [ "$status" != "200" ]; then
-            echo "::error::npm refused the OIDC token exchange (HTTP $status). Check the trusted publisher on npmjs.com: owner=zimmem or diorama-cli, repo=diorama, workflow=release.yml, and that it is not restricted to an environment."
-            cat "$RUNNER_TEMP/oidc.json" || true
-            exit 1
-          fi
-          echo "trusted publisher: reachable"
+          case "$status" in
+            200|201)
+              # Never print the token itself, only the fact that one arrived.
+              node -e '
+                const body = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))
+                if (!body.token) {
+                  console.error("::error::the exchange returned no token")
+                  process.exit(1)
+                }
+                console.log(`trusted publisher: OK (token valid for ${body.expires - body.created}s)`)
+              ' "$RUNNER_TEMP/oidc.json"
+              ;;
+            *)
+              echo "::error::npm refused the OIDC token exchange (HTTP $status). Check the trusted publisher on npmjs.com: owner=diorama-cli, repo=diorama, workflow=release.yml, Environment left empty."
+              cat "$RUNNER_TEMP/oidc.json" || true
+              exit 1
+              ;;
+          esac
 
       - name: Publish to npm
         if: startsWith(github.ref, 'refs/tags/') && inputs.dry_run != true
