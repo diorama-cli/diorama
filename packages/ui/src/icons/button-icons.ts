@@ -17,6 +17,9 @@ export interface ButtonGlyph {
 export const BUTTON_GLYPHS: Readonly<Record<string, ButtonGlyph>> = {
   "caret-down": { body: "<path d=\"M6 9l6 6l6 -6\"/>" },
   "caret-right": { body: "<path d=\"M9 6l6 6l-6 6\"/>" },
+  "caret-up": { body: "<path d=\"M6 15l6 -6l6 6\"/>" },
+  "columns": { body: "<path d=\"M3 4a1 1 0 0 1 1 -1h16a1 1 0 0 1 1 1v16a1 1 0 0 1 -1 1h-16a1 1 0 0 1 -1 -1v-16\"/><path d=\"M12 3v18\"/>" },
+  "diff": { body: "<path d=\"M11 16h10\"/><path d=\"M11 16l4 4\"/><path d=\"M11 16l4 -4\"/><path d=\"M13 8h-10\"/><path d=\"M13 8l-4 4\"/><path d=\"M13 8l-4 -4\"/>" },
   "check": { body: "<path d=\"M5 12l5 5l10 -10\"/>" },
   "close": { body: "<path d=\"M18 6l-12 12\"/><path d=\"M6 6l12 12\"/>" },
   "code": { body: "<path d=\"M7 8l-4 4l4 4\"/><path d=\"M17 8l4 4l-4 4\"/><path d=\"M14 4l-4 16\"/>" },
@@ -31,6 +34,7 @@ export const BUTTON_GLYPHS: Readonly<Record<string, ButtonGlyph>> = {
   "folder-open": { body: "<path d=\"M5 19l2.757 -7.351a1 1 0 0 1 .936 -.649h12.307a1 1 0 0 1 .986 1.164l-.996 5.211a2 2 0 0 1 -1.964 1.625h-14.026a2 2 0 0 1 -2 -2v-11a2 2 0 0 1 2 -2h4l3 3h7a2 2 0 0 1 2 2v2\"/>" },
   "git-changes": { body: "<path d=\"M4 6a2 2 0 1 0 4 0a2 2 0 1 0 -4 0\"/><path d=\"M16 18a2 2 0 1 0 4 0a2 2 0 1 0 -4 0\"/><path d=\"M11 6h5a2 2 0 0 1 2 2v8\"/><path d=\"M14 9l-3 -3l3 -3\"/><path d=\"M13 18h-5a2 2 0 0 1 -2 -2v-8\"/><path d=\"M10 15l3 3l-3 3\"/>" },
   "git-history": { body: "<path d=\"M12 8l0 4l2 2\"/><path d=\"M3.05 11a9 9 0 1 1 .5 4m-.5 5v-5h5\"/>" },
+  "unfold": { body: "<path d=\"M8 7l4 -4l4 4\"/><path d=\"M8 17l4 4l4 -4\"/><path d=\"M12 3l0 18\"/>" },
   "info": { body: "<path d=\"M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0\"/><path d=\"M12 9h.01\"/><path d=\"M11 12h1v4h1\"/>" },
   "keyboard": { body: "<path d=\"M2 8a2 2 0 0 1 2 -2h16a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-16a2 2 0 0 1 -2 -2l0 -8\"/><path d=\"M6 10l0 .01\"/><path d=\"M10 10l0 .01\"/><path d=\"M14 10l0 .01\"/><path d=\"M18 10l0 .01\"/><path d=\"M6 14l0 .01\"/><path d=\"M18 14l0 .01\"/><path d=\"M10 14l4 .01\"/>" },
   "loader": { body: "<path d=\"M12 3a9 9 0 1 0 9 9\"/>" },
