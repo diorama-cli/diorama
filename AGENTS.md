@@ -13,7 +13,7 @@
 | 3 | [docs/features.md](docs/features.md) | **有什么**：能力清单与档位（✅ / v1 / 未来 / 不做） |
 | 4 | 最近一档的 `docs/mN/spec.md` | **怎么实现的** + **§6.2 的坑**（见下面 §5） |
 
-最近一档是 [docs/m9/spec.md](docs/m9/spec.md)（主题切换，`ctx.theme`）。
+最近一档是 [docs/m14/spec.md](docs/m14/spec.md)（一个目录里的多个 git 仓库，`ctx.git`）。
 
 `docs/plan.md` 是**阶段性排期**，会退役；不要把它当长期真源，也不要在新代码里引用它。
 一次会话的最小读法：`contract.md` 目录 → `features.md` 表 → 最近 spec 的「坑」一节。
@@ -60,6 +60,7 @@ scripts/                  生成器（图标表；`pnpm icons` 重新生成）
 | `ctx.commands`、键记法、按键分发 | `kernel/src/client/commands.ts`、`client/boot.ts` |
 | `ctx.tabs` / `ctx.tree` | `kernel/src/client/tabs.ts`、`client/tree.ts` |
 | `ctx.git`（仓库探测、status/diff/log/show/showCommit/blob、上限） | `kernel/src/server/git.ts`、`kernel/src/shared/types.ts`、`kernel/src/client/git.ts` |
+| 仓库发现（向下走查、深度/忽略/上限、嵌套） | `kernel/src/server/repos.ts`、`kernel/src/server/config.ts` 的 `[git]` 表 |
 | `ctx.fs` 的大小上限（两端共用一个数） | `kernel/src/shared/limits.ts` |
 | 页面配色 token（light / dark 调色板、主题覆盖的集合） | `ui/src/styles.css`（`:root` 与 `[data-scheme='dark']` 两处**一起改**）；防白闪脚本在 `apps/web/index.html` |
 | `ctx.search`（文件名 / 内容搜索、上限、reveal store） | `kernel/src/server/search.ts`、`kernel/src/shared/search.ts`、`kernel/src/client/search.ts`、`ui/src/reveal.ts` |
@@ -126,6 +127,11 @@ scripts/                  生成器（图标表；`pnpm icons` 重新生成）
 | RPC 对某个内核服务一直 `ESERVICE`，日志没有报错 | 服务的 server 半边没被 CLI 选中（`selectPlugins` 的固定清单漏了它） | 新内核服务的四处接线见 §4「新内核服务的『每 mount 一份』接线」 |
 | 改了 `index.html`（或颜色）后 e2e 行为像没生效，`data-scheme` 是 `null` | e2e 的壳来自 `packages/cli/web/`（组装产物），`pnpm build` 不刷新它 | 改了壳 / 样式后跑 `node scripts/assemble-package.mjs` 再测（m9/spec §5.1） |
 | 新 token 只加了 light，暗色下掉回奇怪的颜色 | `:root` 与 `:root[data-scheme='dark']` 两处必须成对 | 颜色一律进 token 表（contract §5.3）；两处一起加 |
+| 多仓库挂载「变更」里什么都没有 / 服务报 `no usable git repository` | `GitRepoView` 假设了「挂载在仓库里」，并列多仓库时恰好反过来（仓库在挂载里） | 两个方向二选一：仓库**包含**挂载 → `repoPath` 是 `''`；仓库**在**挂载里 → `repoPath` 是它的挂载相对路径（m14/spec §6 坑 2–3）|
+| 内层仓库的文件在外层仓库的变更里也出现一次 | git 对未跟踪目录报的路径**带尾斜杠**（`?? vendor/lib/`），与嵌套表里的 `vendor/lib` 不相等 | 比较嵌套前去掉尾斜杠；`nested` 一律用**挂载**路径（m14/spec §6 坑 4–5）|
+| 多仓库挂载里点开子目录仓库的提交，右侧报 `ENOENT: no such commit` | 提交座位只拿到 sha，`showCommit` / `show` / `blob` 都没带仓库，落回「挂载自己的仓库」 | `#history` 的值是 `<repo>:<sha>`（挂载根仓库时是裸 sha），`tabs` 解出来交给 `seats.git-commit` 的 `repo`（m14/spec §7）|
+| 提交座位里点「新旧对照」没反应（工作区 tab 正常） | 同一个 `DiffView` 有两处调用点，取数条件各写各的：提交座位只在 `mode === 'file'` 时读文件正文，`split` 模式下 `whole` 是 `idle`，双栏分支不成立 | 两处都用 `mode !== 'inline'`；`DiffView` 的 props 让调用方决定 `whole`，写错不会报错，只会静默少画（m14/spec §8）|
+| RPC 调用多传一个参数就 `EBADREQUEST` | `describe()` 的 `arity` 是白名单，加参数必须同步改 | `ctx.git` 的每个方法都加了可选 `repo`：`METHODS` 里的 arity 要一起放宽（m14/spec §6 坑 6）|
 | 主题「注册了但 palette 里没有」 | `theme` piece 不在 boot 图（`--plugins` 没选它），或注册发生在 piece 同步之后又被 dispose | 命令由 `theme` piece 从注册表同步；确认 piece 在图中、注册方没有立刻注销 |
 
 ## 6. 边界（不要越过的线）

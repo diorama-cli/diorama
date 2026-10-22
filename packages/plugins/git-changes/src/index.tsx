@@ -59,8 +59,36 @@ export const HISTORY_VIEW = 'history'
  * This piece's hash key for the history view (contract.md §3.8): the **value**
  * is the commit being looked at, or `''` for "the history view is open, no
  * commit picked yet". The kernel does not know what `history` means.
+ *
+ * A mount may hold several repositories (v0.10), and the same sha means
+ * different commits in different repositories, so the value carries **both**:
+ * `<repo>:<sha>` when the commit is in a repository below the mount root, and
+ * the bare sha when it is in the mount's own repository (which is what every
+ * v0.6–v0.9 URL already holds). Repository paths contain `/` but never `:`,
+ * so the first `:` is the separator.
  */
 export const HISTORY_HASH_KEY = 'history'
+
+/** A history hash value split into its repository and commit. */
+export interface PickedCommit {
+  /** The repository's mount-relative path (`''` = the mount's own repository). */
+  repo: string
+  /** The commit, as the history row spells it (a full sha). */
+  commit: string
+}
+
+/** Encode a picked commit for `#history` (see {@link HISTORY_HASH_KEY}). */
+export function historyHashValue(repo: string, commit: string): string {
+  return repo === '' ? commit : `${repo}:${commit}`
+}
+
+/** Decode a `#history` value; `undefined` for the empty (or absent) value. */
+export function parseHistoryHash(value: string | undefined): PickedCommit | undefined {
+  if (value === undefined || value === '') return undefined
+  const at = value.indexOf(':')
+  if (at <= 0) return { repo: '', commit: value }
+  return { repo: value.slice(0, at), commit: value.slice(at + 1) }
+}
 
 /** The changes view's switcher icon (docs/m7/spec.md §3: the button table). */
 export const CHANGES_ICON = iconSvg('git-changes')
@@ -234,6 +262,55 @@ function useTabPath(tabs: TabsService | undefined): string | undefined {
   return useSyncExternalStore(subscribe, read, read)
 }
 
+/**
+ * One repository's group in the changes view (v0.10): a foldable header naming
+ * the repository, then that repository's own tree. A mount with a single
+ * repository rooted at the mount has no header — the group would only repeat
+ * what the column already is.
+ */
+function RepoGroup({
+  repo,
+  entries,
+  selected,
+  open,
+  collapsed,
+  onToggle,
+  showHeader,
+}: {
+  repo: string
+  entries: readonly GitStatusEntry[]
+  selected: string | undefined
+  open(entry: GitStatusEntry): void
+  collapsed: ReadonlySet<string>
+  onToggle(key: string): void
+  showHeader: boolean
+}) {
+  const key = `repo:${repo}`
+  const closed = collapsed.has(key)
+  const label = repo === '' ? '(挂载目录)' : repo
+  return (
+    <div className="diorama-changes__repo" data-repo={repo} data-testid="git-changes-repo">
+      {showHeader ? (
+        <button
+          type="button"
+          className="diorama-changes__repo-head"
+          aria-expanded={!closed}
+          title={repo === '' ? '仓库根就是挂载目录' : repo}
+          onClick={() => onToggle(key)}
+        >
+          <span className="diorama-tree__caret" aria-hidden="true">
+            <Icon name={closed ? 'caret-right' : 'caret-down'} size={14} />
+          </span>
+          <FileIcon name={label} kind="dir" expanded={!closed} />
+          <span className="diorama-changes__repo-name">{label}</span>
+          <span className="diorama-changes__count">{entries.length}</span>
+        </button>
+      ) : null}
+      {closed ? null : <ChangeTree entries={entries} selected={selected} onOpen={open} />}
+    </div>
+  )
+}
+
 /** The changes view (contract.md §5.2). */
 function ChangesView({ active }: { active: boolean }) {
   const { mount, ctx } = useKernel()
@@ -241,6 +318,16 @@ function ChangesView({ active }: { active: boolean }) {
   const changes = useChanges(mount)
   const activeTab = useTabPath(tabs)
   const router = ctx.router
+  // Repository groups fold like directories do; the state is this view's own.
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
+  const toggle = (key: string): void => {
+    setCollapsed(current => {
+      const next = new Set(current)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
   void active
   if (changes.error !== undefined) {
     return (
@@ -272,10 +359,23 @@ function ChangesView({ active }: { active: boolean }) {
     tabs.open(diffFile(entry.file), { view: 'diff' })
     router?.state(DIFF_HASH_KEY).set('')
   }
+  // One group per repository, in the order the service reports them
+  // (shallowest first, contract.md §3.2).
+  const groups: { repo: string; entries: GitStatusEntry[] }[] = []
+  for (const entry of changes.entries) {
+    const repo = entry.repo ?? ''
+    const last = groups[groups.length - 1]
+    if (last !== undefined && last.repo === repo) last.entries.push(entry)
+    else groups.push({ repo, entries: [entry] })
+  }
+  const showHeaders = groups.length > 1
   return (
     <div className="diorama-changes" data-testid="git-changes">
       <div className="diorama-changes__group">
-        <span>{changes.entries.length} 个改动</span>
+        <span>
+          {changes.entries.length} 个改动
+          {groups.length > 1 ? ` · ${groups.length} 个仓库` : ''}
+        </span>
         <button
           type="button"
           className="diorama-changes__reload"
@@ -287,7 +387,18 @@ function ChangesView({ active }: { active: boolean }) {
           <Icon name="reload" size={14} />
         </button>
       </div>
-      <ChangeTree entries={changes.entries} selected={activeTab} onOpen={open} />
+      {groups.map(group => (
+        <RepoGroup
+          key={group.repo}
+          repo={group.repo}
+          entries={group.entries}
+          selected={activeTab}
+          open={open}
+          collapsed={collapsed}
+          onToggle={toggle}
+          showHeader={showHeaders}
+        />
+      ))}
     </div>
   )
 }
@@ -633,7 +744,13 @@ function TabDiff({ tab }: TabDiffProps) {
   // Both hooks run before any early return: a tab that starts loading and ends
   // up with an entry must not change the number of hooks between renders.
   const mode = useDiffMode()
-  const entry = state.status === 'ready' ? state.result.entries.find(item => item.file === tab.path) : undefined
+  // The same mount-relative path may exist in several repositories of the
+  // mount (v0.10): the tab's entry is the one whose repository it was opened
+  // from. The diff call is scoped by path, so the service resolves that
+  // repository itself; here the lookup only has to prefer the same one.
+  const entry = state.status === 'ready'
+    ? state.result.entries.find(item => item.file === tab.path) ?? state.result.entries[0]
+    : undefined
   const usable = entry !== undefined && !('error' in entry)
   const binary = usable && entry.binary === true
   // The file itself is read only when a mode that shows file content is on
@@ -1128,8 +1245,19 @@ function ModeSwitch({ mode, ids }: { mode: DiffMode; ids: DiffTestIds }) {
  */
 const HISTORY_PAGE = 50
 
+/** One repository's commits in the history view (v0.10). */
+interface HistoryGroup {
+  repo: string
+  commits: GitLogEntry[]
+}
+
+/**
+ * The history of **every** repository of the mount (v0.10), grouped: a mount
+ * may hold several, and each has its own first commit. The limit is per
+ * repository, the same way the changes view's list is per repository.
+ */
 function useHistory(git: GitClient): {
-  commits: GitLogEntry[] | undefined
+  groups: HistoryGroup[] | undefined
   error: string | undefined
   more: boolean
   loadMore(): void
@@ -1137,12 +1265,18 @@ function useHistory(git: GitClient): {
 } {
   const [limit, setLimit] = useState(HISTORY_PAGE)
   const [epoch, setEpoch] = useState(0)
-  const [state, setState] = useState<{ commits?: GitLogEntry[]; error?: string }>({})
+  const [state, setState] = useState<{ groups?: HistoryGroup[]; error?: string }>({})
   useEffect(() => {
     let live = true
-    git.log({ limit }).then(
-      commits => {
-        if (live) setState({ commits })
+    const load = async (): Promise<HistoryGroup[]> => {
+      const repos = await git.repos()
+      return Promise.all(
+        repos.map(async repo => ({ repo: repo.path, commits: await git.log({ limit, repo: repo.path }) })),
+      )
+    }
+    load().then(
+      groups => {
+        if (live) setState({ groups })
       },
       (error: unknown) => {
         if (live) setState({ error: error instanceof Error ? error.message : String(error) })
@@ -1152,12 +1286,15 @@ function useHistory(git: GitClient): {
       live = false
     }
   }, [git, limit, epoch])
-  const commits = state.commits
+  const groups = state.groups
   return {
-    commits,
+    groups,
     error: state.error,
     // A full page may or may not have more; the next ask that comes back short ends it.
-    more: commits !== undefined && commits.length === limit && limit < MAX_LOG_LIMIT_PAGE,
+    more:
+      groups !== undefined &&
+      groups.some(group => group.commits.length === limit) &&
+      limit < MAX_LOG_LIMIT_PAGE,
     loadMore: () => setLimit(value => Math.min(value + HISTORY_PAGE, MAX_LOG_LIMIT_PAGE)),
     reload: () => setEpoch(value => value + 1),
   }
@@ -1185,6 +1322,16 @@ function HistoryView({ active }: { active: boolean }) {
   const history = useHistory(git)
   const router = ctx.router
   const selected = useHistorySelection(ctx)
+  // Repository groups fold like the changes view's (v0.10).
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
+  const toggle = (key: string): void => {
+    setCollapsed(current => {
+      const next = new Set(current)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
   void active
   if (history.error !== undefined) {
     return (
@@ -1193,28 +1340,35 @@ function HistoryView({ active }: { active: boolean }) {
       </div>
     )
   }
-  if (history.commits === undefined) {
+  if (history.groups === undefined) {
     return (
       <div className="diorama-changes" data-testid="git-history">
         正在读取历史…
       </div>
     )
   }
-  if (history.commits.length === 0) {
+  const total = history.groups.reduce((sum, group) => sum + group.commits.length, 0)
+  if (total === 0) {
     return (
       <div className="diorama-changes diorama-changes__empty" data-testid="git-history" role="status">
         还没有提交
       </div>
     )
   }
-  const pick = (sha: string): void => {
-    // The value carries the commit; `''` would mean "nothing picked".
-    router?.state(HISTORY_HASH_KEY).set(sha)
+  const pick = (repo: string, sha: string): void => {
+    // The value carries the commit **and its repository** (v0.10): the same sha
+    // is a different commit in another repository. `''` would mean "nothing
+    // picked".
+    router?.state(HISTORY_HASH_KEY).set(historyHashValue(repo, sha))
   }
+  const showHeaders = history.groups.length > 1
   return (
     <div className="diorama-changes" data-testid="git-history">
       <div className="diorama-changes__group">
-        <span>{history.commits.length} 个提交</span>
+        <span>
+          {total} 个提交
+          {showHeaders ? ` · ${history.groups.length} 个仓库` : ''}
+        </span>
         <button
           type="button"
           className="diorama-changes__reload"
@@ -1226,31 +1380,59 @@ function HistoryView({ active }: { active: boolean }) {
           <Icon name="reload" size={14} />
         </button>
       </div>
-      <div className="diorama-history" role="listbox" aria-label="提交历史">
-        {history.commits.map(commit => {
-          const current = commit.sha === selected
-          return (
-            <button
-              key={commit.sha}
-              type="button"
-              role="option"
-              aria-selected={current}
-              className={`diorama-history__row${current ? ' diorama-changes__row--selected' : ''}`}
-              data-sha={commit.sha}
-              data-testid="git-history-commit"
-              title={`${commit.sha}\n${commit.author} · ${formatWhen(commit.at)}`}
-              onClick={() => pick(commit.sha)}
-            >
-              <span className="diorama-history__subject">{commit.subject || '(无提交说明)'}</span>
-              <span className="diorama-history__meta">
-                <code>{commit.shortSha}</code>
-                <span className="diorama-history__author">{commit.author}</span>
-                <time dateTime={new Date(commit.at).toISOString()}>{formatWhen(commit.at)}</time>
-              </span>
-            </button>
-          )
-        })}
-      </div>
+      {history.groups.map(group => {
+        const key = `repo:${group.repo}`
+        const closed = collapsed.has(key)
+        const label = group.repo === '' ? '(挂载目录)' : group.repo
+        return (
+          <div className="diorama-changes__repo" key={group.repo} data-repo={group.repo} data-testid="git-history-repo">
+            {showHeaders ? (
+              <button
+                type="button"
+                className="diorama-changes__repo-head"
+                aria-expanded={!closed}
+                title={group.repo === '' ? '仓库根就是挂载目录' : group.repo}
+                onClick={() => toggle(key)}
+              >
+                <span className="diorama-tree__caret" aria-hidden="true">
+                  <Icon name={closed ? 'caret-right' : 'caret-down'} size={14} />
+                </span>
+                <FileIcon name={label} kind="dir" expanded={!closed} />
+                <span className="diorama-changes__repo-name">{label}</span>
+                <span className="diorama-changes__count">{group.commits.length}</span>
+              </button>
+            ) : null}
+            {closed ? null : (
+              <div className="diorama-history" role="listbox" aria-label="提交历史">
+                {group.commits.map(commit => {
+                  const current = commit.sha === selected?.commit && group.repo === selected.repo
+                  return (
+                    <button
+                      key={`${group.repo}:${commit.sha}`}
+                      type="button"
+                      role="option"
+                      aria-selected={current}
+                      className={`diorama-history__row${current ? ' diorama-changes__row--selected' : ''}`}
+                      data-sha={commit.sha}
+                      data-repo={group.repo}
+                      data-testid="git-history-commit"
+                      title={`${commit.sha}\n${commit.author} · ${formatWhen(commit.at)}`}
+                      onClick={() => pick(group.repo, commit.sha)}
+                    >
+                      <span className="diorama-history__subject">{commit.subject || '(无提交说明)'}</span>
+                      <span className="diorama-history__meta">
+                        <code>{commit.shortSha}</code>
+                        <span className="diorama-history__author">{commit.author}</span>
+                        <time dateTime={new Date(commit.at).toISOString()}>{formatWhen(commit.at)}</time>
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )
+      })}
       {history.more && (
         <button type="button" className="diorama-changes__reload" data-testid="git-history-more" onClick={history.loadMore}>
           <Icon name="caret-down" size={14} />
@@ -1265,14 +1447,13 @@ function HistoryView({ active }: { active: boolean }) {
  * The commit the history view has picked: the hash value, kept in step with
  * the seat. One writer (this view) and one reader (the seat) share the slot.
  */
-function useHistorySelection(ctx: unknown): string | undefined {
-  const [selected, setSelected] = useState<string | undefined>(() => readHistoryHash(ctx))
+function useHistorySelection(ctx: unknown): PickedCommit | undefined {
+  const [selected, setSelected] = useState<PickedCommit | undefined>(() => readHistoryHash(ctx))
   useEffect(() => {
     const slot = historySlot(ctx)
     if (slot === undefined) return
     const sync = (): void => {
-      const value = slot.get()
-      setSelected(value === undefined || value === '' ? undefined : value)
+      setSelected(parseHistoryHash(slot.get()))
     }
     sync()
     return slot.onChange(sync)
@@ -1290,9 +1471,8 @@ function historySlot(ctx: unknown): { get(): string | undefined; set(value: stri
   }
 }
 
-function readHistoryHash(ctx: unknown): string | undefined {
-  const value = historySlot(ctx)?.get()
-  return value === undefined || value === '' ? undefined : value
+function readHistoryHash(ctx: unknown): PickedCommit | undefined {
+  return parseHistoryHash(historySlot(ctx)?.get())
 }
 
 /**
@@ -1300,7 +1480,7 @@ function readHistoryHash(ctx: unknown): string | undefined {
  * commit touched. Picking a file shows its change in that commit, with a
  * toggle for the file's content at that commit (`blob()`).
  */
-function CommitSeat({ commit }: CommitSeatProps) {
+function CommitSeat({ commit, repo }: CommitSeatProps) {
   const { mount } = useKernel()
   const git = mount.git
   const [state, setState] = useState<{ status: string; detail?: CommitDetail; error?: string }>({ status: 'loading' })
@@ -1309,7 +1489,9 @@ function CommitSeat({ commit }: CommitSeatProps) {
     let live = true
     setState({ status: 'loading' })
     setPicked(undefined)
-    git.showCommit(commit).then(
+    // The repository matters (v0.10): the same sha is a different commit in
+    // another repository, and the mount's own repository is only the default.
+    git.showCommit(commit, repo).then(
       detail => {
         if (!live) return
         setState({ status: 'ready', detail })
@@ -1323,7 +1505,7 @@ function CommitSeat({ commit }: CommitSeatProps) {
     return () => {
       live = false
     }
-  }, [git, commit])
+  }, [git, commit, repo])
   if (state.status === 'loading') {
     return (
       <div className="diorama-diff" data-testid="git-commit-loading">
@@ -1381,7 +1563,7 @@ function CommitSeat({ commit }: CommitSeatProps) {
               这个提交没有改动
             </div>
           )}
-          {file !== undefined && <CommitFileDiff commit={detail.sha} file={file} />}
+          {file !== undefined && <CommitFileDiff commit={detail.sha} file={file} repo={repo} />}
         </div>
       </div>
     </div>
@@ -1445,7 +1627,7 @@ export function messageBody(message: string): string {
 }
 
 /** The whole file at a commit, read for the "whole file" mode (`blob()`). */
-function useCommitText(commit: string, path: string, wanted: boolean): FileState {
+function useCommitText(commit: string, path: string, wanted: boolean, repo?: string): FileState {
   const { mount } = useKernel()
   const [state, setState] = useState<FileState>({ status: 'idle' })
   useEffect(() => {
@@ -1455,7 +1637,7 @@ function useCommitText(commit: string, path: string, wanted: boolean): FileState
     }
     let live = true
     setState({ status: 'loading' })
-    mount.git.blob(commit, path).then(
+    mount.git.blob(commit, path, repo).then(
       result => {
         if (!live) return
         if (result.binary === true) {
@@ -1471,7 +1653,7 @@ function useCommitText(commit: string, path: string, wanted: boolean): FileState
     return () => {
       live = false
     }
-  }, [mount, commit, path, wanted])
+  }, [mount, commit, path, wanted, repo])
   return state
 }
 
@@ -1481,7 +1663,7 @@ function useCommitText(commit: string, path: string, wanted: boolean): FileState
  * left it** (`blob()`), so the code around a change is the code that change
  * produced — not today's working tree, which may be nothing like it.
  */
-function CommitFileDiff({ commit, file }: { commit: string; file: DiffEntry }) {
+function CommitFileDiff({ commit, file, repo }: { commit: string; file: DiffEntry; repo?: string }) {
   const { mount } = useKernel()
   const [state, setState] = useState<{ status: string; entry?: DiffEntry; error?: string }>({
     status: file.text === undefined && file.binary !== true ? 'loading' : 'ready',
@@ -1496,7 +1678,7 @@ function CommitFileDiff({ commit, file }: { commit: string; file: DiffEntry }) {
       return
     }
     let live = true
-    mount.git.show(commit, file.file).then(
+    mount.git.show(commit, file.file, repo).then(
       entry => {
         if (live) setState({ status: 'ready', entry })
       },
@@ -1507,8 +1689,12 @@ function CommitFileDiff({ commit, file }: { commit: string; file: DiffEntry }) {
     return () => {
       live = false
     }
-  }, [mount, commit, file])
-  const whole = useCommitText(commit, file.file, mode === 'file' && file.binary !== true)
+  }, [mount, commit, file, repo])
+  // Both content modes need the file (v0.10, m13 §2): "whole file" puts the
+  // change inside the file's own line numbers, and "split" needs the unchanged
+  // lines for both columns. Asking for it only in `file` mode left `split` with
+  // no text at all, so the button did nothing in the commit seat.
+  const whole = useCommitText(commit, file.file, mode !== 'inline' && file.binary !== true, repo)
   if (state.status === 'loading') {
     return <div className="diorama-renderer" data-testid="git-commit-diff-loading">正在读取改动…</div>
   }

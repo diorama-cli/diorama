@@ -141,7 +141,7 @@ interface TabsLike {
  * it: the hash must say what is on screen, or a refresh would come back to a
  * commit the reader has already left (contract.md §3.8).
  */
-function usePickedCommit(tabs: TabsLike): string | undefined {
+function usePickedCommit(tabs: TabsLike): PickedCommit | undefined {
   const { ctx } = useKernel()
   const router = ctx.router as
     | {
@@ -153,29 +153,50 @@ function usePickedCommit(tabs: TabsLike): string | undefined {
       }
     | undefined
   const slot = router?.state('history')
-  const commit = useSyncExternalStore(
+  // The value may name a repository as well as a commit (v0.10):
+  // `<repo>:<sha>`, or a bare sha for the mount's own repository — which is
+  // every value a v0.6–v0.9 URL holds. This piece does not interpret the
+  // parts; it only has to notice that a value is there.
+  const value = useSyncExternalStore(
     useCallback((listener: () => void) => slot?.onChange(listener) ?? (() => {}), [slot]),
-    useCallback(() => {
-      const value = slot?.get()
-      return value === undefined || value === '' ? undefined : value
-    }, [slot]),
+    useCallback(() => slot?.get(), [slot]),
   )
-  const held = useCommitHeld(commit, tabs)
+  const picked = parsePickedCommit(value)
+  const held = useCommitHeld(value === undefined || value === '' ? undefined : value, tabs)
   useEffect(() => {
-    if (commit !== undefined && !held) slot?.set(undefined)
-  }, [commit, held, slot])
-  return held ? commit : undefined
+    if (picked !== undefined && !held) slot?.set(undefined)
+  }, [picked, held, slot])
+  return held ? picked : undefined
+}
+
+/** A `#history` value split into repository and commit (v0.10). */
+interface PickedCommit {
+  /** The repository's mount-relative path (`''` = the mount's own). */
+  repo: string
+  commit: string
+}
+
+/**
+ * Decode `#history`. The repository is optional and a repository path never
+ * contains `:` (mount paths are POSIX, §3.1), so the first `:` separates the
+ * two when there is one.
+ */
+function parsePickedCommit(value: string | undefined): PickedCommit | undefined {
+  if (value === undefined || value === '') return undefined
+  const at = value.indexOf(':')
+  if (at <= 0) return { repo: '', commit: value }
+  return { repo: value.slice(0, at), commit: value.slice(at + 1) }
 }
 
 /** The picked commit, drawn in `seats.git-commit` in place of the tabs (v0.6). */
-function CommitColumn({ commit }: { commit: string }) {
+function CommitColumn({ commit, repo }: PickedCommit) {
   const { registry } = useKernel()
   if (registry?.owned?.('seats.git-commit') !== true) return null
   return (
     <section className="diorama-tabs diorama-tabs--commit" data-testid="tabs-commit">
       <Slot
         name="seats.git-commit"
-        props={{ commit }}
+        props={{ commit, repo }}
         empty={null}
         exhausted={errors => (
           <div className="diorama-renderer__error" role="alert">
@@ -184,8 +205,8 @@ function CommitColumn({ commit }: { commit: string }) {
         )}
         fallback={null}
         render={entry => {
-          const Commit = entry.component as unknown as (props: { commit: string }) => ReactElement | null
-          return <Commit commit={commit} />
+          const Commit = entry.component as unknown as (props: { commit: string; repo?: string }) => ReactElement | null
+          return <Commit commit={commit} repo={repo} />
         }}
       />
     </section>
@@ -268,7 +289,7 @@ function TabsView() {
   // A commit being looked at takes the right column; the tabs (and their
   // per-tab state) stay mounted underneath the whole time.
   const commit = usePickedCommit(tabs)
-  if (commit !== undefined) return <CommitColumn commit={commit} />
+  if (commit !== undefined) return <CommitColumn commit={commit.commit} repo={commit.repo} />
   if (snapshot.tabs.length === 0) {
     return (
       <section className="diorama-tabs" data-testid="tabs">

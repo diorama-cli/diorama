@@ -206,14 +206,23 @@ interface FsService {
   `stat` 不受影响（直接按路径取信息）：已被打开的文件即使被隐藏，也照样能读。
 - client 半边：`mountCtx.fs` 与上面**同名同签名**，底层走 RPC（§4），调用形状与本地服务一致。
 
-### 3.2 `ctx.git`（server）✅ v0.5 定 / v0.6 补历史视图
+### 3.2 `ctx.git`（server）✅ v0.5 定 / v0.6 补历史视图 / v0.10 多仓库
 
-git 的**只读**视图。**只在目录是 git 仓库时才存在**（在 `onMount` 里探测），其它插件必须
-`inject: { optional: ['git'] }` 或做能力检测。**不提供任何写操作**（无 commit / stage / checkout；
-`showCommit` 是**读**一个提交，不是建提交）。
+git 的**只读**视图。**一个挂载目录里的每一个仓库**都在这里（v0.10）：并列的多个、外层仓库里
+嵌套的仓库，都在同一个服务里按仓库区分。**一个仓库都没有时才不存在**（在 `onMount` 里探测），
+其它插件必须 `inject: { optional: ['git'] }` 或做能力检测。**不提供任何写操作**（无 commit /
+stage / checkout；`showCommit` 是**读**一个提交，不是建提交）。
 
 ```ts
 type RepoRelPath = string   // 相对挂载根，`/` 分隔，无前导 `/`；'' 表示挂载根（与 §3.1 的 RelPath 同义）
+
+/** 一个挂载里的一个仓库（v0.10）。 */
+interface GitRepoInfo {
+  /** 仓库根相对挂载根的路径；`''` = 仓库根就是挂载根（或包含挂载根）。 */
+  path: RelPath
+  /** 发现走查因深度/数量上限提前停止：这份清单只是前缀。 */
+  truncated?: true
+}
 
 interface GitStatusEntry {
   file: RelPath
@@ -222,6 +231,8 @@ interface GitStatusEntry {
   status: string
   /** 仅 `renamed`：改名前的工作区路径。 */
   oldPath?: RelPath
+  /** 这个改动属于哪个仓库（v0.10；`''` = 挂载根的那个）。 */
+  repo?: RelPath
 }
 
 interface DiffScope {
@@ -229,6 +240,11 @@ interface DiffScope {
   path?: RelPath
   /** 只看这个目录（相对挂载根，'`' 表示挂载根）。左侧列表按子树过滤时用。 */
   scope?: RelPath
+  /**
+   * 只看这个仓库（v0.10）。缺省 = 挂载里的全部仓库；给了 `path` 时由路径
+   * 自己决定仓库（最深的那一个）。
+   */
+  repo?: RelPath
   /**
    * 比较基准。缺省 = `'HEAD'`（工作区 vs HEAD）。
    * - `'HEAD'`：工作区 vs HEAD（含未暂存与未跟踪）
@@ -244,6 +260,8 @@ interface DiffEntry {
   file: RelPath
   kind: GitStatusEntry['kind']
   status: string
+  /** 这个文件属于哪个仓库（v0.10；`''` = 挂载根的那个）。 */
+  repo?: RelPath
   /** unified diff 文本（`--no-color`）；二进制文件没有 `text`，而有 `binary: true`。 */
   text?: string
   binary?: true
@@ -254,7 +272,7 @@ interface DiffEntry {
 
 interface DiffResult {
   /** 变更清单。单个文件读失败不拖垮列表：那一项只有 `file` 与 `error`。 */
-  entries: (DiffEntry | { file: RelPath; error: { code: string; message: string } })[]
+  entries: (DiffEntry | { file: RelPath; repo?: RelPath; error: { code: string; message: string } })[]
   /** 整次结果超过上限（4 MiB / 2000 行）：只回前缀，后续文件不出现在 `entries` 里。 */
   truncated: boolean
 }
@@ -278,6 +296,8 @@ interface CommitDetail {
   at: number
   /** 完整提交说明（含 subject 与正文），原样。 */
   message: string
+  /** 这个提交在哪个仓库（v0.10）。 */
+  repo?: RelPath
   /** 该提交改动的文件，形状与 `diff()` 的条目相同（相对挂载根）。 */
   files: DiffEntry[]
   /** 文件清单超过上限（4 MiB / 2000 行）：`files` 只是前缀。 */
@@ -296,30 +316,43 @@ interface BlobResult {
 }
 
 interface GitService {
-  /** 工作区根的**绝对路径**（realpath 后）；挂载目录可能是仓库的子目录。 */
+  /** 挂载根的**绝对路径**（realpath 后）。 */
   readonly root: string
-  status(): Promise<GitStatusEntry[]>                     // 扁平、不排序
+  /** 这个挂载里的仓库，浅的在前（v0.10）。 */
+  repos(): GitRepoInfo[]
+  /** 全部仓库的变更（扁平、不排序）；给了 `repo` 就只看那一个。 */
+  status(repo?: RelPath): Promise<GitStatusEntry[]>
   diff(scope?: DiffScope): Promise<DiffResult>
-  log(options?: { limit?: number; path?: RelPath }): Promise<GitLogEntry[]>   // 新的在前
+  /** 新的在前；`repo` 缺省 = 挂载自己的仓库。 */
+  log(options?: { limit?: number; path?: RelPath; repo?: RelPath }): Promise<GitLogEntry[]>
   // —— v0.6：历史视图 ——
   /** 该提交里这个文件的改动（相对**父提交**；root commit 相对空树），形状同 `DiffEntry`。 */
-  show(commit: string, path: RelPath): Promise<DiffEntry>
+  show(commit: string, path: RelPath, repo?: RelPath): Promise<DiffEntry>
   /** 提交详情：提交说明 + 改动的文件清单。 */
-  showCommit(commit: string): Promise<CommitDetail>
+  showCommit(commit: string, repo?: RelPath): Promise<CommitDetail>
   /** 该提交下这个文件的**内容**（不是 diff）；`size` 超过 8 MiB 时 `truncated`。 */
-  blob(commit: string, path: RelPath): Promise<BlobResult>
+  blob(commit: string, path: RelPath, repo?: RelPath): Promise<BlobResult>
 }
 ```
 
 规则：
 
-- **存在性**：`onMount` 时用 `git rev-parse --show-toplevel` 探测；工作区根 = 该命令的输出（可以
-  是挂载根，也可以是它的祖先）。不是仓库，或机器上没有 `git` → 该 mount **不 provide `git`**，
-  日志一条原因（`[mount:<id>] git: …`）。
+- **存在性（v0.10）**：`onMount` 时**发现**挂载里的全部仓库——向下走查（深度由
+  `[git] maxDepth` 决定，默认 3；`[git] ignore` 剪枝，缺省用挂载的 `ignore`），加上
+  `git rev-parse --show-toplevel` 找到的**包含**挂载的那个仓库（挂载是它的子目录时）。
+  一个仓库都没有，或机器上没有 `git` → 该 mount **不 provide `git`**，日志一条原因
+  （`[mount:<id>] git: …`）。
+- **仓库之间不重叠**：外层仓库的 `status` / `diff` / `showCommit` **不报**嵌套在它里面的仓库的
+  文件（对它是未跟踪目录或 submodule），那些文件由内层仓库自己报。所以
+  `status()` 的并集没有重复，`repo` 字段指明每一行属于谁。
+- **多仓库时的基准**：`repo` 缺省是「挂载自己的仓库」——仓库根正好是挂载根，或者仓库**包含**
+  挂载根；都没有时是发现到的第一个。给了 `path` 的调用由路径决定仓库（最深的那个），不需要
+  `repo`。
 - **路径基准**一律是**相对挂载根**的 `RelPath`，与 §3.1 相同：绝对路径、`..` 越界、NUL →
   `EINVAL` / `EOUTSIDE`；路径不在仓库内 → `EOUTSIDE`。服务端自行换算成仓库内路径。
 - **只读**：只运行只读的子命令（`status` / `diff` / `log` / `show` / `cat-file` / `rev-parse`），
-  带 `--no-color`、不写 index、不碰工作区。
+  带 `--no-color`、不写 index、不碰工作区。仓库发现**不调用 git**：只看目录项里有没有
+  `.git`（目录或 gitfile），或裸仓库的 `HEAD` + `objects` + `refs`。
 - **上限**（单次调用的累计量，超限检查在返回前）：`diff()` 4 MiB / 2000 行，超出部分不进
   `entries`，`truncated: true`；单个文件的 diff 超限时那一项 `truncated: true`。`log().limit`
   默认 50、上限 500（`EINVAL`）。超限**不**报 `ETOOLARGE`——列表场景要的是前缀而不是失败。
@@ -330,7 +363,7 @@ interface GitService {
   | `EINVAL` | 路径非法、`base` 不是 `'HEAD'` / `'index'` / 可解析的提交、提交号非法、`limit` 越界 |
   | `ENOENT` | 文件不存在且不在任何变更里；`show` / `blob` / `showCommit` 的提交或路径在该提交下不存在 |
   | `EOUTSIDE` | 路径越出挂载根或不在仓库内 |
-  | `ENOTREPO` | 服务在，但工作区根已经不可用（目录被移走） |
+  | `ENOTREPO` | 服务在，但那个仓库已经不可用（目录被移走）；或 `repo` 不是这个挂载里的仓库 |
   | `EIO` | `git` 进程失败（stderr 摘要进 `message`） |
 
 - **形状**：`diff()` 按文件给，不给整次 patch 拼接——左右两栏各按自己的粒度用（左侧只要
@@ -867,6 +900,11 @@ ignore = [".git", "node_modules"]   # 隐藏规则（覆盖内置默认）
 [watch]
 debounceMs = 300            # 事件窗口合并（§3.1）；0–60000
 maxDirectories = 64         # 每个目录同时监听的目录数上限（§3.1）；1–4096
+
+[git]
+maxDepth = 3                # 向下找仓库的层数（§3.2）；0–64
+maxRepos = 32               # 一个挂载最多报多少个仓库；1–4096
+# ignore = ["node_modules", "dist"]   # 走查时剪掉的目录；缺省 = 上面的 ignore
 ```
 
 | 字段 | 类型 | 默认 | 说明 |
@@ -878,6 +916,9 @@ maxDirectories = 64         # 每个目录同时监听的目录数上限（§3.1
 | `watch.debounceMs` | integer 0–60000 | `300` | `fs.watch` 的合并窗口 |
 | `watch.enabled` | boolean | `true` | `false` 时 `fs.watch` 立即返回空 disposer（不监听） |
 | `watch.maxDirectories` | integer 1–4096 | `64` | 每个 mount 同时监听的目录上限（§3.1） |
+| `git.maxDepth` | integer 0–64 | `3` | 从挂载根向下找 `.git` 的层数；0 = 只看挂载根（§3.2） |
+| `git.maxRepos` | integer 1–4096 | `32` | 一个挂载最多报多少个仓库；到上限时 `repos()` 的 `truncated` 为 true |
+| `git.ignore` | string[] | 同 `ignore` | 走查时剪掉的目录；缺省沿用 `ignore`（即 `.git` + `node_modules`） |
 
 **优先级：CLI > `diorama.toml` > 默认值。**
 
@@ -1687,6 +1728,33 @@ RPC 广播 `{ topic: 'mount.state', payload: MountStatus }`。
 
 **没有变的东西**：`ctx.git` 全部方法与上限（§3.2）、tab 的 `(path, view)` 键（§3.4）、
 `#diff` hash 语义（§3.8）、slot 清单（§5）、主题 token（§5.3 只新增了用现有 token 的选择器）。
+
+## 24. `0.0.2` 之后：一个目录里的多个仓库（未发版，与 §20 同一档）
+
+> 2026-10-22。用户要求：**支持目录下多 git 仓库**——并列的多个仓库，以及外层仓库里嵌套的
+> 仓库；向下扫描 `.git`，跳过 `node_modules`（可配置其它忽略目录）；变更视图按仓库**分组**，
+> 分组可折叠。契约号不动（§6）：`ctx.git` 的方法名不变，只加一个 `repos()` 与可选的
+> `repo` 参数。
+>
+> 同日修复：历史视图点开子目录仓库里的提交报 `ENOENT: no such commit`——提交座位拿不到
+> 仓库，`showCommit` / `show` / `blob` 都落回了「挂载自己的仓库」。见下表最后两行。
+
+| 条款 | `0.0.2` | 本档 |
+|---|---|---|
+| §3.2 存在性 | 一个 mount = 一个仓库（`rev-parse` 探测）；不是仓库就不 provide | 一个 mount = **它里面的全部仓库**（向下走查 + `rev-parse` 找包含它的仓库）；**一个都没有**才不 provide |
+| §3.2 新方法 | — | `repos(): GitRepoInfo[]`（浅的在前，`{ path, truncated? }`） |
+| §3.2 方法参数 | `status()` / `diff(scope)` / `log(options)` / `show(commit, path)` / `showCommit(commit)` / `blob(commit, path)` | 各加可选 `repo`（`status(repo?)`、`DiffScope.repo`、`log({repo?})`、`show(commit, path, repo?)`、`showCommit(commit, repo?)`、`blob(commit, path, repo?)`）；缺省 = 挂载自己的仓库，给了 `path` 时由路径决定 |
+| §3.2 返回值 | `GitStatusEntry` / `DiffEntry` / `CommitDetail` 不带仓库 | 各加可选 `repo`（`''` = 挂载根的那个），调用方据此分组 |
+| §3.2 仓库之间 | — | 外层仓库**不报**嵌套在它里面的仓库的文件；`status()` 的并集不重复 |
+| §4.1 `diorama.toml` | `host` / `port` / `plugins` / `ignore` / `watch` | 新增 `[git]`：`maxDepth`（默认 **3**，0–64）、`maxRepos`（默认 32，1–4096）、`ignore`（缺省用挂载的 `ignore`，即 `.git` + `node_modules`） |
+| §5.2 变更视图 | 一个平铺的改动树 | **按仓库分组**，组头可折叠；只有一个仓库（且就是挂载根）时不出组头 |
+| §5.2 历史视图 | 一个提交列表 | 同样按仓库分组、可折叠 |
+| §5 `CommitSeatProps` | `{ commit }` | 加可选 `repo`（缺省 = 挂载自己的仓库，即 v0.10 之前的唯一含义） |
+| §3.8 `#history` 的值 | 提交 sha | `<repo>:<sha>`（仓库在挂载根之下时）或裸 sha（挂载自己的仓库）；仓库路径不含 `:`，第一个 `:` 是分隔符 |
+
+**没有变的东西**：`ctx.git` 的只读性、路径基准（相对挂载根）、上限（4 MiB / 2000 行、
+`log` 50/500、`blob` 8 MiB）、错误码表、`#diff` / `#history` 的 hash 语义、tab 的
+`(path, view)` 键、slot 清单。
 
 ## 待定清单（v0.4 后仍 🔲）
 

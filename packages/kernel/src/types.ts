@@ -19,6 +19,7 @@ export type {
   FsWatchEvent,
   GitChangeKind,
   GitLogEntry,
+  GitRepoInfo,
   GitStatusEntry,
   RelPath,
   TabInfo,
@@ -26,7 +27,7 @@ export type {
 export type { ErrorCode, FsErrorCode, GitErrorCode, RpcErrorCode } from './shared/errors.ts'
 export type { BootPlugin, MountHandle, MountInfo, MountManifest } from './client/mount.ts'
 export type { FsClient } from './client/fs.ts'
-export type { GitClient } from './client/git.ts'
+export type { GitClient, GitLogOptions } from './client/git.ts'
 export type { RpcClient } from './client/rpc.ts'
 export type { FileMatcher, FileRendererProps } from './shared/matcher.ts'
 export type {

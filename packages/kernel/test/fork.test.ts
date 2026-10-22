@@ -258,8 +258,8 @@ test('fork: each mount of one repository gets its own git, and the root gets non
   assert.ok(b instanceof GitService)
   assert.notEqual(a, b)
   // Each service serves its own mount (the same working tree, different mount roots).
-  assert.equal(a.root, realpathSync(join(repo, 'sub')))
-  assert.equal(b.root, realpathSync(repo))
+  assert.equal(realpathSync(a.root), realpathSync(join(repo, 'sub')))
+  assert.equal(realpathSync(b.root), realpathSync(repo))
   // The root sees neither, and nothing collided.
   assert.equal(gitOf(host.root), undefined)
   assert.deepEqual(logs.filter(message => /has been registered/.test(message)), [])

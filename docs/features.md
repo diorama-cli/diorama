@@ -51,7 +51,7 @@
 | K8 | `ctx.fs`（只读） | ✅ M2→M3 | `list`（尊重 ignore）/ `stat` / `readText` / `readBytes` / `watch`（目录、300ms 合并、**mount 内共享**、`maxDirectories` 上限）；`ETOOLARGE` 上限 |
 | K20 | `ctx.theme`（client） | ✅ v0.9 | 页面配色：跟随系统 / 锁定 / 主题注册表（§3.10）；纯客户端，不 RPC |
 | K19 | `ctx.search`（只读） | ✅ v0.8 | `search(query, { kind, caseSensitive, wholeWord, regex, scope, maxFiles, maxMatchesPerFile })`；`name`（子序列）/ `content`（逐行报 line/column/length）；上限 200 文件 / 每文件 20 条 / 扫描 2 万文件，超限**截断**并报真实总数；二进制跳过；`EINVAL` / `ENOENT`（contract §3.9）|
-| K9 | `ctx.git`（只读） | ✅ | `status` / `diff(scope)` / `log`（v0.5）；`show` / `showCommit` / `blob`、`base: 'index' \| <commit>`（v0.6）；仓库探测、上限、错误码（contract §3.2）|
+| K9 | `ctx.git`（只读） | ✅ | `status` / `diff(scope)` / `log`（v0.5）；`show` / `showCommit` / `blob`、`base: 'index' \| <commit>`（v0.6）；**v0.10：一个挂载里的全部仓库**——`repos()` + 每个方法的可选 `repo`，向下走查 `.git`（`[git] maxDepth` 默认 3、`maxRepos`、`ignore` 剪枝），嵌套仓库不重复出现在外层；上限、错误码（contract §3.2）|
 | K10 | `ctx.slots` | ✅ M0→M1 | |
 | K11 | `ctx.commands` | ✅ M2 | 内核内置：命令 id fail loud、快捷键字面冲突抛错、`CommandContext` 内核采集、单一 keydown 分发 |
 | K12 | `ctx.diorama.mounts` | ✅ M3 | `onMount` 时机、卸载顺序、`MountInfo` 带 `port`/`url`/`configFile`（契约 §2.5/§3.5）|
@@ -80,8 +80,8 @@
 | P10 | `image` 渲染器 | ✅ 本轮 | `mime: ['image/*']`；先 `stat`、超 32 MiB 不请求；bytes → Blob URL → 原生 `<img>`（SVG 也走 `<img>`，不内联 DOM）|
 | P11 | `pdf` 渲染器 | ✅ 本轮 | `ext: ['pdf']`；bytes → Blob URL → `<iframe>`（浏览器 viewers），另给 blob 链接；不引 PDF 引擎 |
 | P17 | `html` 渲染器 | ✅ | `ext: ['html', 'htm']` 的唯一 owner；**样式阶段**：页面 CSS（内联 / `style=` / 外链）与外部图片放行，脚本不跑；**脚本阶段**：逐文件确认后 `allow-scripts`（无 `allow-same-origin`）执行页面脚本；另有源码视图。切换在渲染器头部（contract §5.1）|
-| P12 | `git-changes`（变更视图 + diff 座位） | ✅ | 左栏「变更」（`sidebar.views` 的 `changes` 视图，`order: 20`）；该 tab 以 `view: 'diff'` 渲染 unified diff；**v0.6：由 `fs.watch` 驱动重算**（不再 5 秒轮询）；不是仓库时两个 git 视图都不出现。**v0.10：diff 三种读法**（「改动」= 着色的 unified diff；「整个文件」= 单栏，把改动放进文件自己的行号里；「新旧对照」= 双栏，左旧右新、删除在左、新增在右；长段未改动行都折成可展开的横带；偏好存 `localStorage`、对工作区 tab 与提交座位同时生效）+ 头部 ‹ › 与 ↑/↓ 在变更块之间循环跳转、`+a −r` 计数 |
-| P16 | `git-changes`（历史视图 + 提交座位） | ✅ 本轮 | 左栏「历史」（`history`，`order: 30`）：提交列表（每页 50，上限 500）；点提交写 `#history=<sha>`，右侧 `seats.git-commit` 显示**标题行**（正文展开/收起）、作者、文件清单与「改动 / 提交时的内容」；**打开文件（含再点当前文件）或切走侧栏视图即回到 tab 列表**，`#history` 随之清掉 |
+| P12 | `git-changes`（变更视图 + diff 座位） | ✅ | 左栏「变更」（`sidebar.views` 的 `changes` 视图，`order: 20`）；该 tab 以 `view: 'diff'` 渲染 unified diff；**v0.6：由 `fs.watch` 驱动重算**（不再 5 秒轮询）；**v0.10：按仓库分组、组头可折叠**（多仓库挂载）；一个仓库都没有时两个 git 视图都不出现。**v0.10：diff 三种读法**（「改动」= 着色的 unified diff；「整个文件」= 单栏，把改动放进文件自己的行号里；「新旧对照」= 双栏，左旧右新、删除在左、新增在右；长段未改动行都折成可展开的横带；偏好存 `localStorage`、对工作区 tab 与提交座位同时生效）+ 头部 ‹ › 与 ↑/↓ 在变更块之间循环跳转、`+a −r` 计数 |
+| P16 | `git-changes`（历史视图 + 提交座位） | ✅ 本轮 | 左栏「历史」（`history`，`order: 30`）：提交列表（每页 50，上限 500），**v0.10 起按仓库分组、组头可折叠**；点提交写 `#history=<sha>`，右侧 `seats.git-commit` 显示**标题行**（正文展开/收起）、作者、文件清单与「改动 / 提交时的内容」；**打开文件（含再点当前文件）或切走侧栏视图即回到 tab 列表**，`#history` 随之清掉 |
 | P13 | `search-view`（文件搜索） | ✅ v0.8 | 左栏「搜索」视图（`order: 40`）：**按内容**（字面量 / 正则、大小写、全字）与**按文件名**（子序列，VS Code 的 `Ctrl+P` 口径）两种模式；结果按文件折叠，点一条打开文件并**跳到那一行**。另注册 `mod+p` 快速打开覆盖层（`layout.overlay`，`order: 300`）。服务是内核的 `ctx.search`（§3.9），只走 `ctx.fs`，因此 `ignore` 对树与搜索一致 |
 | P14 | `jupyter` / `.ipynb` | **未来** | 第二轮明确不做（只要文本，但渲染形式未定）|
 | P9 | `i18n` | 🔲 待定 | 界面语言未做（主题已独立成 P20 / U12）|

@@ -892,6 +892,39 @@ code {
   font-size: 11px;
 }
 
+/* One repository's group in the changes/history views (v0.10): a foldable
+   header naming the repository, then that repository's own rows. */
+.diorama-changes__repo + .diorama-changes__repo {
+  border-top: 1px solid var(--dio-border);
+  margin-top: 4px;
+  padding-top: 4px;
+}
+
+.diorama-changes__repo-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 10px;
+  border: 0;
+  background: none;
+  color: var(--dio-fg);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.diorama-changes__repo-head:hover {
+  background: var(--dio-hover);
+}
+
+.diorama-changes__repo-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .diorama-changes__empty {
   padding: 10px;
   color: var(--dio-muted);

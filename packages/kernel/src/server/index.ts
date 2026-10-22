@@ -46,14 +46,26 @@ export {
   DEFAULT_LOG_LIMIT,
   detectRepository,
   findRepoRoot,
+  GitRepoView,
   GitService,
   gitEnvironment,
   gitHalf,
   MAX_DIFF_BYTES,
   MAX_DIFF_LINES,
   MAX_LOG_LIMIT,
+  openMount,
   parsePorcelainZ,
 } from './git.ts'
+export {
+  DEFAULT_GIT_MAX_DEPTH,
+  DEFAULT_GIT_MAX_REPOS,
+  discoverRepositories,
+  nestedPaths,
+  repoRootOf,
+  type DiscoveredRepo,
+  type DiscoverOptions,
+  type DiscoverResult,
+} from './repos.ts'
 export {
   ContractMismatchError,
   HttpError,

@@ -41,8 +41,8 @@ export interface MountHandle extends MountInfo {
   /** The mount's files, through RPC (contract.md §3.1). */
   fs: FsClient
   /**
-   * The mount's repository, through RPC (contract.md §3.2). Calls reject with
-   * `ESERVICE` when the directory is not inside a git working tree; ask
+   * The mount's repositories, through RPC (contract.md §3.2). Calls reject with
+   * `ESERVICE` when the directory holds no git repository at all; ask
    * `hasGit()` (from `diorama-kernel/client`) before relying on it.
    */
   git: GitClient

@@ -71,6 +71,17 @@ declare global {
  */
 export type GitChangeKind = 'added' | 'modified' | 'deleted' | 'renamed' | 'untracked' | 'conflicted'
 
+/** One repository a mount contains (contract.md §3.2, v0.10). */
+export interface GitRepoInfo {
+  /** The repository root as a mount-relative path (`''` = the mount root). */
+  path: RelPath
+  /**
+   * The discovery walk stopped early (its depth/limit): the list is a prefix,
+   * not every repository of the mount.
+   */
+  truncated?: boolean
+}
+
 /** One changed path of the working tree. */
 export interface GitStatusEntry {
   file: RelPath
@@ -79,6 +90,8 @@ export interface GitStatusEntry {
   status: string
   /** `renamed` only: the path before the rename. */
   oldPath?: RelPath
+  /** The repository this change belongs to (v0.10; `''` = the mount root). */
+  repo?: RelPath
 }
 
 /** What a `diff()` call compares (contract.md §3.2). */
@@ -87,6 +100,11 @@ export interface DiffScope {
   path?: RelPath
   /** Only this directory subtree ('' = the mount root). */
   scope?: RelPath
+  /**
+   * Only this repository (v0.10). Absent = every repository of the mount; a
+   * `path` decides its repository by itself.
+   */
+  repo?: RelPath
   /**
    * What to compare (v0.6): `'HEAD'` (working tree vs HEAD, default), `'index'`
    * (staged vs HEAD) or any revision git can resolve (working tree vs it).
@@ -99,6 +117,8 @@ export interface DiffEntry {
   file: RelPath
   kind: GitChangeKind
   status: string
+  /** The repository this file belongs to (v0.10; `''` = the mount root). */
+  repo?: RelPath
   /** Unified diff text (`--no-color`); binary files have `binary: true` instead. */
   text?: string
   binary?: true
@@ -131,6 +151,8 @@ export interface CommitDetail {
   shortSha: string
   subject: string
   author: string
+  /** The repository the commit is in (v0.10; `''` = the mount root). */
+  repo?: RelPath
   /** ms since epoch. */
   at: number
   /** The whole commit message, verbatim (subject and body). */

@@ -26,11 +26,16 @@ import type {
   DiffResult,
   DiffScope,
   GitLogEntry,
+  GitRepoInfo,
   GitStatusEntry,
   RelPath,
 } from '../shared/types.ts'
 import { resolveInside } from './fs.ts'
-import type { Mounts } from './plugins.ts'
+import type { MountInfo, Mounts } from './plugins.ts'
+import {
+  DEFAULT_GIT_MAX_DEPTH,
+  discoverRepositories,
+} from './repos.ts'
 
 declare module 'cordis' {
   interface Context {
@@ -53,12 +58,15 @@ export const MAX_LOG_LIMIT = 500
 export const MAX_BLOB_BYTES = 8 * 1024 * 1024
 
 const METHODS: MethodDescriptor[] = [
-  { name: 'status', arity: 0 },
+  // v0.10: every method takes an optional trailing `repo` (the mount's own
+  // repository when absent), so the arities are the widest accepted shape.
+  { name: 'repos', arity: 0 },
+  { name: 'status', arity: 1 },
   { name: 'diff', arity: 1 },
   { name: 'log', arity: 1 },
-  { name: 'show', arity: 2 },
-  { name: 'showCommit', arity: 1 },
-  { name: 'blob', arity: 2 },
+  { name: 'show', arity: 3 },
+  { name: 'showCommit', arity: 2 },
+  { name: 'blob', arity: 3 },
 ]
 
 /** A commit argument as callers pass it (full sha, short sha, `HEAD~1`). */
@@ -209,24 +217,47 @@ function within(path: string, scope: string): boolean {
   return path === scope || path.startsWith(`${scope}/`)
 }
 
-/** The service: one instance per mount that is inside a git working tree. */
-export class GitService {
+/**
+ * One repository's view inside a mount (contract.md §3.2, v0.10).
+ *
+ * A mount may contain several repositories, so this is **not** the service
+ * plugins talk to: {@link GitService} is, and it forwards to the view that owns
+ * the path. A view knows one working tree and answers only for paths below it
+ * that are not inside a repository nested within it.
+ */
+export class GitRepoView {
   /** The mount root (absolute, realpath'ed). */
   readonly root: string
 
   /** The working tree root (absolute, realpath'ed). */
   readonly repoRoot: string
 
+  /** The repository root as a mount path, POSIX ('' = the mount root itself). */
+  readonly repoPath: string
+
   /**
    * The mount root as a repository path, POSIX ('' = the same directory).
    * A mount below the working tree is a *prefix* of its files' repository
    * paths (`src/` → `src/app.js`), never a path segment above them.
+   *
+   * `undefined` when the repository is **inside** the mount instead (a nested
+   * checkout): then {@link repoPath} is the prefix and the mount is the wider
+   * of the two, so there is no mount prefix to prepend.
    */
-  private readonly mountInRepo: string
+  private readonly mountInRepo: string | undefined
+
+  /**
+   * Repositories nested inside this one, as **repository** paths. Their files
+   * belong to them: a nested checkout is an untracked directory to the outer
+   * repository, and a submodule's tree is the submodule's business, so the
+   * outer view must not report (or diff) paths below them.
+   */
+  private readonly nested: string[]
 
   /**
    * @param root mount root, absolute
    * @param repoRoot working tree root, absolute (realpath'ed; `rev-parse` output)
+   * @param nested repositories inside this one, **mount**-relative POSIX paths
    *
    * Both sides must be in the same path space: a mount reached through a
    * symlink (`/tmp/x` vs `/private/tmp/x` on macOS) would otherwise make
@@ -234,7 +265,7 @@ export class GitService {
    * mount registry realpaths its roots, but a service built by hand (a test, a
    * future caller) may not — normalise here.
    */
-  constructor(root: string, repoRoot: string) {
+  constructor(root: string, repoRoot: string, nested: readonly string[] = []) {
     this.repoRoot = resolve(repoRoot)
     this.root = resolve(root)
     if (!isInside(this.root, this.repoRoot)) {
@@ -243,12 +274,32 @@ export class GitService {
       const resolved = realpathSyncSafe(this.root)
       if (resolved !== undefined && isInside(resolved, this.repoRoot)) this.root = resolved
     }
-    if (!isInside(this.root, this.repoRoot)) {
-      // A mount outside its repository is not a repository mount: be loud,
-      // and still answer with an empty surface rather than a wrong prefix.
-      throw gitError('ENOTREPO', `the mount ${this.root} is not inside the working tree ${this.repoRoot}`)
+    const mountInsideRepo = isInside(this.root, this.repoRoot)
+    const repoInsideMount = isInside(this.repoRoot, this.root)
+    if (!mountInsideRepo && !repoInsideMount) {
+      // Neither contains the other: not a view this mount can offer.
+      throw gitError('ENOTREPO', `the repository ${this.repoRoot} is not inside the mount ${this.root}`)
     }
-    this.mountInRepo = toPosix(relative(this.repoRoot, this.root))
+    // Exactly one of the two prefixes exists. A mount **below** its repository
+    // (the common case since v0.5) keeps a mount prefix; a repository **inside**
+    // the mount (v0.10: several repositories, one of them nested here) has the
+    // repository as the prefix and no mount prefix at all.
+    this.mountInRepo = mountInsideRepo && !repoInsideMount ? toPosix(relative(this.repoRoot, this.root)) : undefined
+    this.repoPath = repoInsideMount && !mountInsideRepo ? toPosix(relative(this.root, this.repoRoot)) : ''
+    // Nesting is compared in **mount** space, the space callers hand paths in.
+    this.nested = [...nested]
+  }
+
+  /**
+   * Whether a mount path belongs to a repository nested in this one. The
+   * nested root itself is included: its tree is the inner repository's.
+   */
+  private isNested(path: RelPath): boolean {
+    for (const inner of this.nested) {
+      if (inner === '') continue
+      if (path === inner || path.startsWith(`${inner}/`)) return true
+    }
+    return false
   }
 
   /** The methods the RPC channel may proxy (contract.md §4). */
@@ -264,18 +315,24 @@ export class GitService {
     } catch (error) {
       throw this.translate(error)
     }
-    // A mount below the working tree only sees its own subtree of the status.
-    const prefix = this.mountInRepo === '' ? '' : `${this.mountInRepo}/`
+    // A mount below the working tree only sees its own subtree of the status;
+    // a repository inside the mount sees its whole tree.
+    const prefix = this.mountInRepo === undefined || this.mountInRepo === '' ? '' : `${this.mountInRepo}/`
     const entries: GitStatusEntry[] = []
     for (const record of parsePorcelainZ(String(output)).filter(item => item.file.startsWith(prefix))) {
+      // A nested repository's files are its own view's business (v0.10).
       const file = this.toMountPath(record.file)
       if (file === undefined) continue // outside the mount: not this page's business
+      // A nested repository is an *untracked directory* to the outer one, and
+      // git spells that with a trailing slash: compare without it.
+      if (this.isNested(file.replace(/\/+$/, ''))) continue
       const kind = classify(record.status)
       const oldPath = record.oldFile === undefined ? undefined : this.toMountPath(record.oldFile)
       entries.push({
         file,
         kind,
         status: record.status,
+        repo: this.repoPath,
         ...(oldPath === undefined ? {} : { oldPath }),
       })
     }
@@ -388,7 +445,7 @@ export class GitService {
       const present = await this.existsIn(sha, repoPath)
       const inParent = await this.existsIn(`${sha}^`, repoPath)
       if (!present && !inParent) throw gitError('ENOENT', `${path} does not exist in ${revision}`)
-      return { file: mountPath, kind: 'modified', status: 'M ', text: '' }
+      return { file: mountPath, kind: 'modified', status: 'M ', repo: this.repoPath, text: '' }
     }
     return this.toEntry(mountPath, text, kindFromDiff(text))
   }
@@ -407,6 +464,7 @@ export class GitService {
       author: author ?? '',
       at: Number(seconds ?? 0) * 1000,
       message: rest.join('\x1f'),
+      repo: this.repoPath,
       files: [],
     }
     // The file list is the diff of the commit against its parent, one entry
@@ -532,6 +590,7 @@ export class GitService {
       }
       const file = this.toMountPath(repoPath)
       if (file === undefined) continue // outside the mount
+      if (this.isNested(file)) continue // a nested repository's file
       const oldPath = oldRepoPath === undefined ? undefined : this.toMountPath(oldRepoPath)
       files.push({ file, kind, status: `${letter} `, ...(oldPath === undefined ? {} : { oldPath }) })
     }
@@ -546,7 +605,7 @@ export class GitService {
     oldPath?: RelPath,
     status = kind === 'added' ? 'A ' : kind === 'deleted' ? 'D ' : 'M ',
   ): DiffEntry {
-    const base: DiffEntry = { file, kind, status, ...(oldPath === undefined ? {} : { oldPath }) }
+    const base: DiffEntry = { file, kind, status, repo: this.repoPath, ...(oldPath === undefined ? {} : { oldPath }) }
     if (looksBinary(text)) return { ...base, binary: true }
     if (Buffer.byteLength(text, 'utf8') > MAX_DIFF_BYTES || countLines(text) > MAX_DIFF_LINES) {
       return { ...base, text: clip(text, MAX_DIFF_BYTES, MAX_DIFF_LINES), truncated: true }
@@ -560,6 +619,7 @@ export class GitService {
       file: change.file,
       kind: change.kind,
       status: change.status,
+      repo: this.repoPath,
       ...(change.oldPath === undefined ? {} : { oldPath: change.oldPath }),
     }
     if (change.kind === 'untracked') {
@@ -579,7 +639,7 @@ export class GitService {
       output = await runGit(this.repoRoot, args, true)
     } catch (error) {
       const mapped = this.translate(error)
-      return { file: change.file, error: { code: mapped.code ?? 'EIO', message: mapped.message } }
+      return { file: change.file, repo: this.repoPath, error: { code: mapped.code ?? 'EIO', message: mapped.message } }
     }
     const text = Buffer.isBuffer(output) ? output.toString('utf8') : String(output)
     if (text === '' && change.kind === 'added') {
@@ -602,18 +662,42 @@ export class GitService {
     return info.isDirectory() ? 'dir' : 'file'
   }
 
-  /** A mount path → repository path (POSIX). */
+  /**
+   * A mount path → repository path (POSIX). Two directions, one translation:
+   * a mount below its repository drops a prefix; a repository inside the mount
+   * adds one (`repoPath`).
+   */
   private toRepoPath(path: RelPath): string {
+    if (this.mountInRepo === undefined) {
+      // The repository is inside the mount: strip its own mount prefix.
+      if (this.repoPath === '') return path
+      if (path === this.repoPath) return ''
+      return path.startsWith(`${this.repoPath}/`) ? path.slice(this.repoPath.length + 1) : path
+    }
     if (this.mountInRepo === '') return path
     return path === '' ? this.mountInRepo : `${this.mountInRepo}/${path}`
   }
 
   /** A repository path → mount path, or `undefined` when it is outside the mount. */
   private toMountPath(repoPath: string): RelPath | undefined {
+    if (this.mountInRepo === undefined) {
+      // The repository is inside the mount: prefix its own mount path back.
+      if (this.repoPath === '') return repoPath
+      return repoPath === '' ? this.repoPath : `${this.repoPath}/${repoPath}`
+    }
     if (this.mountInRepo === '') return repoPath
     if (repoPath === this.mountInRepo) return ''
     if (!repoPath.startsWith(`${this.mountInRepo}/`)) return undefined
     return repoPath.slice(this.mountInRepo.length + 1)
+  }
+
+  /**
+   * Whether this view answers for a mount path: below the repository root, and
+   * not inside a repository nested in this one (that one has its own view).
+   */
+  owns(path: RelPath): boolean {
+    if (!within(path, this.repoPath)) return false
+    return !this.isNested(path)
   }
 
   /** Map a failed git process to the contract's codes (contract.md §3.2). */
@@ -693,7 +777,145 @@ function firstLine(text: string): string {
   return text.split('\n')[0] ?? text
 }
 
-/** The `git` server half, shaped like `fsHalf` (contract.md §2.5). */
+/**
+ * `ctx.git` for one mount (contract.md §3.2, v0.10): the read-only view of
+ * **every** repository the mounted directory contains.
+ *
+ * A mount is a directory; it may hold one repository, several side by side, or
+ * a repository with more nested inside it. The methods therefore take the
+ * repository they answer for (`repos()` lists them, and `repo` defaults to
+ * the mount's own repository — the one rooted at the mount, else the first
+ * found). One view per repository does the work; this class only routes.
+ */
+export class GitService {
+  /** The mount root (absolute). */
+  readonly root: string
+
+  /** Every repository, shallowest first (contract.md §3.2). */
+  readonly views: readonly GitRepoView[]
+
+  /** The walk stopped early (depth/limit): the list is a prefix. */
+  readonly truncated: boolean
+
+  constructor(root: string, views: readonly GitRepoView[], truncated = false) {
+    if (views.length === 0) throw gitError('ENOTREPO', `the mount ${root} contains no git repository`)
+    this.root = resolve(root)
+    this.views = views
+    this.truncated = truncated
+  }
+
+  /** The methods the RPC channel may proxy (contract.md §4). */
+  describe(): MethodDescriptor[] {
+    return METHODS
+  }
+
+  /** The repositories of this mount, shallowest first (contract.md §3.2). */
+  repos(): GitRepoInfo[] {
+    return this.views.map(view => ({ path: view.repoPath, truncated: this.truncated }))
+  }
+
+  /**
+   * The view that answers for a repository path. `undefined` is the mount's
+   * own repository: the one rooted exactly at the mount, else the first found
+   * (a mount below its repository, or one that only contains repositories).
+   */
+  private viewOf(repo: string | undefined): GitRepoView {
+    if (repo === undefined || repo === '') {
+      return this.views.find(view => view.repoPath === '') ?? (this.views[0] as GitRepoView)
+    }
+    const found = this.views.find(view => view.repoPath === repo)
+    if (found === undefined) throw gitError('ENOTREPO', `no repository "${repo}" on this mount`)
+    return found
+  }
+
+  /** The view that owns a mount path (the deepest repository containing it). */
+  private viewOfPath(path: RelPath): GitRepoView {
+    const normalized = path.length > 1 && path.endsWith('/') ? path.replace(/\/+$/, '') : path
+    let best: GitRepoView | undefined
+    for (const view of this.views) {
+      if (!view.owns(normalized)) continue
+      if (best === undefined || view.repoPath.length > best.repoPath.length) best = view
+    }
+    if (best === undefined) throw gitError('ENOTREPO', `${path} is not inside a repository of this mount`)
+    return best
+  }
+
+  /**
+   * Every changed path of every repository (contract.md §3.2). Each entry's
+   * `repo` says which repository it belongs to; paths are mount-relative, so
+   * the list is one flat surface the views group themselves.
+   */
+  async status(repo?: string): Promise<GitStatusEntry[]> {
+    const views = repo === undefined ? this.views : [this.viewOf(repo)]
+    const out: GitStatusEntry[] = []
+    for (const view of views) {
+      for (const entry of await view.status()) out.push({ ...entry, repo: view.repoPath })
+    }
+    return out
+  }
+
+  /** Unified diffs of one repository against `HEAD` (contract.md §3.2). */
+  async diff(scope: DiffScope = {}): Promise<DiffResult> {
+    // A scoped call names one repository; the whole-mount call spans them all
+    // and keeps the per-call byte/line account shared across repositories.
+    if (scope.repo !== undefined) return this.viewOf(scope.repo).diff(scope)
+    if (scope.path !== undefined) {
+      const view = this.viewOfPath(scope.path)
+      return view.diff({ ...scope, repo: view.repoPath })
+    }
+    const result: DiffResult = { entries: [], truncated: false }
+    let bytes = 0
+    let lines = 0
+    for (const view of this.views) {
+      const part = await view.diff(scope)
+      for (const entry of part.entries) {
+        // An unreadable file carries an `error` and no text: it costs nothing
+        // against the account, and stays in the list (one bad file is not the
+        // whole answer).
+        const text = 'text' in entry ? entry.text ?? '' : ''
+        const entryBytes = Buffer.byteLength(text, 'utf8')
+        const entryLines = countLines(text)
+        if (bytes + entryBytes > MAX_DIFF_BYTES || lines + entryLines > MAX_DIFF_LINES) {
+          result.truncated = true
+          break
+        }
+        bytes += entryBytes
+        lines += entryLines
+        result.entries.push({ ...entry, repo: view.repoPath })
+      }
+      if (part.truncated) result.truncated = true
+      if (result.truncated) break
+    }
+    return result
+  }
+
+  /** Recent commits of one repository, newest first (contract.md §3.2). */
+  log(options: { limit?: number; path?: RelPath; repo?: string } = {}): Promise<GitLogEntry[]> {
+    if (options.path !== undefined) return this.viewOfPath(options.path).log(options)
+    return this.viewOf(options.repo).log(options)
+  }
+
+  /** One file's change in one commit (contract.md §3.2). */
+  show(commit: string, path: RelPath, repo?: string): Promise<DiffEntry> {
+    return this.viewOf(repo ?? this.viewOfPath(path).repoPath).show(commit, path)
+  }
+
+  /** One commit in full (contract.md §3.2). */
+  showCommit(commit: string, repo?: string): Promise<CommitDetail> {
+    return this.viewOf(repo).showCommit(commit)
+  }
+
+  /** One file's content in one commit (contract.md §3.2). */
+  blob(commit: string, path: RelPath, repo?: string): Promise<BlobResult> {
+    return this.viewOf(repo ?? this.viewOfPath(path).repoPath).blob(commit, path)
+  }
+}
+
+/**
+ * The `git` server half, shaped like `fsHalf` (contract.md §2.5): discovery is
+ * asynchronous and `onMount` is not, so the probe runs on a fiber owned by the
+ * mount and the service appears once it answers.
+ */
 export const gitHalf = {
   name: 'git',
   inject: ['diorama'],
@@ -701,20 +923,17 @@ export const gitHalf = {
     root.diorama.mounts.onMount((mountCtx, info) => {
       const ctx = mountCtx as unknown as MountFiberContext
       if (typeof ctx.plugin !== 'function') return
-      // Detection is asynchronous but `onMount` is not (contract.md §2.5): the
-      // probe runs on a fiber owned by this mount, so the service appears once
-      // it answers and an unmount in between takes both away.
       void (async () => {
         try {
           const fiber = ctx.plugin?.({
             name: `git:${info.mountId}`,
             async apply(inner: MountFiberContext) {
-              const detected = await detectRepository(info.root)
-              if ('reason' in detected) {
-                console.error(`[mount:${info.mountId}] git: ${detected.reason}`)
+              const service = await openMount(info)
+              if ('reason' in service) {
+                console.error(`[mount:${info.mountId}] git: ${service.reason}`)
                 return
               }
-              provideGit(inner, new GitService(info.root, detected.repoRoot))
+              provideGit(inner, service.service)
             },
           })
           // A PENDING fiber is not a failure: `apply` runs once the probe answers.
@@ -725,6 +944,68 @@ export const gitHalf = {
       })()
     })
   },
+}
+
+/**
+ * Discover the repositories of a mount and build its `ctx.git` (contract.md
+ * §3.2, v0.10). A mount with no repository answers `{ reason }`: it gets **no
+ * `git` service at all**, which is how a plugin detects the capability.
+ */
+export async function openMount(info: MountInfo): Promise<{ service: GitService } | { reason: string }> {
+  const config = info.config?.git
+  // A repository above the mount is *also* a repository of the mount (the
+  // mount is a subdirectory of it, contract.md §3.2 since v0.5). The walk finds
+  // what is below; `rev-parse` finds what contains. A mount that is exactly a
+  // repository root is found by the walk, so the two never double up.
+  const above = await enclosingRepository(info.root)
+  const found = await discoverRepositories({
+    root: info.root,
+    ignore: config?.ignore ?? info.config?.ignore,
+    maxDepth: config?.maxDepth,
+    maxRepos: config?.maxRepos,
+  })
+  if (above !== undefined) {
+    found.repos = [{ path: '', root: above }, ...found.repos.filter(repo => repo.path !== '')]
+  }
+  if (found.repos.length === 0) {
+    // Distinguish "no repository here" from "no git binary": the second is a
+    // machine problem the reader should hear about, the first is normal.
+    const probe = await detectRepository(info.root)
+    return { reason: 'reason' in probe ? probe.reason : `no git repository in ${info.root} (depth ${config?.maxDepth ?? DEFAULT_GIT_MAX_DEPTH})` }
+  }
+  const views: GitRepoView[] = []
+  for (const repo of found.repos) {
+    // Views take **mount** paths for their nesting (that is the space their
+    // callers hand paths in); `nestedPaths` answers in repository space, so
+    // translate here rather than inside every view.
+    const nested = found.repos
+      .filter(other => other.path !== repo.path && within(other.path, repo.path))
+      .map(other => other.path)
+    try {
+      views.push(new GitRepoView(info.root, repo.root, nested))
+    } catch (error) {
+      // A repository whose working tree does not contain its own directory is
+      // not something this mount can show; skip it, the rest still answer.
+      console.error(`[mount:${info.mountId}] git: ${repo.path === '' ? '.' : repo.path}: ${(error as Error).message}`)
+    }
+  }
+  if (views.length === 0) return { reason: `no usable git repository in ${info.root}` }
+  return { service: new GitService(info.root, views, found.truncated) }
+}
+
+/**
+ * The working tree that **contains** `dir` (a mount below its repository's
+ * root, contract.md §3.2 since v0.5), or `undefined` when `dir` is not inside
+ * one. A missing `git` binary is not "no repository": it is re-thrown so the
+ * caller reports the machine problem instead of an empty mount.
+ */
+async function enclosingRepository(dir: string): Promise<string | undefined> {
+  try {
+    return await findRepoRoot(dir)
+  } catch (error) {
+    if (error instanceof GitProcessError && error.code === 'ENOENT') throw error
+    return undefined
+  }
 }
 
 /** The parts of a mount context this half uses (declared locally on purpose). */

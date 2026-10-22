@@ -50,10 +50,17 @@ export interface TabDiffProps {
   tab: TabInfo
 }
 
-/** Props one `seats.git-commit` entry receives (contract.md §5, v0.6). */
+/** Props one `seats.git-commit` entry receives (contract.md §5, v0.6 / v0.10). */
 export interface CommitSeatProps {
   /** The commit being shown: full sha, short sha or a revision. */
   commit: string
+  /**
+   * The repository the commit is in, as a mount-relative path (v0.10).
+   * Absent = the mount's own repository, which is the only one a mount could
+   * have before v0.10 — so a piece that does not know about repositories
+   * still gets the old meaning.
+   */
+  repo?: string
 }
 
 /**

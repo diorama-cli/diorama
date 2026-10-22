@@ -13,6 +13,7 @@ import { dirname, join, resolve } from 'node:path'
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml'
 import { DEFAULT_IGNORE } from '../shared/ignore.ts'
 import { BUILTIN_PLUGIN_IDS } from './plan.ts'
+import { DEFAULT_GIT_MAX_DEPTH, DEFAULT_GIT_MAX_REPOS } from './repos.ts'
 
 /** The config file name looked up in the served directory and `$DIORAMA_HOME`. */
 export const CONFIG_FILE = 'diorama.toml'
@@ -33,6 +34,15 @@ export interface EffectiveConfig {
     /** Watched-directory cap per mount (contract.md §3.1). */
     maxDirectories: number
   }
+  /** Repository discovery (contract.md §3.2, v0.10). */
+  git: {
+    /** Levels below the mount root that are searched for repositories. */
+    maxDepth: number
+    /** Repositories one mount reports at most. */
+    maxRepos: number
+    /** Patterns pruned from the walk; absent = the mount's `ignore`. */
+    ignore?: string[]
+  }
 }
 
 /** What a `diorama.toml` may say (every field optional). */
@@ -42,6 +52,7 @@ export interface FileConfig {
   plugins?: string[]
   ignore?: string[]
   watch?: { debounceMs?: number; enabled?: boolean; maxDirectories?: number }
+  git?: { maxDepth?: number; maxRepos?: number; ignore?: string[] }
 }
 
 /** Where the configuration came from. */
@@ -85,6 +96,7 @@ export function defaultConfig(): EffectiveConfig {
     plugins: [...BUILTIN_PLUGIN_IDS],
     ignore: [...DEFAULT_IGNORE],
     watch: { debounceMs: 300, enabled: true, maxDirectories: 64 },
+    git: { maxDepth: DEFAULT_GIT_MAX_DEPTH, maxRepos: DEFAULT_GIT_MAX_REPOS },
   }
 }
 
@@ -94,8 +106,9 @@ export function dioramaHome(env: NodeJS.ProcessEnv = process.env): string {
   return home !== undefined && home !== '' ? resolve(home) : join(homedir(), '.diorama')
 }
 
-const ROOT_KEYS = new Set(['host', 'port', 'plugins', 'ignore', 'watch'])
+const ROOT_KEYS = new Set(['host', 'port', 'plugins', 'ignore', 'watch', 'git'])
 const WATCH_KEYS = new Set(['debounceMs', 'enabled', 'maxDirectories'])
+const GIT_KEYS = new Set(['maxDepth', 'maxRepos', 'ignore'])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -153,6 +166,29 @@ export function validateFileConfig(raw: unknown, where: string): FileConfig {
     }
     out.watch = watch
   }
+  if (raw.git !== undefined) {
+    if (!isRecord(raw.git)) throw new ConfigError(`${where}: "git" must be a table`)
+    for (const key of Object.keys(raw.git)) {
+      if (!GIT_KEYS.has(key)) throw new ConfigError(`${where}: unknown key "git.${key}" (known: ${[...GIT_KEYS].join(', ')})`)
+    }
+    const git: NonNullable<FileConfig['git']> = {}
+    if (raw.git.maxDepth !== undefined) {
+      const value = raw.git.maxDepth
+      if (!Number.isInteger(value) || (value as number) < 0 || (value as number) > 64) {
+        throw new ConfigError(`${where}: "git.maxDepth" must be an integer 0–64`)
+      }
+      git.maxDepth = value as number
+    }
+    if (raw.git.maxRepos !== undefined) {
+      const value = raw.git.maxRepos
+      if (!Number.isInteger(value) || (value as number) < 1 || (value as number) > 4096) {
+        throw new ConfigError(`${where}: "git.maxRepos" must be an integer 1–4096`)
+      }
+      git.maxRepos = value as number
+    }
+    if (raw.git.ignore !== undefined) git.ignore = stringArray(raw.git.ignore, `${where}: "git.ignore"`)
+    out.git = git
+  }
   return out
 }
 
@@ -209,6 +245,11 @@ export function mergeConfig(file: FileConfig, cli: ResolveOptions['cli'] = {}): 
       enabled: file.watch?.enabled ?? base.watch.enabled,
       maxDirectories: file.watch?.maxDirectories ?? base.watch.maxDirectories,
     },
+    git: {
+      maxDepth: file.git?.maxDepth ?? base.git.maxDepth,
+      maxRepos: file.git?.maxRepos ?? base.git.maxRepos,
+      ...(file.git?.ignore === undefined ? {} : { ignore: [...file.git.ignore] }),
+    },
   }
 }
 
@@ -224,11 +265,13 @@ export function resolveConfig(options: ResolveOptions): { config: EffectiveConfi
  * The keys a written file may carry, in the order they are emitted: the order
  * of the example in contract.md §4.1, so a written file reads like the docs.
  */
-export const CONFIG_KEYS = ['host', 'port', 'plugins', 'ignore', 'watch'] as const
+export const CONFIG_KEYS = ['host', 'port', 'plugins', 'ignore', 'watch', 'git'] as const
 export const WATCH_CONFIG_KEYS = ['debounceMs', 'enabled', 'maxDirectories'] as const
+export const GIT_CONFIG_KEYS = ['maxDepth', 'maxRepos', 'ignore'] as const
 
 export type ConfigKey = (typeof CONFIG_KEYS)[number]
 export type WatchConfigKey = (typeof WATCH_CONFIG_KEYS)[number]
+export type GitConfigKey = (typeof GIT_CONFIG_KEYS)[number]
 
 /**
  * One field to write. `watch.*` is addressed as a dotted key (`watch.enabled`),
@@ -240,8 +283,8 @@ export type ConfigPatch = Record<string, unknown>
 export function readConfigValue(config: FileConfig, key: string): unknown {
   const [head, tail] = key.split('.')
   if (tail !== undefined) {
-    if (head !== 'watch') return undefined
-    return (config.watch as Record<string, unknown> | undefined)?.[tail]
+    if (head !== 'watch' && head !== 'git') return undefined
+    return (config[head] as Record<string, unknown> | undefined)?.[tail]
   }
   return (config as Record<string, unknown>)[head as string]
 }
@@ -257,17 +300,19 @@ export function readConfigValue(config: FileConfig, key: string): unknown {
 export function patchFileConfig(base: FileConfig, patch: ConfigPatch, where = 'config'): FileConfig {
   const next: Record<string, unknown> = { ...base }
   if (next.watch !== undefined) next.watch = { ...(next.watch as Record<string, unknown>) }
+  if (next.git !== undefined) next.git = { ...(next.git as Record<string, unknown>) }
   for (const [key, value] of Object.entries(patch)) {
-    const [head, tail] = key.split('.')
+    const [head = '', tail] = key.split('.')
     if (tail !== undefined) {
-      if (head !== 'watch' || !(WATCH_CONFIG_KEYS as readonly string[]).includes(tail)) {
+      const table = head === 'watch' ? WATCH_CONFIG_KEYS : head === 'git' ? GIT_CONFIG_KEYS : undefined
+      if (table === undefined || !(table as readonly string[]).includes(tail)) {
         throw new ConfigError(`${where}: unknown key "${key}" (known: ${knownKeys().join(', ')})`)
       }
-      const watch = { ...((next.watch as Record<string, unknown> | undefined) ?? {}) }
-      if (value === undefined) delete watch[tail]
-      else watch[tail] = value
-      if (Object.keys(watch).length === 0) delete next.watch
-      else next.watch = watch
+      const nested = { ...((next[head] as Record<string, unknown> | undefined) ?? {}) }
+      if (value === undefined) delete nested[tail]
+      else nested[tail] = value
+      if (Object.keys(nested).length === 0) delete next[head]
+      else next[head] = nested
       continue
     }
     if (!(CONFIG_KEYS as readonly string[]).includes(head as string)) {
@@ -281,7 +326,11 @@ export function patchFileConfig(base: FileConfig, patch: ConfigPatch, where = 'c
 
 /** Every addressable key, for messages: `host, port, plugins, ignore, watch.debounceMs, …`. */
 export function knownKeys(): string[] {
-  return [...CONFIG_KEYS.filter(key => key !== 'watch'), ...WATCH_CONFIG_KEYS.map(key => `watch.${key}`)]
+  return [
+    ...CONFIG_KEYS.filter(key => key !== 'watch' && key !== 'git'),
+    ...WATCH_CONFIG_KEYS.map(key => `watch.${key}`),
+    ...GIT_CONFIG_KEYS.map(key => `git.${key}`),
+  ]
 }
 
 /**
@@ -306,6 +355,12 @@ export function formatFileConfig(config: FileConfig): string {
     if (value !== undefined) watch[key] = value
   }
   if (Object.keys(watch).length > 0) table.watch = watch
+  const git: Record<string, unknown> = {}
+  for (const key of GIT_CONFIG_KEYS) {
+    const value = config.git?.[key]
+    if (value !== undefined) git[key] = Array.isArray(value) ? [...value] : value
+  }
+  if (Object.keys(git).length > 0) table.git = git
   if (Object.keys(table).length === 0) return ''
   // smol-toml already ends with a newline; a file should not end with a blank line.
   return `${stringifyToml(table).replace(/\n+$/, '')}\n`

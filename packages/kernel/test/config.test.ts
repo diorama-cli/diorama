@@ -57,6 +57,8 @@ test('config: precedence is CLI > file > default', () => {
     ignore: ['dist'],
     // maxDirectories has no file entry above: the default survives the merge.
     watch: { debounceMs: 50, enabled: true, maxDirectories: 64 },
+    // No `[git]` table either: repository discovery keeps its defaults.
+    git: { maxDepth: 3, maxRepos: 32 },
   })
   // CLI wins field by field; `--all` empties the ignore list.
   const merged = mergeConfig(file, { port: 0, host: '127.0.0.1', all: true })

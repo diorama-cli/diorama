@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { detectRepository, GitService, gitEnvironment, MAX_LOG_LIMIT, parsePorcelainZ } from '../src/server/git.ts'
+import { detectRepository, GitRepoView, GitService, gitEnvironment, MAX_LOG_LIMIT, openMount, parsePorcelainZ } from '../src/server/git.ts'
 import { createDispatcher } from '../src/server/rpc.ts'
 
 /**
@@ -42,8 +42,14 @@ function repo(files: Record<string, string> = {}): { root: string; dispose(): vo
   return { root, dispose: () => rmSync(root, { recursive: true, force: true }) }
 }
 
+/** A mount-level service over one repository rooted at `root`. */
 function service(root: string): GitService {
-  return new GitService(root, root)
+  return new GitService(root, [new GitRepoView(root, root)])
+}
+
+/** A mount-level service whose single repository is `repoRoot`, seen from `root`. */
+function mountAt(root: string, repoRoot: string, nested: string[] = []): GitService {
+  return new GitService(root, [new GitRepoView(root, repoRoot, nested)])
 }
 
 test('git: status classifies modified, deleted and untracked files', async t => {
@@ -129,7 +135,7 @@ test('git: a mount inside a subdirectory only sees its own subtree', async t => 
   const sub = join(fixture.root, 'src')
   // Make the subdirectory itself dirty: the fixture's changes are elsewhere.
   writeFileSync(join(sub, 'app.js'), 'one\nsub\n')
-  const svc = new GitService(sub, fixture.root)
+  const svc = mountAt(sub, fixture.root)
   const entries = await svc.status()
   assert.deepEqual(entries.map(entry => entry.file), ['app.js'])
   const diff = await svc.diff({ path: 'app.js' })
@@ -191,7 +197,7 @@ test('git: a mount reached through a symlink still sees its changes', async t =>
   t.after(() => rmSync(link, { force: true }))
   // `rev-parse` reports the realpath of the working tree (as the service gets it).
   const repoRoot = realpathSync(fixture.root)
-  const svc = new GitService(link, repoRoot)
+  const svc = mountAt(link, repoRoot)
   const entries = await svc.status()
   assert.ok(entries.some(entry => entry.file === 'src/app.js'), `status was ${JSON.stringify(entries)}`)
   const diff = await svc.diff({ path: 'src/app.js' })
@@ -358,7 +364,7 @@ test('git: the environment of the server cannot redirect the repository', async 
     // Detection and every read answer for the mount, not for the environment.
     const detected = await detectRepository(mine.root)
     assert.deepEqual(detected, { repoRoot: realpathSync(mine.root) })
-    const fixture = new GitService(mine.root, (detected as { repoRoot: string }).repoRoot)
+    const fixture = mountAt(mine.root, (detected as { repoRoot: string }).repoRoot)
     const entries = await fixture.status()
     assert.deepEqual(entries.map(entry => entry.file).sort(), ['gone.txt', 'new.txt', 'src/app.js'])
     assert.equal((await fixture.log({ limit: 1 }))[0]?.subject, 'first')

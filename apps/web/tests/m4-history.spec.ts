@@ -96,6 +96,31 @@ test('history: a commit shows the file as that commit left it', async ({ page })
   await expect(page.getByTestId('git-commit-diff-text')).not.toContainText('TWO')
   await expect(page.getByTestId('git-commit-diff-text')).toContainText('function hi()')
 })
+test('history: the commit seat reads a diff three ways, split included', async ({ page }) => {
+  repository()
+  server = await startDiorama(directory.root)
+  await page.goto(server.url)
+  await openHistory(page)
+  await page.getByTestId('git-history-commit').first().click()
+  await page.getByTestId('git-commit-file').filter({ hasText: 'src/app.js' }).click()
+  // "whole file": the change inside the file's own lines.
+  await page.getByTestId('git-commit-mode-content').click()
+  await expect(page.getByTestId('git-commit-diff-text')).toHaveAttribute('data-mode', 'file')
+  // "split": two columns, which needs the file text as well. It used to ask
+  // for it only in whole-file mode, so this button did nothing here.
+  await page.getByTestId('git-commit-mode-split').click()
+  const split = page.getByTestId('git-commit-diff-text')
+  await expect(split).toHaveAttribute('data-mode', 'split')
+  await expect(split.getByText('旧', { exact: true })).toBeVisible()
+  await expect(split.getByText('新', { exact: true })).toBeVisible()
+  // Both sides carry the change: the old line on the left, the new one on the right.
+  await expect(split).toContainText('one')
+  await expect(split).toContainText('TWO')
+  await expect(split.locator('.diorama-diff__split-row').first()).toBeVisible()
+  // Back to the plain diff.
+  await page.getByTestId('git-commit-mode-diff').click()
+  await expect(page.getByTestId('git-commit-diff-text')).not.toHaveAttribute('data-mode', 'split')
+})
 
 test('history: #history=<sha> survives a refresh and comes back to the view', async ({ page }) => {
   const shas = repository()

@@ -173,9 +173,9 @@ scripts/                  生成器（图标表；pnpm icons 重新生成）
 ```bash
 pnpm install
 pnpm build                 # 全量构建（含各包的类型声明产出）
-pnpm test:unit             # node --test，289 条单测
+pnpm test:unit             # node --test，303 条单测
 pnpm -r --no-sort run typecheck   # 注意：不要用 pnpm typecheck（任务图成环，会失败）
-pnpm --filter diorama-web exec playwright test   # 114 条端到端，真实 CLI + Chromium
+pnpm --filter diorama-web exec playwright test   # 120 条端到端，真实 CLI + Chromium
 ```
 
 端到端测试跑的是构建产物（`packages/*/lib`、`apps/web/dist`），改了源码先 `pnpm build` 再跑；每个用例使用独立的 `DIORAMA_HOME` 与 gateway，不碰真实的 `~/.diorama`。
@@ -199,11 +199,11 @@ diorama-beta .
 | [docs/architecture.md](docs/architecture.md) | **为什么**：已拍板的决定、放弃项与代价 |
 | [docs/features.md](docs/features.md) | **有什么**：能力清单与档位（✅ / 待定 / 明确不做） |
 | [docs/plan.md](docs/plan.md) | 阶段性排期与各里程碑的验收标准 |
-| [docs/m0…m9/spec.md](docs/) | 每一档的实施说明与踩坑记录 |
+| [docs/m0…m14/spec.md](docs/) | 每一档的实施说明与踩坑记录 |
 
 ## 状态与许可
 
 - 契约版本 `0.0.3`（pre-1.0 线：破坏性变更以 `0.0.x` 递增表达；插件声明 `>=0.0.3 <0.1.0`）。
-- 已实现：文件树、多标签、五类渲染器、git 变更与历史（diff 三档读法：行内 / 整文件单栏 / 新旧双栏）、文件搜索、命令面板与快捷键体系、watch、URL 深链、图标、明暗主题（跟随系统 / 锁定 / 第三方主题注册）、gateway 多目录挂载、`diorama.toml` 配置、挂载的 `--json` 输出。289 条单测 + 114 条端到端全部通过。
+- 已实现：文件树、多标签、五类渲染器、git 变更与历史（diff 三档读法：行内 / 整文件单栏 / 新旧双栏）、文件搜索、命令面板与快捷键体系、watch、URL 深链、图标、明暗主题（跟随系统 / 锁定 / 第三方主题注册）、gateway 多目录挂载、`diorama.toml` 配置、挂载的 `--json` 输出、**一个目录里的多个 git 仓库**（并列与嵌套，变更 / 历史按仓库分组）。303 条单测 + 120 条端到端全部通过。
 - 尚未做：外部插件加载（`~/.diorama/plugins` 与 npm 来源）、界面语言（i18n）、编辑能力（永远不会做——这是只读查看器）。
 - [MIT](LICENSE)
