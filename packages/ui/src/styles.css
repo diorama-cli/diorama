@@ -939,11 +939,40 @@ code {
   font-size: 12px;
   line-height: 1.55;
   tab-size: 4;
+  /* The reader takes focus for ↑ / ↓ between changes; a focus ring around the
+     whole scroll area would flash on every click, so the row marker is the cue
+     (below) and the outline is suppressed only for the mouse. */
+  outline: none;
+}
+
+.diorama-diff__text:focus-visible {
+  outline: 1px solid var(--dio-accent);
+  outline-offset: -1px;
 }
 
 .diorama-diff__line {
-  padding: 0 12px;
+  display: flex;
+  align-items: baseline;
+  gap: 0;
+  padding: 0 12px 0 0;
   white-space: pre;
+}
+
+/* The gutter: old and new line numbers, fixed width, never selected. */
+.diorama-diff__num {
+  flex: none;
+  width: 3.5em;
+  padding-right: 0.6em;
+  color: var(--dio-muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+  opacity: 0.75;
+}
+
+.diorama-diff__code {
+  flex: 1;
+  padding-left: 6px;
 }
 
 .diorama-diff__line--add {
@@ -963,6 +992,147 @@ code {
 
 .diorama-diff__line--meta {
   color: var(--dio-muted);
+}
+
+/* The header's change count: +added / −removed, then the mode and the arrows. */
+.diorama-diff__stat {
+  display: inline-flex;
+  flex: none;
+  gap: 6px;
+  font-family: var(--dio-mono);
+  font-size: 11.5px;
+}
+
+.diorama-diff__stat-add {
+  color: var(--dio-status-added);
+}
+
+.diorama-diff__stat-del {
+  color: var(--dio-danger);
+}
+
+.diorama-diff__modes,
+.diorama-diff__nav {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+
+.diorama-diff__modes button,
+.diorama-diff__nav-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: var(--dio-muted);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.diorama-diff__modes button:hover,
+.diorama-diff__nav-button:hover {
+  background: var(--dio-hover);
+  color: var(--dio-text);
+}
+
+.diorama-diff__modes button[aria-pressed='true'] {
+  border-color: var(--dio-border);
+  background: var(--dio-surface-alt);
+  color: var(--dio-text);
+}
+
+.diorama-diff__nav-button {
+  padding: 1px 3px;
+}
+
+.diorama-diff__nav-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.diorama-diff__nav-count {
+  min-width: 5.5em;
+  color: var(--dio-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+/* The side-by-side reader: two columns of the same file, the change in both. */
+.diorama-diff__split-head,
+.diorama-diff__split-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.diorama-diff__split-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  border-bottom: 1px solid var(--dio-border);
+  background: var(--dio-panel);
+  color: var(--dio-muted);
+  font-family: var(--dio-sans, inherit);
+  font-size: 11px;
+}
+
+.diorama-diff__split-title {
+  padding: 3px 12px;
+}
+
+.diorama-diff__split-title + .diorama-diff__split-title {
+  border-left: 1px solid var(--dio-border);
+}
+
+/* A row of the two-column reader: each cell is a line (number + text). */
+.diorama-diff__split-cell {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  padding-right: 12px;
+}
+
+.diorama-diff__split-cell + .diorama-diff__split-cell {
+  border-left: 1px solid var(--dio-border);
+}
+
+/* The side that has no line here: blank, not an empty-looking code line. */
+.diorama-diff__split-cell--empty {
+  background: var(--dio-surface-alt);
+}
+
+.diorama-diff__split-cell--empty .diorama-diff__num {
+  opacity: 0.3;
+}
+
+/* A folded run of unchanged lines in the whole-file mode: a band, not a row. */
+.diorama-diff__gap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin: 2px 0;
+  padding: 1px 12px;
+  border: 0;
+  border-top: 1px dashed var(--dio-border);
+  border-bottom: 1px dashed var(--dio-border);
+  background: var(--dio-surface-alt);
+  color: var(--dio-muted);
+  font: inherit;
+  font-family: var(--dio-mono);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.diorama-diff__gap:hover {
+  background: var(--dio-hover);
+  color: var(--dio-text);
 }
 
 /* Changes view: a tree of changed files (contract.md §3.2, §5.2) */

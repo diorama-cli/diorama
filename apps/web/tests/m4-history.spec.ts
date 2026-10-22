@@ -78,23 +78,23 @@ test('history: commits list, newest first, and a commit opens in the commit seat
   expect(new URL(page.url()).hash).toBe(`#history=${shas.second}`)
 })
 
-test('history: a commit shows the content of the file at that commit', async ({ page }) => {
+test('history: a commit shows the file as that commit left it', async ({ page }) => {
   repository()
   server = await startDiorama(directory.root)
   await page.goto(server.url)
   await openHistory(page)
   await page.getByTestId('git-history-commit').first().click()
-  // The second commit changed src/app.js: its content at that commit is the
-  // new text (not what the working tree would show later, not the parent's).
+  // The second commit changed src/app.js: the whole file there is the new text
+  // (not what the working tree would show later, not the parent's).
   await page.getByTestId('git-commit-file').filter({ hasText: 'src/app.js' }).click()
   await page.getByTestId('git-commit-mode-content').click()
-  await expect(page.getByTestId('git-commit-blob-text')).toContainText('TWO')
+  await expect(page.getByTestId('git-commit-diff-text')).toContainText('TWO')
   // The first commit's version of the same file is the fixture's original.
   await page.getByTestId('git-history-commit').nth(1).click()
   await page.getByTestId('git-commit-file').filter({ hasText: 'src/app.js' }).click()
   await page.getByTestId('git-commit-mode-content').click()
-  await expect(page.getByTestId('git-commit-blob-text')).not.toContainText('TWO')
-  await expect(page.getByTestId('git-commit-blob-text')).toContainText('function hi()')
+  await expect(page.getByTestId('git-commit-diff-text')).not.toContainText('TWO')
+  await expect(page.getByTestId('git-commit-diff-text')).toContainText('function hi()')
 })
 
 test('history: #history=<sha> survives a refresh and comes back to the view', async ({ page }) => {

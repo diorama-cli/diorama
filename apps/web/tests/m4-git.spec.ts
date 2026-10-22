@@ -105,7 +105,9 @@ test('git: the changes view switches with the tree and opens a file as a diff', 
     await expect(untracked.getByTestId('git-diff-notes')).toContainText('新文件')
     const whole = untracked.getByTestId('git-diff-text')
     await expect(whole).toContainText('+brand new')
-    await expect(whole.locator('.diorama-diff__line')).toHaveCount(1)
+    // One addition, plus the hunk header the reader numbers it with.
+    await expect(whole.locator('[data-tone="add"]')).toHaveCount(1)
+    await expect(whole.locator('[data-tone="hunk"]')).toHaveCount(1)
 
     // Switching back keeps the tree's state (one column, hidden panes).
     await switcher.locator('[data-view="files"]').click()
@@ -154,6 +156,122 @@ test('git: content and diff of one file are two tabs; the hash restores the diff
     await page.locator('.diorama-tabs__strip [role="tab"]').nth(1).locator('.diorama-tabs__label').click()
     await expect(page.getByTestId('tabs-content').filter({ visible: true }).getByTestId('git-diff')).toBeVisible()
     await expect(page).toHaveURL(/\/~\/LICENSE#diff$/)
+  } finally {
+    await server.stop()
+    repo.dispose()
+  }
+})
+
+test('git: the diff can be read inline or inside the whole file, with hunk navigation', async ({ page }) => {
+  const repo = fixture()
+  // A file long enough to be folded: the change sits in the middle of it.
+  const body = Array.from({ length: 40 }, (_, index) => `line ${index + 1}`).join('\n')
+  writeFileSync(join(repo.root, 'src/long.js'), body + '\n')
+  git(repo.root, 'init', '-q', '-b', 'main')
+  git(repo.root, 'add', '-A')
+  git(repo.root, 'commit', '-q', '-m', 'first')
+  writeFileSync(join(repo.root, 'src/long.js'), body.replace('line 20', 'line twenty') + '\n')
+  const server = await startDiorama(repo.root)
+  try {
+    await page.goto(server.url)
+    await page.getByTestId('sidebar-switcher').locator('[data-view="changes"]').click()
+    await page.getByTestId('git-changes').locator('[data-path="src/long.js"]').click()
+    const diff = page.getByTestId('tabs-content').filter({ visible: true }).getByTestId('git-diff')
+    await expect(diff).toBeVisible()
+
+    // Inline mode is the default: the unified diff, one row per line, with a
+    // gutter of both line numbers.
+    await expect(diff).toHaveAttribute('data-mode', 'inline')
+    await expect(diff.getByTestId('git-diff-mode-inline')).toHaveAttribute('aria-pressed', 'true')
+    const removed = diff.locator('[data-tone="del"]')
+    await expect(removed).toHaveCount(1)
+    await expect(removed.locator('.diorama-diff__num').first()).toHaveText('20')
+    await expect(diff.getByTestId('git-diff-stat')).toContainText('+1')
+    await expect(diff.getByTestId('git-diff-stat')).toContainText('−1')
+
+    // The whole file: the real code around the change, and the long runs of
+    // unchanged lines folded into one band.
+    await diff.getByTestId('git-diff-mode-file').click()
+    await expect(diff).toHaveAttribute('data-mode', 'file')
+    await expect(diff.getByTestId('git-diff-text')).toHaveAttribute('data-mode', 'file')
+    await expect(diff.locator('[data-tone="add"]')).toHaveCount(1)
+    await expect(diff.locator('[data-tone="add"]')).toContainText('line twenty')
+    await expect(diff.locator('[data-tone="del"]')).toContainText('line 20')
+    const gaps = diff.getByTestId('git-diff-gap')
+    await expect(gaps).toHaveCount(2)
+    // Unchanged lines around the change are real file lines, numbered.
+    await expect(diff.getByText('line 19', { exact: true })).toBeVisible()
+    // Opening the band above the change shows the lines it was hiding.
+    await expect(diff.getByText('line 5', { exact: true })).toHaveCount(0)
+    await gaps.first().click()
+    await expect(diff.getByText('line 5', { exact: true })).toBeVisible()
+    await expect(diff.getByTestId('git-diff-gap')).toHaveCount(1)
+
+    // Side by side: the old file on the left, the new one on the right, the
+    // change in both columns — the deletion on the left, the insertion on the
+    // right. Unchanged lines are the same text on both sides (one read).
+    await diff.getByTestId('git-diff-mode-split').click()
+    await expect(diff).toHaveAttribute('data-mode', 'split')
+    await expect(diff.getByTestId('git-diff-text')).toHaveAttribute('data-mode', 'split')
+    const splitRows = diff.locator('.diorama-diff__split-row')
+    await expect(splitRows.filter({ hasText: 'line 19' })).toHaveCount(1)
+    // The deleted line is on the left only; its replacement on the right only.
+    const changed = splitRows.filter({ hasText: 'line twenty' })
+    await expect(changed).toHaveCount(1)
+    await expect(changed.locator('[data-tone="del"]')).toContainText('line 20')
+    await expect(changed.locator('[data-tone="add"]')).toContainText('line twenty')
+    // The band before the change opens here too.
+    await diff.getByTestId('git-diff-gap').first().click()
+    await expect(splitRows.filter({ hasText: 'line 5' })).toHaveCount(1)
+
+    // The mode is remembered across reloads (it is a reading preference).
+    await page.reload()
+    const afterReload = page.getByTestId('tabs-content').filter({ visible: true }).getByTestId('git-diff')
+    await expect(afterReload).toHaveAttribute('data-mode', 'split')
+    await expect(afterReload.getByTestId('git-diff-mode-split')).toHaveAttribute('aria-pressed', 'true')
+  } finally {
+    await server.stop()
+    repo.dispose()
+  }
+})
+
+test('git: the hunk arrows move between changes, and say where they are', async ({ page }) => {
+  const repo = fixture()
+  // Two changes far apart: two hunks in one file.
+  const body = Array.from({ length: 60 }, (_, index) => `line ${index + 1}`).join('\n')
+  writeFileSync(join(repo.root, 'src/two.js'), body + '\n')
+  git(repo.root, 'init', '-q', '-b', 'main')
+  git(repo.root, 'add', '-A')
+  git(repo.root, 'commit', '-q', '-m', 'first')
+  writeFileSync(join(repo.root, 'src/two.js'), body.replace('line 10', 'line ten').replace('line 50', 'line fifty') + '\n')
+  const server = await startDiorama(repo.root)
+  try {
+    await page.goto(server.url)
+    await page.getByTestId('sidebar-switcher').locator('[data-view="changes"]').click()
+    await page.getByTestId('git-changes').locator('[data-path="src/two.js"]').click()
+    const diff = page.getByTestId('tabs-content').filter({ visible: true }).getByTestId('git-diff')
+    const count = diff.getByTestId('git-diff-hunk-count')
+    await expect(count).toHaveText('2 处改动')
+
+    // Next → 1/2, next → 2/2, next again wraps to the first change.
+    await diff.getByTestId('git-diff-next').click()
+    await expect(count).toHaveText('1 / 2')
+    await diff.getByTestId('git-diff-next').click()
+    await expect(count).toHaveText('2 / 2')
+    await diff.getByTestId('git-diff-next').click()
+    await expect(count).toHaveText('1 / 2')
+    // Previous walks back, wrapping too.
+    await diff.getByTestId('git-diff-previous').click()
+    await expect(count).toHaveText('2 / 2')
+    await diff.getByTestId('git-diff-previous').click()
+    await expect(count).toHaveText('1 / 2')
+
+    // The whole-file mode has the same two arrows, and the change it picked is
+    // in the file's own numbering.
+    await diff.getByTestId('git-diff-mode-file').click()
+    await diff.getByTestId('git-diff-next').click()
+    await expect(diff.locator('[data-tone="add"]')).toHaveCount(2)
+    await expect(diff.getByTestId('git-diff-text')).toContainText('line ten')
   } finally {
     await server.stop()
     repo.dispose()

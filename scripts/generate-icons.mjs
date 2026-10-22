@@ -49,6 +49,9 @@ const out = join(root, 'packages/ui/src/icons')
 const BUTTON_ICONS = {
   'caret-down': 'chevron-down',
   'caret-right': 'chevron-right',
+  'caret-up': 'chevron-up',
+  'columns': 'columns-2',
+  'diff': 'arrows-diff',
   'check': 'check',
   'close': 'x',
   'code': 'code',
@@ -63,6 +66,7 @@ const BUTTON_ICONS = {
   'folder-open': 'folder-open',
   'git-changes': 'git-compare',
   'git-history': 'history',
+  'unfold': 'arrows-vertical',
   'info': 'info-circle',
   'keyboard': 'keyboard',
   'loader': 'loader-2',

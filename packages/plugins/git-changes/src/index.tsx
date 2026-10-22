@@ -18,12 +18,25 @@
  * column shows only what is there.
  */
 import type { Context } from 'cordis'
-import { useEffect, useMemo, useState, useSyncExternalStore, type ReactElement } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactElement } from 'react'
 import type { ChangeTreeNode, CommitDetail, DiffEntry, DiffResult, FileInfo, GitLogEntry, GitStatusEntry } from 'diorama-kernel'
 import { buildChangeTree, hasGit, type GitClient, type TabsService } from 'diorama-kernel/client'
 import { FileIcon, Icon, iconSvg, provideEntry, useKernel } from 'diorama-ui'
 import type {} from 'diorama-plugin-slots'
 import type { CommitSeatProps, TabDiffProps } from 'diorama-plugin-slots'
+import {
+  buildFileRows,
+  buildSplitRows,
+  collapseFileRows,
+  collapseSplitRows,
+  diffHunks,
+  diffStat,
+  labelHunks,
+  parseDiff,
+  splitLines,
+  type DiffLine,
+  type FileGap,
+} from './model.ts'
 
 export const name = 'git-changes'
 export const inject = ['slots']
@@ -379,25 +392,6 @@ function ChangeNode({
   )
 }
 
-/** Colour a unified diff line (`+`, `-`, `@@`, file headers). */
-function lineTone(line: string): string {
-  if (line.startsWith('@@')) return 'hunk'
-  if (line.startsWith('+++') || line.startsWith('---')) return 'meta'
-  if (
-    line.startsWith('diff ') ||
-    line.startsWith('index ') ||
-    line.startsWith('new file') ||
-    line.startsWith('deleted file') ||
-    line.startsWith('similarity') ||
-    line.startsWith('rename ')
-  ) {
-    return 'meta'
-  }
-  if (line.startsWith('+')) return 'add'
-  if (line.startsWith('-')) return 'del'
-  return 'context'
-}
-
 /**
  * An untracked file has no diff (git never compares it): show the whole file
  * as an addition. The bytes come from `ctx.fs` — a diff reader may read the
@@ -436,6 +430,16 @@ async function synthesizeAddition(
   return { lines, notes, truncated: false }
 }
 
+/**
+ * The diff of a file that has none: every line an addition, in the one-hunk
+ * form git itself would print for a new file. The readers need a diff (they
+ * parse it), and "the whole file is new" is exactly that.
+ */
+export function additionDiff(lines: readonly string[]): string {
+  if (lines.length === 0) return ''
+  return ['@@ -0,0 +1,' + lines.length + ' @@', ...lines.map(line => `+${line}`)].join('\n')
+}
+
 /** Bytes of an untracked file shown in full (above this, say how big it is). */
 export const MAX_UNTRACKED_BYTES = 2 * 1024 * 1024
 
@@ -446,6 +450,171 @@ function formatBytes(size: number): string {
   if (size < 1024) return `${size} B`
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KiB`
   return `${(size / (1024 * 1024)).toFixed(1)} MiB`
+}
+
+/**
+ * The whole file, for the "whole file" mode: its text as it is now, plus why it
+ * cannot be shown when it cannot (a binary, a file over the read limit).
+ */
+type FileState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'ready'; text: string }
+  | { status: 'note'; note: string }
+  /** The path is not there (the old side of a file that has just been added). */
+  | { status: 'missing' }
+
+/**
+ * Read one file of this mount for a reader that shows file content (the
+ * whole-file and side-by-side modes).
+ *
+ * `ctx.fs` is the only way to read a file (contract.md §5.1: a reader may read
+ * the file it shows). A binary or oversized file is a **note**, not an error:
+ * the diff is still readable, and "cannot show this side" is one line.
+ *
+ * `missing` is a path that is not there at all (the old side of a file the
+ * working tree has only just gained): that is not a note, it is an empty side,
+ * and the caller decides what to say.
+ */
+function useFileText(path: string | undefined, wanted: boolean): FileState {
+  const { mount } = useKernel()
+  const [state, setState] = useState<FileState>({ status: 'idle' })
+  useEffect(() => {
+    if (!wanted || path === undefined) {
+      setState({ status: 'idle' })
+      return
+    }
+    let live = true
+    setState({ status: 'loading' })
+    mount.fs.stat(path).then(
+      info => {
+        if (!live) return
+        if (info.size > MAX_UNTRACKED_BYTES) {
+          setState({ status: 'note', note: `文件过大（${formatBytes(info.size)}），只显示改动` })
+          return
+        }
+        return mount.fs.readText(path).then(
+          text => {
+            if (live) setState({ status: 'ready', text })
+          },
+          (error: unknown) => {
+            if (!live) return
+            const code = (error as { code?: string }).code
+            if (code === 'EBINARY') setState({ status: 'note', note: `二进制文件（${formatBytes(info.size)}），只显示改动` })
+            else setState({ status: 'note', note: `读取失败：${(error as Error).message}` })
+          },
+        )
+      },
+      (error: unknown) => {
+        if (!live) return
+        const code = (error as { code?: string }).code
+        // A path that is gone (or never was) is an empty side, not a failure.
+        if (code === 'ENOENT') setState({ status: 'missing' })
+        else setState({ status: 'note', note: `读取失败：${(error as Error).message}` })
+      },
+    )
+    return () => {
+      live = false
+    }
+  }, [mount, path, wanted])
+  return state
+}
+
+/**
+ * How a diff is read (three ways, one button each):
+ *
+ * - `inline` — the unified diff alone (what git prints);
+ * - `file` — the file with the change laid into it, one column;
+ * - `split` — the old file beside the new one, the change in both.
+ */
+export type DiffMode = 'inline' | 'file' | 'split'
+
+/** Where the choice is remembered (`localStorage`, like the theme's). */
+export const DIFF_MODE_STORAGE_KEY = 'diorama.git.diffMode'
+
+/** The three modes, in the order the buttons show them. */
+export const DIFF_MODES: readonly DiffMode[] = ['inline', 'file', 'split']
+
+/** The remembered mode; anything unrecognised is `inline` (the old behaviour). */
+export function readDiffMode(): DiffMode {
+  try {
+    const stored = globalThis.localStorage?.getItem(DIFF_MODE_STORAGE_KEY)
+    return DIFF_MODES.find(mode => mode === stored) ?? 'inline'
+  } catch {
+    return 'inline'
+  }
+}
+
+/** Remember the mode. A blocked storage just means it does not survive a reload. */
+export function storeDiffMode(mode: DiffMode): void {
+  try {
+    globalThis.localStorage?.setItem(DIFF_MODE_STORAGE_KEY, mode)
+  } catch {
+    // Nothing to do: the choice still applies to this page.
+  }
+}
+
+/**
+ * The diff's mode, shared by every diff surface of this piece (the working-tree
+ * tab and the commit seat). One client half draws both, so a module-level store
+ * is already shared state — the page global is only needed across *halves*
+ * (docs/m4/spec.md §6.2 trap 13).
+ */
+const MODE_LISTENERS = new Set<() => void>()
+let modeState: DiffMode | undefined
+
+function diffModeState(): DiffMode {
+  modeState ??= readDiffMode()
+  return modeState
+}
+
+/** Subscribe to the mode (for `useSyncExternalStore`). */
+export function subscribeDiffMode(listener: () => void): () => void {
+  MODE_LISTENERS.add(listener)
+  return () => {
+    MODE_LISTENERS.delete(listener)
+  }
+}
+
+/** The mode right now (a primitive: `useSyncExternalStore` needs a stable read). */
+export function diffModeSnapshot(): DiffMode {
+  return diffModeState()
+}
+
+/** Switch every diff surface of the page to `mode`. */
+export function setDiffMode(mode: DiffMode): void {
+  if (diffModeState() === mode) return
+  modeState = mode
+  storeDiffMode(mode)
+  for (const listener of [...MODE_LISTENERS]) listener()
+}
+
+/** The mode, as a component reads it. */
+export function useDiffMode(): DiffMode {
+  return useSyncExternalStore(subscribeDiffMode, diffModeSnapshot, diffModeSnapshot)
+}
+
+/**
+ * Move between the changes of one diff: the toolbar's arrows, and the arrow
+ * keys while the reader has focus. `-1` means "nothing picked yet"; the first
+ * `next` lands on the first change, the first `previous` on the last one.
+ */
+function useHunkNav(count: number): { cursor: number; next(): void; previous(): void } {
+  const [cursor, setCursor] = useState(-1)
+  const step = useCallback(
+    (delta: number): void => {
+      setCursor(current => {
+        if (count === 0) return -1
+        // Nothing picked yet: forward starts at the first change, backward at
+        // the last one. After that it **wraps**, like every "find next" there
+        // is: from the last change, "next" is the first one, not a dead arrow.
+        if (current < 0) return delta > 0 ? 0 : count - 1
+        return (current + delta + count) % count
+      })
+    },
+    [count],
+  )
+  return { cursor, next: () => step(1), previous: () => step(-1) }
 }
 
 type DiffState = { status: 'loading' } | { status: 'ready'; result: DiffResult } | { status: 'error'; error: string }
@@ -461,6 +630,16 @@ function TabDiff({ tab }: TabDiffProps) {
   const [state, setState] = useState<DiffState>({ status: 'loading' })
   const [added, setAdded] = useState<AddedState>({ status: 'idle' })
   const [epoch, setEpoch] = useState(0)
+  // Both hooks run before any early return: a tab that starts loading and ends
+  // up with an entry must not change the number of hooks between renders.
+  const mode = useDiffMode()
+  const entry = state.status === 'ready' ? state.result.entries.find(item => item.file === tab.path) : undefined
+  const usable = entry !== undefined && !('error' in entry)
+  const binary = usable && entry.binary === true
+  // The file itself is read only when a mode that shows file content is on
+  // (and only for text). The two-column reader wants the old side as well:
+  // the index's copy of the path, which is what the change was compared with.
+  const file = useFileText(tab.path, mode !== 'inline' && usable && !binary)
   useEffect(() => {
     let live = true
     setState({ status: 'loading' })
@@ -510,123 +689,435 @@ function TabDiff({ tab }: TabDiffProps) {
       </div>
     )
   }
-  const entry = state.result.entries.find(item => item.file === tab.path)
+  const notes: string[] = []
+  // A file git has never compared has no diff text: the reader synthesised an
+  // addition out of its content, and that is the diff both modes draw.
+  const synthesized = usable && entry.text === undefined && !binary && added.status === 'ready' ? additionDiff(added.lines) : ''
+  if (synthesized !== '' && added.status === 'ready') notes.push(...added.notes)
   return (
-    <DiffBody
+    <DiffView
       path={tab.path}
-      entry={entry}
-      truncated={state.result.truncated}
-      added={added}
+      kind={usable ? entry.kind : undefined}
+      oldPath={usable ? entry.oldPath : undefined}
+      diff={usable ? (entry.text ?? synthesized) : ''}
+      binary={binary}
+      error={entry === undefined ? { code: 'ENODIFF', message: '这个文件没有未提交的改动' } : 'error' in entry ? entry.error : undefined}
+      truncated={usable && entry.truncated === true}
+      callTruncated={state.result.truncated}
+      notes={notes}
+      loading={usable && !binary && entry.text === undefined && added.status === 'loading'}
+      whole={file}
       onRefresh={() => setEpoch(value => value + 1)}
+      testIds={{
+        root: 'git-diff',
+        text: 'git-diff-text',
+        notes: 'git-diff-notes',
+        empty: 'git-diff-empty',
+        error: 'git-diff-error',
+        loading: 'git-diff-loading',
+        modeInline: 'git-diff-mode-inline',
+        modeFile: 'git-diff-mode-file',
+        modeSplit: 'git-diff-mode-split',
+      }}
     />
   )
 }
 
-/** The diff itself: a header, the unified text split into lines, and the flags. */
-function DiffBody({
-  path,
-  entry,
-  truncated,
-  added,
-  onRefresh,
-}: {
+/** Test hooks: the working-tree tab and the commit seat differ only in these. */
+interface DiffTestIds {
+  root: string
+  text: string
+  notes: string
+  empty: string
+  error: string
+  loading: string
+  /** The three mode buttons (a page can show more than one diff surface). */
+  modeInline: string
+  modeFile: string
+  modeSplit: string
+}
+
+/** What one diff surface knows before any mode is applied. */
+interface DiffViewProps {
+  /** The file, mount-relative. */
   path: string
-  entry: DiffResult['entries'][number] | undefined
+  /** Its change kind (a badge); absent when there is no entry to show. */
+  kind: GitStatusEntry['kind'] | undefined
+  oldPath?: string
+  /** The unified diff text; `''` when there is none (untracked, binary, no change). */
+  diff: string
+  binary: boolean
+  /** The entry could not be read (`{code, message}`), or there is nothing to show. */
+  error: { code: string; message: string } | undefined
+  /** This file's diff was clipped by the service's per-file limit. */
   truncated: boolean
-  /** The whole content of a file that has no diff (untracked). */
-  added: AddedState
-  onRefresh(): void
-}) {
-  if (entry === undefined) {
-    return (
-      <div className="diorama-diff" data-testid="git-diff">
-        <div className="diorama-diff__header">{path}</div>
-        <div className="diorama-renderer__empty" role="status" data-testid="git-diff-empty">
-          这个文件没有未提交的改动
-        </div>
-      </div>
-    )
+  /** The whole `diff()` call hit its limit: other files are missing from it. */
+  callTruncated: boolean
+  notes: readonly string[]
+  /** A read is still in flight (an untracked file's content). */
+  loading: boolean
+  /**
+   * The file's text as it is now: both the whole-file and the side-by-side
+   * reader need it (the left column of the split takes its unchanged lines
+   * from the same file — see `buildSplitRows`).
+   */
+  whole: FileState
+  /** Re-read the change; absent where there is nothing to re-read (a commit). */
+  onRefresh?(): void
+  testIds: DiffTestIds
+}
+
+/**
+ * One file's change, in the three ways to read it (v0.10):
+ *
+ * - **inline** — the unified diff, as git prints it. The default, and the only
+ *   mode that always works (a binary file, an oversized file, a deletion);
+ * - **whole file** — the file itself with the changes laid into it, one column,
+ *   so the reader sees the code around a change (`ctx.fs.readText`);
+ * - **split** — the old file beside the new one, the change shown in both
+ *   columns (the deletions on the left, the insertions on the right).
+ *
+ * The mode is shared by every diff surface of the piece and remembered across
+ * reloads; the choice of *which change to look at* is per surface, because it
+ * is about this file.
+ */
+function DiffView({
+  path,
+  kind,
+  oldPath,
+  diff,
+  binary,
+  error,
+  truncated,
+  callTruncated,
+  notes,
+  loading,
+  whole,
+  onRefresh,
+  testIds,
+}: DiffViewProps) {
+  const mode = useDiffMode()
+  const rows = useMemo(() => parseDiff(diff), [diff])
+  const stat = useMemo(() => diffStat(rows), [rows])
+  const hunks = useMemo(() => diffHunks(rows), [rows])
+  const nav = useHunkNav(hunks.length)
+  const scroller = useRef<HTMLDivElement | null>(null)
+  // A mode that shows file content needs the file, and cannot show what it
+  // does not have: a binary, an unreadable file, a note all fall back to the
+  // inline reader rather than a blank column.
+  const contentMode = mode !== 'inline' && error === undefined && !binary && whole.status !== 'note'
+  const lines = splitLines(diff)
+
+  // Scrolling to the picked change: inline mode has the `@@` row's index, the
+  // other two have the change's first row. Both are row indexes, so all three
+  // views scroll the same way (the rows are direct children of the scroller).
+  const target = mode !== 'inline' ? undefined : hunks[nav.cursor]?.row
+  useEffect(() => {
+    if (target === undefined) return
+    const element = scroller.current?.children[target]
+    if (element === undefined) return
+    ;(element as HTMLElement).scrollIntoView({ block: 'center' })
+  }, [target])
+
+  // Arrow keys walk the changes while the reader's focus is in this surface.
+  // Registered on the scroller, not on the page: two diffs (a tab and a commit
+  // seat) must not answer the same key at the same time.
+  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (event.altKey || event.metaKey || event.ctrlKey || event.shiftKey) return
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+    if (hunks.length === 0) return
+    event.preventDefault()
+    if (event.key === 'ArrowDown') nav.next()
+    else nav.previous()
   }
-  if ('error' in entry) {
-    return (
-      <div className="diorama-diff" data-testid="git-diff">
-        <div className="diorama-diff__header">{path}</div>
-        <div className="diorama-renderer__error" role="alert" data-testid="git-diff-error">
-          {entry.error.code}: {entry.error.message}
-        </div>
-      </div>
-    )
-  }
-  const notes: string[] = []
-  if (entry.binary === true) notes.push('二进制文件：git 不提供文本 diff')
-  if (entry.truncated === true) notes.push('这个文件的 diff 过大，已截断')
-  if (truncated) notes.push('改动过多，只显示了一部分')
-  if (entry.oldPath !== undefined) notes.push(`由 ${entry.oldPath} 改名`)
-  // A file with no diff text gets its whole content as an addition (below);
-  // the diff text itself is used when git produced one.
-  const whole = entry.text === undefined && added.status === 'ready' ? added : undefined
-  const lines = whole === undefined
-    ? (entry.text ?? '').split('\n')
-    : whole.lines.map(line => `+${line}`)
-  if (whole === undefined && lines[lines.length - 1] === '') lines.pop()
-  if (whole !== undefined) {
-    notes.push(...whole.notes)
-    if (whole.truncated) notes.push('已截断')
-  }
+
+  const headerNotes: string[] = []
+  if (binary) headerNotes.push('二进制文件：git 不提供文本 diff')
+  if (truncated) headerNotes.push('这个文件的 diff 过大，已截断')
+  if (callTruncated) headerNotes.push('改动过多，只显示了一部分')
+  if (oldPath !== undefined) headerNotes.push(`由 ${oldPath} 改名`)
+  headerNotes.push(...notes)
+
   return (
-    <div className="diorama-diff" data-testid="git-diff" data-kind={entry.kind}>
+    <div className="diorama-diff" data-testid={testIds.root} data-kind={kind} data-mode={mode}>
       <div className="diorama-diff__header">
-        <span className={`diorama-changes__badge diorama-changes__badge--${TONE[entry.kind]}`} aria-hidden="true">
-          {BADGE[entry.kind]}
-        </span>
+        {kind === undefined ? null : (
+          <span className={`diorama-changes__badge diorama-changes__badge--${TONE[kind]}`} aria-hidden="true">
+            {BADGE[kind]}
+          </span>
+        )}
         <FileIcon name={path.slice(path.lastIndexOf('/') + 1)} />
         <span className="diorama-diff__path">{path}</span>
-        <button
-          type="button"
-          className="diorama-diff__reload"
-          title="重新读取这个文件"
-          aria-label="重新读取这个文件"
-          onClick={onRefresh}
-        >
-          <Icon name="reload" size={14} />
-        </button>
+        {stat.hunks > 0 && (
+          <span className="diorama-diff__stat" data-testid="git-diff-stat" title={`${stat.hunks} 处改动`}>
+            <span className="diorama-diff__stat-add">+{stat.added}</span>
+            <span className="diorama-diff__stat-del">−{stat.removed}</span>
+          </span>
+        )}
+        <ModeSwitch mode={mode} ids={testIds} />
+        {hunks.length > 0 && (
+          <span className="diorama-diff__nav" role="group" aria-label="在改动之间移动">
+            <button
+              type="button"
+              className="diorama-diff__nav-button"
+              title="上一处改动（↑）"
+              aria-label="上一处改动"
+              data-testid="git-diff-previous"
+              onClick={nav.previous}
+            >
+              <Icon name="caret-up" size={14} />
+            </button>
+            <span className="diorama-diff__nav-count" data-testid="git-diff-hunk-count">
+              {nav.cursor < 0 ? `${hunks.length} 处改动` : `${nav.cursor + 1} / ${hunks.length}`}
+            </span>
+            <button
+              type="button"
+              className="diorama-diff__nav-button"
+              title="下一处改动（↓）"
+              aria-label="下一处改动"
+              data-testid="git-diff-next"
+              onClick={nav.next}
+            >
+              <Icon name="caret-down" size={14} />
+            </button>
+          </span>
+        )}
+        {onRefresh !== undefined && (
+          <button
+            type="button"
+            className="diorama-diff__reload"
+            title="重新读取这个文件"
+            aria-label="重新读取这个文件"
+            onClick={onRefresh}
+          >
+            <Icon name="reload" size={14} />
+          </button>
+        )}
       </div>
-      {notes.length > 0 && (
-        <div className="diorama-diff__notes" role="status" data-testid="git-diff-notes">
-          {notes.join('；')}
+      {headerNotes.length > 0 && (
+        <div className="diorama-diff__notes" role="status" data-testid={testIds.notes}>
+          {headerNotes.join('；')}
         </div>
       )}
-      {lines.length === 0 && entry.text === undefined && added.status === 'loading' && (
-        <div className="diorama-renderer" data-testid="git-diff-loading">
+      {error !== undefined && (
+        <div className={error.code === 'ENODIFF' ? 'diorama-renderer__empty' : 'diorama-renderer__error'} role={error.code === 'ENODIFF' ? 'status' : 'alert'} data-testid={error.code === 'ENODIFF' ? testIds.empty : testIds.error}>
+          {error.code === 'ENODIFF' ? error.message : `${error.code}: ${error.message}`}
+        </div>
+      )}
+      {error === undefined && loading && lines.length === 0 && (
+        <div className="diorama-renderer" data-testid={testIds.loading}>
           正在读取文件…
         </div>
       )}
-      {lines.length > 0 && <DiffLines lines={lines} />}
+      {contentMode && whole.status === 'loading' && (
+        <div className="diorama-renderer" data-testid={testIds.loading}>
+          正在读取整个文件…
+        </div>
+      )}
+      {contentMode && whole.status === 'ready' && mode === 'file' && (
+        <WholeFile diff={diff} text={whole.text} testId={testIds.text} />
+      )}
+      {contentMode && whole.status === 'ready' && mode === 'split' && (
+        <SplitFile diff={diff} text={whole.text} testId={testIds.text} />
+      )}
+      {!contentMode && whole.status === 'note' && (
+        <div className="diorama-diff__notes" role="status" data-testid="git-diff-file-note">
+          {whole.note}
+        </div>
+      )}
+      {(!contentMode || (whole.status !== 'ready' && whole.status !== 'loading')) && error === undefined && lines.length > 0 && (
+        <div
+          className="diorama-diff__text"
+          data-testid={testIds.text}
+          ref={scroller}
+          role="group"
+          aria-label="改动"
+          tabIndex={0}
+          onKeyDown={onKeyDown}
+        >
+          <InlineRows rows={rows} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** The inline reader: the unified diff, one row per line, with a gutter. */
+function InlineRows({ rows }: { rows: readonly DiffLine[] }) {
+  return (
+    <>
+      {rows.map((row, index) => (
+        <div
+          key={index}
+          className={`diorama-diff__line diorama-diff__line--${row.tone}`}
+          data-tone={row.tone}
+          data-line={row.newLine ?? row.oldLine}
+        >
+          <span className="diorama-diff__num" aria-hidden="true">
+            {row.oldLine ?? ''}
+          </span>
+          <span className="diorama-diff__num" aria-hidden="true">
+            {row.newLine ?? ''}
+          </span>
+          <span className="diorama-diff__code">{row.text === '' ? '\u00a0' : row.text}</span>
+        </div>
+      ))}
+    </>
+  )
+}
+
+/** The whole-file reader: the file with the changes laid in, long runs folded. */
+function WholeFile({ diff, text, testId }: { diff: string; text: string; testId: string }) {
+  const rows = useMemo(() => buildFileRows(text, diff), [text, diff])
+  const [open, setOpen] = useState<number | undefined>(undefined)
+  const body = useMemo(() => labelHunks(collapseFileRows(rows, 3, 2, open), diff), [rows, diff, open])
+  // A run of unchanged lines *after* the last change has no row to sit in
+  // front of, so it is drawn once more after the last row.
+  const trailing = body.gaps.get(body.rows.length)
+  return (
+    <div className="diorama-diff__text" data-testid={testId} data-mode="file" role="group" aria-label="整个文件">
+      {body.rows.map((row, index) => {
+        const gap = body.gaps.get(index)
+        if (gap !== undefined) {
+          return (
+            <button
+              key={`gap-${index}`}
+              type="button"
+              className="diorama-diff__gap"
+              data-testid="git-diff-gap"
+              title={`展开第 ${gap.from}–${gap.to} 行`}
+              onClick={() => setOpen(gap.openedBy)}
+            >
+              <Icon name="unfold" size={13} />
+              <span>
+                {gap.count} 行未改动（第 {gap.from}–{gap.to} 行）
+              </span>
+            </button>
+          )
+        }
+        return (
+          <div
+            key={index}
+            className={`diorama-diff__line diorama-diff__line--${row.tone}`}
+            data-tone={row.tone}
+            data-line={row.number ?? row.oldNumber}
+          >
+            <span className="diorama-diff__num" aria-hidden="true">
+              {row.oldNumber ?? ''}
+            </span>
+            <span className="diorama-diff__num" aria-hidden="true">
+              {row.number ?? ''}
+            </span>
+            <span className="diorama-diff__code">{row.text === '' ? '\u00a0' : row.text}</span>
+          </div>
+        )
+      })}
+      {trailing !== undefined && (
+        <button
+          type="button"
+          className="diorama-diff__gap"
+          data-testid="git-diff-gap"
+          title={`展开第 ${trailing.from}–${trailing.to} 行`}
+          onClick={() => setOpen(trailing.openedBy)}
+        >
+          <Icon name="unfold" size={13} />
+          <span>
+            {trailing.count} 行未改动（第 {trailing.from}–{trailing.to} 行）
+          </span>
+        </button>
+      )}
     </div>
   )
 }
 
 /**
- * Unified diff lines, coloured (contract.md §3.2: the text, not a parsed
- * model). Shared by the working-tree diff and a commit's file list.
+ * The side-by-side reader: the old file on the left, the new one on the right,
+ * the change shown in both (deletions on the left, insertions on the right).
+ *
+ * Both columns come from **one** read of the file: an unchanged line is the
+ * same text on either side, so only its number differs (`buildSplitRows`).
+ * Long runs of unchanged lines fold into one band across the two columns, the
+ * same way the whole-file reader folds them.
  */
-function DiffLines({ lines, testId = 'git-diff-text' }: { lines: readonly string[]; testId?: string }) {
+function SplitFile({ diff, text, testId }: { diff: string; text: string; testId: string }) {
+  const rows = useMemo(() => buildSplitRows(text, diff), [text, diff])
+  const [open, setOpen] = useState<number | undefined>(undefined)
+  const body = useMemo(() => collapseSplitRows(rows, 3, 2, open), [rows, open])
+  const trailing = body.gaps.get(body.rows.length)
+  const gap = (entry: FileGap, key: string) => (
+    <button
+      key={key}
+      type="button"
+      className="diorama-diff__gap"
+      data-testid="git-diff-gap"
+      title={`展开第 ${entry.from}–${entry.to} 行`}
+      onClick={() => setOpen(entry.openedBy)}
+    >
+      <Icon name="unfold" size={13} />
+      <span>
+        {entry.count} 行未改动（第 {entry.from}–{entry.to} 行）
+      </span>
+    </button>
+  )
   return (
-    <pre className="diorama-diff__text" data-testid={testId}>
-      {lines.map((line, index) => (
-        <div key={index} className={`diorama-diff__line diorama-diff__line--${lineTone(line)}`}>
-          {line === '' ? '\u00a0' : line}
-        </div>
-      ))}
-    </pre>
+    <div className="diorama-diff__text" data-testid={testId} data-mode="split" role="group" aria-label="新旧文件对照">
+      <div className="diorama-diff__split-head" aria-hidden="true">
+        <span className="diorama-diff__split-title">旧</span>
+        <span className="diorama-diff__split-title">新</span>
+      </div>
+      {body.rows.map((row, index) => {
+        const folded = body.gaps.get(index)
+        if (folded !== undefined) return gap(folded, `gap-${index}`)
+        return (
+          <div key={index} className="diorama-diff__split-row" data-change={row.change || undefined}>
+            {([row.old, row.next] as const).map((cell, side) => (
+              <div
+                key={side}
+                className={`diorama-diff__split-cell${cell === undefined ? ' diorama-diff__split-cell--empty' : ` diorama-diff__line--${cell.tone}`}`}
+                data-tone={cell?.tone ?? 'empty'}
+                data-line={cell?.number}
+              >
+                <span className="diorama-diff__num" aria-hidden="true">
+                  {cell?.number ?? ''}
+                </span>
+                <span className="diorama-diff__code">{cell === undefined || cell.text === '' ? '\u00a0' : cell.text}</span>
+              </div>
+            ))}
+          </div>
+        )
+      })}
+      {trailing !== undefined && gap(trailing, 'gap-tail')}
+    </div>
   )
 }
 
-/** The lines of a unified diff, without the trailing newline artifact. */
-function diffLines(text: string): string[] {
-  const lines = text.split('\n')
-  if (lines[lines.length - 1] === '') lines.pop()
-  return lines
+/** One mode button: the label is the icon, the tooltip says what it does. */
+const MODE_BUTTONS: readonly { mode: DiffMode; icon: string; label: string; title: string }[] = [
+  { mode: 'inline', icon: 'diff', label: '改动', title: '只看改动（与 git diff 一致）' },
+  { mode: 'file', icon: 'file-text', label: '整个文件', title: '把改动放进整个文件里看（单栏）' },
+  { mode: 'split', icon: 'columns', label: '新旧对照', title: '左旧右新，两栏对照（双栏）' },
+]
+
+/** The three buttons that pick how a diff is read. */
+function ModeSwitch({ mode, ids }: { mode: DiffMode; ids: DiffTestIds }) {
+  const testIds: Record<DiffMode, string> = { inline: ids.modeInline, file: ids.modeFile, split: ids.modeSplit }
+  return (
+    <span className="diorama-diff__modes" role="group" aria-label="显示方式">
+      {MODE_BUTTONS.map(button => (
+        <button
+          key={button.mode}
+          type="button"
+          aria-pressed={mode === button.mode}
+          aria-label={button.label}
+          title={button.title}
+          data-testid={testIds[button.mode]}
+          onClick={() => setDiffMode(button.mode)}
+        >
+          <Icon name={button.icon} size={14} />
+        </button>
+      ))}
+    </span>
+  )
 }
 
 /**
@@ -814,7 +1305,6 @@ function CommitSeat({ commit }: CommitSeatProps) {
   const git = mount.git
   const [state, setState] = useState<{ status: string; detail?: CommitDetail; error?: string }>({ status: 'loading' })
   const [picked, setPicked] = useState<string | undefined>(undefined)
-  const [mode, setMode] = useState<'diff' | 'content'>('diff')
   useEffect(() => {
     let live = true
     setState({ status: 'loading' })
@@ -886,23 +1376,12 @@ function CommitSeat({ commit }: CommitSeatProps) {
           ))}
         </div>
         <div className="diorama-git-commit__panel">
-          {file !== undefined && (
-            <div className="diorama-git-commit__modes" role="group" aria-label="显示方式">
-              <button type="button" aria-pressed={mode === 'diff'} data-testid="git-commit-mode-diff" onClick={() => setMode('diff')}>
-                改动
-              </button>
-              <button type="button" aria-pressed={mode === 'content'} data-testid="git-commit-mode-content" onClick={() => setMode('content')}>
-                提交时的内容
-              </button>
-            </div>
-          )}
           {file === undefined && (
             <div className="diorama-renderer__empty" role="status" data-testid="git-commit-empty">
               这个提交没有改动
             </div>
           )}
-          {file !== undefined && mode === 'diff' && <CommitFileDiff commit={detail.sha} file={file} />}
-          {file !== undefined && mode === 'content' && <CommitFileContent commit={detail.sha} path={file.file} />}
+          {file !== undefined && <CommitFileDiff commit={detail.sha} file={file} />}
         </div>
       </div>
     </div>
@@ -965,13 +1444,50 @@ export function messageBody(message: string): string {
     .replace(/\n+$/, '')
 }
 
-/** One file's change in the commit (`show()`), as diff lines. */
+/** The whole file at a commit, read for the "whole file" mode (`blob()`). */
+function useCommitText(commit: string, path: string, wanted: boolean): FileState {
+  const { mount } = useKernel()
+  const [state, setState] = useState<FileState>({ status: 'idle' })
+  useEffect(() => {
+    if (!wanted) {
+      setState({ status: 'idle' })
+      return
+    }
+    let live = true
+    setState({ status: 'loading' })
+    mount.git.blob(commit, path).then(
+      result => {
+        if (!live) return
+        if (result.binary === true) {
+          setState({ status: 'note', note: `二进制文件（${formatBytes(result.size)}），只显示改动` })
+          return
+        }
+        setState({ status: 'ready', text: result.text ?? '' })
+      },
+      (error: unknown) => {
+        if (live) setState({ status: 'note', note: `读取失败：${(error as Error).message}` })
+      },
+    )
+    return () => {
+      live = false
+    }
+  }, [mount, commit, path, wanted])
+  return state
+}
+
+/**
+ * One file's change in the commit (`show()`), read the same two ways as a
+ * working-tree diff. The "whole file" mode here is the file **as the commit
+ * left it** (`blob()`), so the code around a change is the code that change
+ * produced — not today's working tree, which may be nothing like it.
+ */
 function CommitFileDiff({ commit, file }: { commit: string; file: DiffEntry }) {
   const { mount } = useKernel()
   const [state, setState] = useState<{ status: string; entry?: DiffEntry; error?: string }>({
     status: file.text === undefined && file.binary !== true ? 'loading' : 'ready',
     entry: file,
   })
+  const mode = useDiffMode()
   useEffect(() => {
     // `showCommit()` already carries the text; only a text-less entry (a
     // binary, or a file the commit did not change) asks again.
@@ -992,6 +1508,7 @@ function CommitFileDiff({ commit, file }: { commit: string; file: DiffEntry }) {
       live = false
     }
   }, [mount, commit, file])
+  const whole = useCommitText(commit, file.file, mode === 'file' && file.binary !== true)
   if (state.status === 'loading') {
     return <div className="diorama-renderer" data-testid="git-commit-diff-loading">正在读取改动…</div>
   }
@@ -1003,73 +1520,31 @@ function CommitFileDiff({ commit, file }: { commit: string; file: DiffEntry }) {
     )
   }
   const entry = state.entry as DiffEntry
-  if (entry.binary === true) {
-    return (
-      <div className="diorama-renderer__empty" role="status" data-testid="git-commit-diff-binary">
-        二进制文件：git 不提供文本 diff
-      </div>
-    )
-  }
   return (
-    <div data-testid="git-commit-diff" data-kind={entry.kind}>
-      {entry.truncated === true && (
-        <div className="diorama-diff__notes" role="status">
-          这个文件的 diff 过大，已截断
-        </div>
-      )}
-      <DiffLines lines={diffLines(entry.text ?? '')} testId="git-commit-diff-text" />
-    </div>
-  )
-}
-
-/** One file's content at the commit (`blob()`). */
-function CommitFileContent({ commit, path }: { commit: string; path: string }) {
-  const { mount } = useKernel()
-  const [state, setState] = useState<{ status: string; text?: string; binary?: boolean; size?: number; truncated?: boolean; error?: string }>({
-    status: 'loading',
-  })
-  useEffect(() => {
-    let live = true
-    mount.git.blob(commit, path).then(
-      result => {
-        if (live) setState({ status: 'ready', text: result.text, binary: result.binary === true, size: result.size, truncated: result.truncated === true })
-      },
-      (error: unknown) => {
-        if (live) setState({ status: 'error', error: error instanceof Error ? error.message : String(error) })
-      },
-    )
-    return () => {
-      live = false
-    }
-  }, [mount, commit, path])
-  if (state.status === 'loading') {
-    return <div className="diorama-renderer" data-testid="git-commit-blob-loading">正在读取文件…</div>
-  }
-  if (state.status === 'error') {
-    return (
-      <div className="diorama-renderer__error" role="alert" data-testid="git-commit-blob-error">
-        {state.error}
-      </div>
-    )
-  }
-  if (state.binary === true) {
-    return (
-      <div className="diorama-renderer__empty" role="status" data-testid="git-commit-blob-binary">
-        二进制文件（{formatBytes(state.size ?? 0)}）
-      </div>
-    )
-  }
-  return (
-    <div data-testid="git-commit-blob">
-      {state.truncated === true && (
-        <div className="diorama-diff__notes" role="status">
-          文件过大（{formatBytes(state.size ?? 0)}），已截断
-        </div>
-      )}
-      <pre className="diorama-diff__text" data-testid="git-commit-blob-text">
-        {(state.text ?? '').replace(/\n$/, '')}
-      </pre>
-    </div>
+    <DiffView
+      path={file.file}
+      kind={entry.kind}
+      oldPath={entry.oldPath}
+      diff={entry.text ?? ''}
+      binary={entry.binary === true}
+      error={undefined}
+      truncated={entry.truncated === true}
+      callTruncated={false}
+      notes={[]}
+      loading={false}
+      whole={whole}
+      testIds={{
+        root: 'git-commit-diff',
+        text: 'git-commit-diff-text',
+        notes: 'git-commit-diff-notes',
+        empty: 'git-commit-diff-empty',
+        error: 'git-commit-diff-error',
+        loading: 'git-commit-diff-loading',
+        modeInline: 'git-commit-mode-diff',
+        modeFile: 'git-commit-mode-content',
+        modeSplit: 'git-commit-mode-split',
+      }}
+    />
   )
 }
 
