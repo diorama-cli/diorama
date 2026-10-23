@@ -143,7 +143,12 @@ const RECHECK_MS = 400
  * tree. The list also has its own button for when a watch was refused (the
  * per-mount `maxDirectories` cap) or unavailable.
  */
-function useChanges(mount: { git: GitClient; fs: { list(path?: string): Promise<{ path: string; kind: string }[]>; watch(path: string, listener: (event: ChangeEvent) => void): () => void } }): {
+function useChanges(mount: {
+  git: GitClient
+  fs: { list(path?: string): Promise<{ path: string; kind: string }[]>; watch(path: string, listener: (event: ChangeEvent) => void): () => void }
+  /** The channel's reconnect notice (contract.md §4). */
+  rpc: { onReconnect(listener: () => void): () => void }
+}): {
   entries: GitStatusEntry[] | undefined
   error: string | undefined
   reload(): void
@@ -208,9 +213,17 @@ function useChanges(mount: { git: GitClient; fs: { list(path?: string): Promise<
       )
     }
     refreshWatches()
+    // A reconnect is the one change no watch reports (contract.md §4): whatever
+    // moved while the page was offline produced no event, so read once more.
+    const stopReconnect = mount.rpc.onReconnect(() => {
+      if (!live) return
+      refreshWatches()
+      schedule()
+    })
     return () => {
       live = false
       if (timer !== undefined) clearTimeout(timer)
+      stopReconnect()
       for (const dispose of watchers.values()) dispose()
       watchers.clear()
     }

@@ -7,7 +7,7 @@
  * working in the browser. The M0 HTTP transport (`/api/fs/*`) is gone.
  */
 import type { FsWatchEvent, FileInfo, RelPath } from '../shared/types.ts'
-import { SUBSCRIPTION_METHOD, type SubscriptionStarted } from '../shared/rpc.ts'
+import { SUBSCRIPTION_METHOD } from '../shared/rpc.ts'
 import type { RpcClient } from './rpc.ts'
 
 /** The contract's default watch window (contract.md §3.1). */
@@ -42,8 +42,6 @@ export function createFsClient(rpc: RpcClient): FsClient {
     readBytes: path => remote.readBytes(path),
     watch(path, listener) {
       let live = true
-      let session: string | undefined
-      let unsubscribe: (() => void) | undefined
       const pending = new Map<string, FsWatchEvent>()
       const timers = new Map<string, ReturnType<typeof setTimeout>>()
 
@@ -60,20 +58,9 @@ export function createFsClient(rpc: RpcClient): FsClient {
         }, WATCH_DEBOUNCE_MS))
       }
 
-      void rpc.call(`fs.${SUBSCRIPTION_METHOD}`, path).then(
-        value => {
-          const started = value as SubscriptionStarted
-          if (!live) {
-            rpc.cancel(started.session)
-            return
-          }
-          session = started.session
-          unsubscribe = rpc.onSession(started.session, payload => deliver(payload as FsWatchEvent))
-        },
-        (error: unknown) => {
-          console.error(`[diorama] fs.watch(${path}) failed:`, error)
-        },
-      )
+      // The channel keeps this endpoint started across reconnects (contract.md
+      // §4): a dropped network resumes the watch instead of silencing the tree.
+      const unsubscribe = rpc.watchEndpoint(`fs.${SUBSCRIPTION_METHOD}`, [path], payload => deliver(payload as FsWatchEvent))
 
       return () => {
         if (!live) return
@@ -81,8 +68,7 @@ export function createFsClient(rpc: RpcClient): FsClient {
         for (const timer of timers.values()) clearTimeout(timer)
         timers.clear()
         pending.clear()
-        unsubscribe?.()
-        if (session !== undefined) rpc.cancel(session)
+        unsubscribe()
       }
     },
   }

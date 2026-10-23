@@ -57,6 +57,37 @@ test('11. a created file appears in the tree; a deleted one is reported', async 
   }
 })
 
+test('12. a dropped network reconnects by itself, and the page catches up', async ({ page, context }) => {
+  const directory = fixture()
+  const server = await startDiorama(directory.root)
+  try {
+    await page.goto(server.url)
+    await waitForPage(page)
+    const tree = page.getByTestId('file-tree')
+    await tree.locator('[data-path="LICENSE"]').click()
+    await expect(page.getByTestId('plaintext')).toContainText('plain text license', { timeout: 10_000 })
+
+    // The network goes away, a file changes while nobody is listening, and the
+    // network comes back. Nothing is clicked and the page is not reloaded: the
+    // RPC channel dials again, restarts its watches and the readers re-read.
+    await context.setOffline(true)
+    await page.waitForTimeout(1_000)
+    writeFileSync(join(directory.root, 'LICENSE'), 'written while offline\n')
+    writeFileSync(join(directory.root, 'added-while-offline.txt'), 'new\n')
+    await context.setOffline(false)
+
+    await expect(page.getByTestId('plaintext')).toContainText('written while offline', { timeout: 30_000 })
+    await expect(tree.locator('[data-path="added-while-offline.txt"]')).toBeVisible({ timeout: 30_000 })
+
+    // And the connection is live again: a change made now arrives the usual way.
+    writeFileSync(join(directory.root, 'LICENSE'), 'after the reconnect\n')
+    await expect(page.getByTestId('plaintext')).toContainText('after the reconnect', { timeout: 15_000 })
+  } finally {
+    await server.stop()
+    directory.dispose()
+  }
+})
+
 test('10b. auto-refresh off stops content updates; the toggle is a command', async ({ page }) => {
   const directory = fixture()
   const server = await startDiorama(directory.root)

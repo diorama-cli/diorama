@@ -49,7 +49,17 @@ export {
   type SearchOptions,
   type SearchResult,
 } from '../shared/search.ts'
-export { createRpcClient, rpcUrl, RPC_PATH, type RpcClient } from './rpc.ts'
+export {
+  createRpcClient,
+  HEARTBEAT_MS,
+  HEARTBEAT_TIMEOUT_MS,
+  RETRY_INITIAL_MS,
+  RETRY_MAX_MS,
+  rpcUrl,
+  RPC_PATH,
+  type RpcClient,
+  type RpcClientOptions,
+} from './rpc.ts'
 export {
   browserHistory,
   createRouterService,

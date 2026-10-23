@@ -73,8 +73,14 @@ function useDirectory(mount: MountHandle, path: string, open: boolean): DirState
     // change the entry set, and `change` may be the first event of a file that
     // was just created (the kind is only a hint, contract.md §3.1, U2).
     reload = mount.fs.watch(path, () => load())
+    // A reconnect is not a directory event (contract.md §4): anything created or
+    // deleted while the page was offline was never reported, so list once more.
+    const stopReconnect = mount.rpc.onReconnect(() => {
+      if (!cancelled) load()
+    })
     return () => {
       cancelled = true
+      stopReconnect()
       reload()
     }
   }, [mount, path, open])

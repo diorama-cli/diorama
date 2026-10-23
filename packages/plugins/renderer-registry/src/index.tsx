@@ -521,7 +521,15 @@ export function apply(ctx: Context) {
   }
   ctx.effect(() => {
     syncWatches()
-    return tabs.subscribe(syncWatches)
+    const stopTabs = tabs.subscribe(syncWatches)
+    // The watches resume by themselves after a reconnect (contract.md §4), but
+    // a file written while the page was offline produced no event: re-read what
+    // the open tabs show, which is exactly what `view.refresh` does.
+    const stopReconnect = mount.rpc.onReconnect(() => contentSettings.refreshAll())
+    return () => {
+      stopTabs()
+      stopReconnect()
+    }
   }, 'renderer-registry: watch open tabs')
   ctx.effect(
     () => () => {

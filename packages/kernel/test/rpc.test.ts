@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { decodeValue, encodeValue, parseMethod } from '../src/shared/rpc.ts'
-import { createDispatcher } from '../src/server/rpc.ts'
+import { createDispatcher, handleFrame } from '../src/server/rpc.ts'
 import { FsService } from '../src/server/fs.ts'
 
 test('bytes survive the JSON envelope', () => {
@@ -17,6 +17,14 @@ test('method names split into service and method', () => {
   assert.deepEqual(parseMethod('fs.readText'), { service: 'fs', name: 'readText' })
   assert.equal(parseMethod('readText'), undefined)
   assert.equal(parseMethod('fs.'), undefined)
+})
+
+test('a keep-alive frame is answered and touches nothing', async () => {
+  const fs = new FsService(process.cwd())
+  const call = createDispatcher(() => ({ fs }))
+  const frames: unknown[] = []
+  await handleFrame(call, JSON.stringify({ type: 'ping' }), message => frames.push(message), () => {})
+  assert.deepEqual(frames, [{ type: 'pong' }])
 })
 
 test('the dispatcher only forwards described methods', async () => {

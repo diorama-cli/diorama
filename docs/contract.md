@@ -830,7 +830,7 @@ interface ThemeService {
 - **纯客户端**：不经过 RPC，不落盘到 `$DIORAMA_HOME`（页面各自的浏览器存储即所见即所得；
   `ctx.storage`（K14）落地后可以讨论服务端同步，签名未定之前不动）。
 
-## 4. RPC / 通信 ✅ v0.2 定 / v0.3 补事件 session 与 §4.1 配置
+## 4. RPC / 通信 ✅ v0.2 定 / v0.3 补事件 session 与 §4.1 配置 / v0.11 补存活与重连
 
 **形态：自动代理（A1）。** server 插件的服务公开方法自动成为浏览器可调的 RPC 方法：client 半边里 `mountCtx.fs.list(...)` 的形状与 server 服务一致。
 
@@ -849,10 +849,12 @@ interface ThemeService {
 // client → server
 { type: 'call', id: number, method: `${service}.${method}`, args: unknown[] }
 { type: 'cancel', session: string }                     // v0.3：取消一个订阅端点（§3.1 watch）
+{ type: 'ping' }                                        // v0.11：保活，服务端回 pong
 // server → client
 { type: 'result', id: number, value: unknown }          // 二进制值以 base64 呈现（见下）
 { type: 'error', id: number, code: string, message: string }
 { type: 'event', topic: string, payload: unknown, session?: string }
+{ type: 'pong' }                                        // v0.11：保活的回答
 ```
 
 **订阅端点与事件 session（v0.3 定，M2 起）**
@@ -877,6 +879,27 @@ interface ThemeService {
 - 未知服务 → `ESERVICE`；方法执行抛错且无 `code` → `EIO`；带 `code` 的错误原样映射（`EINVAL`、`EOUTSIDE`、…）。
 - **`Uint8Array` 过 JSON**：RPC 信封在 `value` 中把 `Uint8Array` 表示为 `{ $bytes: base64 }`，client 端还原为 `Uint8Array`。这是 M1 二进制唯一的跨线表示。
 - 连接在页面 boot 时建立；服务端**先于**页面读取准备好（fs 在 mount 时已就绪）。连接失败 = 该页的 fs 调用全部 `ESERVICE`（fail loud，不静默兜底）。
+
+**存活与重连（v0.11 定，M16 实现）**
+
+页面是长时间开着的，网络会断——断网、睡眠唤醒、VPN 切换。这条通道因此必须自己活下去：
+
+- **断线自动重连**：socket 关闭后客户端持续拨号，指数退避 **500ms → 10s**，不设次数上限。
+  断线**期间**发起的新调用立刻以 `EDISCONNECTED` 拒绝（**不排队**：排队会让一次写盘在几分钟后
+  突然生效）；`RpcClient.ready()` 指向**当前**那次拨号，断线期间 reject，重连后重新 resolve。
+- **保活帧**：client → server `{ type: 'ping' }`，server → client `{ type: 'pong' }`。
+  两端都要探测——**断网不会触发 `onclose`**，只等它要几分钟：
+  - 客户端每 **5s** 发一帧 `ping`；**20s** 没收到任何帧即判定连接已死，主动关闭并重连。
+  - 服务端每 **15s** 对每条连接发 WebSocket ping；连续两轮无 pong 即 `terminate()`，
+    并按「连接关闭」取消该连接的全部订阅（否则断网页面留下的 socket 会一直占着 OS watcher）。
+  - `ping` / `pong` 是协议层的事：`ping` 由服务端直接应答，不进 `describe()`、不碰任何服务。
+- **订阅端点的重放**：连接关闭 = 该连接的订阅全部取消（见上），所以客户端必须重订。
+  这一步由**通道**负责：`RpcClient.watchEndpoint(method, args, listener)` 登记一个订阅端点，
+  重连成功后自动重放（**先重放订阅，再通知**），返回的 disposer 撤掉登记并在活连接上发
+  `{ type: 'cancel' }`。`ctx.fs.watch`（§3.1）就是它的第一个用户，签名不变。
+- **`RpcClient.onReconnect(listener)`**：重连成功时回调（**首次连接不算**，除非第一次就连了
+  两次以上）。只重订阅是不够的——断网期间磁盘上的改动**没有事件**，所以每个把服务端状态派生
+  到界面的读者（文件树、内容区、变更视图、页面壳的降级状态）都要在此时重读一次。
 
 **与 M0 的关系**：M0 的 `GET /api/fs/list`、`/api/fs/read` **删除**。`/plugin.json`、`/plugins/<id>.js`、`/__diorama__/*` 仍是 HTTP。
 
@@ -1783,6 +1806,26 @@ RPC 广播 `{ topic: 'mount.state', payload: MountStatus }`。
 **没有变的东西**：`ctx.*` 的全部签名、slot 清单与座位类型、RPC 与控制面协议、`diorama.toml`、
 URL / hash 语义、主题 token 表（新样式只用既有 token，无新 token）。
 
+## 26. `0.0.2` 之后：断网之后页面自己接回来（未发版，与 §20 同一档）
+
+> 2026-10-23。用户报告：**断网后 websocket 断了，网络重连后没有自动重连**。契约号不动（§6）：
+> 没有新增服务、没有改 `ctx.*` 的签名与 slot；变的是 §4 那条 WebSocket 的**存活与重连**语义，
+> 以及 `RpcClient` 上多出的 `watchEndpoint` / `onReconnect` / `close`。
+
+| 条款 | `0.0.2` | 本档 |
+|---|---|---|
+| §4 断线 | socket 关闭后**不再拨号**；页面从此永久离线，直到手动刷新 | 自动重连，退避 500ms → 10s，不限次数；`ready()` 指向当前那次拨号 |
+| §4 断线期间的调用 | 立即 `EDISCONNECTED` | 不变（**不排队**），但现在只是暂时的：重连后恢复 |
+| §4 保活 | 无。断网不触发 `onclose`，要等 TCP 超时（分钟级） | 客户端 5s 发 `ping`、20s 无帧判死；服务端 15s WebSocket ping、两轮无 pong 即 `terminate()` |
+| §4 帧表 | `call` / `cancel` / `result` / `error` / `event` | 另加 `{type:'ping'}`（client → server，服务端直接回）与 `{type:'pong'}` |
+| §4 订阅端点 | 调用方自己发 `cancel`；连接关闭即取消，**不会重订** | 通道托管：`RpcClient.watchEndpoint(method, args, listener)` 登记，重连后自动重放（**先重放，再通知**）；返回的 disposer 语义不变 |
+| §4 重连通知 | 无 | `RpcClient.onReconnect(listener)`：重连成功时回调（首次连接不算）。断网期间的改动**没有事件**，读者据此重读 |
+| §4 `RpcClient.close()` | 无（socket 随页面走） | 有：清定时器、不再拨号、在途调用以 `EDISCONNECTED` 结束 |
+| §3.1 `fs.watch` | 直连 `onSession` | 内部改用 `watchEndpoint`；**签名、debounce、disposer 全不变**（插件无感） |
+
+**没有变的东西**：`ctx.*` 的全部签名、slot 清单、控制面协议、`diorama.toml`、URL / hash 语义、
+错误码表（`EDISCONNECTED` 的含义不变）。断线重连是**传输层**的事，页面语义（fail loud）没变。
+
 ## 待定清单（v0.4 后仍 🔲）
 
 - [x] `ctx.git` 具体签名（只读：diff / status / log）— v0.5 定（§3.2）
@@ -1793,6 +1836,7 @@ URL / hash 语义、主题 token 表（新样式只用既有 token，无新 toke
 - [x] O8 的 diff 部分：v0.10 定了**三档读法**（行内 / 整文件单栏 / 新旧双栏）+ 变更块间导航，开关归渲染器头部（§23）；图片缩放、Markdown 源码/预览仍在 O8 里
 - [ ] URL 里是否记多 tab（刷新恢复整组）— 与 U10 一起定
 - [x] 窗格可拖动 / 长名字可横向滚动 — v0.11 定（§5.2、§25）
+- [x] RPC 断线自动重连与订阅重放 — v0.11 定（§4、§26）
 - [ ] 外部插件的发现、bundle 校验、`--plugins-dir` — 最后一个里程碑
 - [ ] gateway 控制面事件的 CLI 消费者（`diorama ls --watch`）— 以后再定（协议已定，见 §7.3）
 - [ ] gateway 单点的 supervisor 兜底（崩溃自拉起，O6）— 以后再定

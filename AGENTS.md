@@ -13,8 +13,9 @@
 | 3 | [docs/features.md](docs/features.md) | **有什么**：能力清单与档位（✅ / v1 / 未来 / 不做） |
 | 4 | 最近一档的 `docs/mN/spec.md` | **怎么实现的** + **§6.2 的坑**（见下面 §5） |
 
-最近一档是 [docs/m15/spec.md](docs/m15/spec.md)（可拖动的窗格 + 长名字横向滚动，`diorama-ui` 的
-`Splitter`）；上一档是 [docs/m14/spec.md](docs/m14/spec.md)（一个目录里的多个 git 仓库，`ctx.git`）。
+最近一档是 [docs/m16/spec.md](docs/m16/spec.md)（RPC 断线自动重连、保活帧与订阅重放）；
+上一档是 [docs/m15/spec.md](docs/m15/spec.md)（可拖动的窗格 + 长名字横向滚动，`diorama-ui` 的
+`Splitter`）。
 
 `docs/plan.md` 是**阶段性排期**，会退役；不要把它当长期真源，也不要在新代码里引用它。
 一次会话的最小读法：`contract.md` 目录 → `features.md` 表 → 最近 spec 的「坑」一节。
@@ -137,6 +138,8 @@ scripts/                  生成器（图标表；`pnpm icons` 重新生成）
 | 点了提交什么都没发生 / 座位里某个 `data-testid` 永远找不到 | 新加的 hook 写在组件的**提前 `return`**（loading / error）之后，两次渲染的 hook 数量不同，React 抛错整棵子树不渲染 | 所有 hook 写在任何条件返回之前（m15/spec §6 坑 1）|
 | `MISSING_EXPORT "X" is not exported by src/y.d.ts`，导出明明写着 | 同一目录里 `y.ts` 与 `y.tsx` 同名，声明 bundle 里抢一个 `.d.ts` | 纯函数与组件分开命名（`splitpane.ts` + `splitter.tsx`）（m15/spec §6 坑 2）|
 | 窗格怎么都横滚不动、长名字只剩省略号 | 行被 `width: 100%` 钉在容器宽度上，名字又 `overflow: hidden` | 行 `width: max-content; min-width: 100%`，名字不收缩不省略；**新窗格一律照此办理**（contract §5.2、m15/spec）|
+| 断网重连后页面「活着但不动」 | 只重连、没重订订阅；或只重订、没让读者重读（断网期间的改动**没有事件**） | 订阅走 `rpc.watchEndpoint`（通道重放），派生状态在 `rpc.onReconnect` 里重读；两端都要心跳，**断网不触发 `onclose`**（contract §4、m16/spec §6）|
+| 新加的订阅在断线后再也不推事件 | 直接 `rpc.call('fs.watch')` + `onSession`，重连后 session 是旧的（服务端已随连接关闭取消） | 订阅端点一律用 `rpc.watchEndpoint(method, args, listener)`（m16/spec §6 坑 2）|
 
 ## 6. 边界（不要越过的线）
 

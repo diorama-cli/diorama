@@ -43,7 +43,12 @@ interface Subscription {
 interface Peer {
   socket: WebSocket
   subscriptions: Map<string, Subscription>
+  /** Answered the last liveness probe (contract.md §4). */
+  alive: boolean
 }
+
+/** How often a page is asked to prove it is still there (contract.md §4). */
+export const HEARTBEAT_MS = 15_000
 
 function isDescribed(service: unknown): service is DescribedService {
   return (
@@ -122,6 +127,13 @@ export async function handleFrame(
     log(`[diorama] rpc: unsupported frame ${JSON.stringify(request).slice(0, 120)}`)
     return
   }
+  // Keep-alive (contract.md §4): the page pings while it is idle so a dead
+  // connection (a dropped network, a suspended laptop) is noticed from both
+  // ends. It touches nothing — the answer is the whole point.
+  if (request.type === 'ping') {
+    send({ type: 'pong' })
+    return
+  }
   if (request.type === 'cancel') {
     const session = (request as { session?: unknown }).session
     if (typeof session !== 'string') {
@@ -186,6 +198,8 @@ export interface RpcChannelOptions {
   dispatcher: RpcDispatcher
   /** Console sink for protocol-level problems. */
   log?: (message: string) => void
+  /** Liveness sweep interval; defaults to {@link HEARTBEAT_MS} (tests shorten it). */
+  heartbeatMs?: number
 }
 
 /** The channel: attach to the mount's HTTP server, push events to every page. */
@@ -193,19 +207,47 @@ export class RpcChannel {
   private readonly peers = new Map<WebSocket, Peer>()
   private readonly server: WebSocketServer
   private readonly log: (message: string) => void
+  /** The liveness sweep (see the constructor). */
+  private readonly sweep: ReturnType<typeof setInterval>
 
   constructor(options: RpcChannelOptions) {
     this.log = options.log ?? (message => console.error(message))
     this.server = new WebSocketServer({ noServer: true })
     this.server.on('connection', socket => {
-      const peer: Peer = { socket, subscriptions: new Map() }
+      const peer: Peer = { socket, subscriptions: new Map(), alive: true }
       this.peers.set(socket, peer)
+      socket.on('pong', () => {
+        peer.alive = true
+      })
       socket.on('message', (data: Buffer | string) => {
+        peer.alive = true
         void handleFrame(options.dispatcher, data.toString(), message => this.sendTo(socket, message), this.log, peer)
       })
       socket.on('close', () => this.drop(socket))
       socket.on('error', () => this.drop(socket))
     })
+    // Liveness (contract.md §4). A page that lost its network leaves a socket
+    // that never closes by itself: the TCP stack only notices after minutes, and
+    // until then this peer's subscriptions keep their OS watchers alive. Ping
+    // every page and terminate the ones that missed a round; the client's own
+    // keep-alive covers the other direction (it reconnects and re-subscribes).
+    this.sweep = setInterval(() => {
+      for (const peer of this.peers.values()) {
+        if (!peer.alive) {
+          this.drop(peer.socket)
+          peer.socket.terminate()
+          continue
+        }
+        peer.alive = false
+        try {
+          peer.socket.ping()
+        } catch {
+          this.drop(peer.socket)
+        }
+      }
+    }, options.heartbeatMs ?? HEARTBEAT_MS)
+    // A heartbeat must never hold the process open (the CLI's short-lived runs).
+    this.sweep.unref()
   }
 
   /** Forget a peer and end its subscriptions (contract.md §4: close = cancel). */
@@ -246,6 +288,7 @@ export class RpcChannel {
   }
 
   close(): void {
+    clearInterval(this.sweep)
     // End subscriptions, then cut the sockets: `close()` alone is a handshake,
     // and the HTTP server's `close()` waits for every socket to go away.
     for (const socket of [...this.peers.keys()]) {

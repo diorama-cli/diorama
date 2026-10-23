@@ -55,7 +55,7 @@
 | K10 | `ctx.slots` | ✅ M0→M1 | |
 | K11 | `ctx.commands` | ✅ M2 | 内核内置：命令 id fail loud、快捷键字面冲突抛错、`CommandContext` 内核采集、单一 keydown 分发 |
 | K12 | `ctx.diorama.mounts` | ✅ M3 | `onMount` 时机、卸载顺序、`MountInfo` 带 `port`/`url`/`configFile`（契约 §2.5/§3.5）|
-| K13 | RPC（client ↔ server） | ✅ M2 | WebSocket 自动代理；**订阅端点 + session**（`fs.watch`、`cancel`、连接关闭即取消）|
+| K13 | RPC（client ↔ server） | ✅ M2 | WebSocket 自动代理；**订阅端点 + session**（`fs.watch`、`cancel`、连接关闭即取消）；**断线自动重连**（退避 500ms→10s）、保活帧（`ping`/`pong`）与订阅重放（`watchEndpoint`），重连后 `onReconnect` 让读者重读（contract §4、§26）|
 | K14 | `ctx.storage`（`~/.diorama/` 持久化） | 🔲 待定 | 签名未定 |
 | K15 | 插件异步任务托管 API | 🔲 待定 | 见 §12 讨论 |
 | K16 | 热重载（HMR） | **未来** | 内好用，外部插件不必 |

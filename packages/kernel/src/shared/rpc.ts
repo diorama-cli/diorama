@@ -11,12 +11,15 @@
 export type RpcRequest =
   | { type: 'call'; id: number; method: string; args: unknown[] }
   | { type: 'cancel'; session: string }
+  /** Keep-alive (v0.11): answered with `pong`; carries no state. */
+  | { type: 'ping' }
 
 /** Server → client. */
 export type RpcResponse =
   | { type: 'result'; id: number; value: unknown }
   | { type: 'error'; id: number; code: string; message: string }
   | { type: 'event'; topic: string; payload: unknown; session?: string }
+  | { type: 'pong' }
 
 /** What a proxying service reports so the channel can whitelist its methods. */
 export interface MethodDescriptor {

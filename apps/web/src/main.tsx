@@ -166,6 +166,19 @@ async function boot(): Promise<PageBoot> {
     const next = healthOf(status)
     for (const listener of [...listeners]) listener(next)
   })
+  // A transition that happened while the page was offline produced no frame;
+  // ask once the channel is back instead of leaving a stale banner.
+  const refreshHealth = (): void => {
+    fetch('/plugin.json', { cache: 'no-store' })
+      .then(response => (response.ok ? response.json() : undefined))
+      .then((manifest?: { state?: string; lastError?: { message?: string } }) => {
+        if (manifest === undefined) return
+        const next = healthOf(manifest)
+        for (const listener of [...listeners]) listener(next)
+      })
+      .catch(() => {})
+  }
+  mountHandle.rpc.onReconnect(refreshHealth)
   return {
     result,
     page,
