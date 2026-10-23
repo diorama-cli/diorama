@@ -13,7 +13,8 @@
 | 3 | [docs/features.md](docs/features.md) | **有什么**：能力清单与档位（✅ / v1 / 未来 / 不做） |
 | 4 | 最近一档的 `docs/mN/spec.md` | **怎么实现的** + **§6.2 的坑**（见下面 §5） |
 
-最近一档是 [docs/m14/spec.md](docs/m14/spec.md)（一个目录里的多个 git 仓库，`ctx.git`）。
+最近一档是 [docs/m15/spec.md](docs/m15/spec.md)（可拖动的窗格 + 长名字横向滚动，`diorama-ui` 的
+`Splitter`）；上一档是 [docs/m14/spec.md](docs/m14/spec.md)（一个目录里的多个 git 仓库，`ctx.git`）。
 
 `docs/plan.md` 是**阶段性排期**，会退役；不要把它当长期真源，也不要在新代码里引用它。
 一次会话的最小读法：`contract.md` 目录 → `features.md` 表 → 最近 spec 的「坑」一节。
@@ -133,6 +134,9 @@ scripts/                  生成器（图标表；`pnpm icons` 重新生成）
 | 提交座位里点「新旧对照」没反应（工作区 tab 正常） | 同一个 `DiffView` 有两处调用点，取数条件各写各的：提交座位只在 `mode === 'file'` 时读文件正文，`split` 模式下 `whole` 是 `idle`，双栏分支不成立 | 两处都用 `mode !== 'inline'`；`DiffView` 的 props 让调用方决定 `whole`，写错不会报错，只会静默少画（m14/spec §8）|
 | RPC 调用多传一个参数就 `EBADREQUEST` | `describe()` 的 `arity` 是白名单，加参数必须同步改 | `ctx.git` 的每个方法都加了可选 `repo`：`METHODS` 里的 arity 要一起放宽（m14/spec §6 坑 6）|
 | 主题「注册了但 palette 里没有」 | `theme` piece 不在 boot 图（`--plugins` 没选它），或注册发生在 piece 同步之后又被 dispose | 命令由 `theme` piece 从注册表同步；确认 piece 在图中、注册方没有立刻注销 |
+| 点了提交什么都没发生 / 座位里某个 `data-testid` 永远找不到 | 新加的 hook 写在组件的**提前 `return`**（loading / error）之后，两次渲染的 hook 数量不同，React 抛错整棵子树不渲染 | 所有 hook 写在任何条件返回之前（m15/spec §6 坑 1）|
+| `MISSING_EXPORT "X" is not exported by src/y.d.ts`，导出明明写着 | 同一目录里 `y.ts` 与 `y.tsx` 同名，声明 bundle 里抢一个 `.d.ts` | 纯函数与组件分开命名（`splitpane.ts` + `splitter.tsx`）（m15/spec §6 坑 2）|
+| 窗格怎么都横滚不动、长名字只剩省略号 | 行被 `width: 100%` 钉在容器宽度上，名字又 `overflow: hidden` | 行 `width: max-content; min-width: 100%`，名字不收缩不省略；**新窗格一律照此办理**（contract §5.2、m15/spec）|
 
 ## 6. 边界（不要越过的线）
 
@@ -142,6 +146,7 @@ scripts/                  生成器（图标表；`pnpm icons` 重新生成）
 - **`TabInfo` 只带 `{ id, path }`**，不带 `FileInfo` 快照——内容由内容区自己 `stat`/读。单 tab 语义已废弃。
 - **`ctx.commands` 是内核服务**，palette 只是它的一个消费面；不要给命令另开第二套注册表或第二个 keydown 监听。
 - **默认只监听 loopback**；`host` 只能由 `diorama.toml` / `--host` 显式放宽。
+- **列表窗格横向可滚、可拖宽的用 `diorama-ui` 的 `Splitter` + `usePaneSize`**（contract §5.2）：不要把长名字截成省略号，也不要给某个插件另写一套指针处理。
 
 ## 7. 提交与验证纪律
 

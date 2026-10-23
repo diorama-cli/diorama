@@ -35,6 +35,16 @@ export {
   toggleOverlay,
 } from './overlay.ts'
 export {
+  clampPane,
+  MAX_PANE_PX,
+  MIN_PANE_PX,
+  PANE_STEP_PX,
+  readPaneSize,
+  storePaneSize,
+  usePaneSize,
+} from './splitpane.ts'
+export { Splitter, type SplitterProps } from './splitter.tsx'
+export {
   baseName,
   fileGlyph,
   FALLBACK_FILE,

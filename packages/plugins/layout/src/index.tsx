@@ -18,8 +18,8 @@
 import type { Context } from 'cordis'
 import type { MountHandle } from 'diorama-kernel'
 import type { CommandsService } from 'diorama-kernel/client'
-import { useLayoutEffect, useSyncExternalStore, type ReactElement } from 'react'
-import { provideEntry, Slot, useKeyedSeat } from 'diorama-ui'
+import { useLayoutEffect, useRef, useSyncExternalStore, type CSSProperties, type ReactElement } from 'react'
+import { provideEntry, Slot, Splitter, useKeyedSeat, usePaneSize } from 'diorama-ui'
 import type {} from 'diorama-plugin-slots'
 import type { SidebarViewProps, SlotEntry } from 'diorama-plugin-slots'
 
@@ -33,6 +33,12 @@ export interface LayoutRootProps {
 
 /** The view shown when the page has not chosen one (contract.md §5.2). */
 export const DEFAULT_VIEW = 'files'
+
+/** Where the column's width is remembered (`localStorage`, like the theme's). */
+export const SIDEBAR_WIDTH_KEY = 'diorama.layout.sidebarWidth'
+
+/** The width the column starts at, before the reader drags its edge (px). */
+export const SIDEBAR_DEFAULT_PX = 260
 
 /**
  * Which view the column shows. Page-level state, not a component's: the
@@ -237,6 +243,8 @@ function SidebarView({ view, active }: { view: SlotEntry<'sidebar.views'>; activ
  * first view, so removing a piece never leaves the column blank.
  */
 function Sidebar({ views }: { views: readonly SlotEntry<'sidebar.views'>[] }) {
+  // The column's own state (view choice) is below; its **width** belongs to the
+  // frame that lays it out (see `SplitFrame`).
   // The store's version is the snapshot: the chosen id itself is read separately,
   // so the snapshot is a number and never a fresh object (React #185).
   // The third argument (the server snapshot) is the same number: the shell
@@ -300,10 +308,35 @@ function MainColumn() {
  */
 function SplitFrame() {
   const views = useSidebarViews()
+  // The column's width is the frame's (it is what lays the column out), and it
+  // is a **preference**: remembered in `localStorage`, clamped by the primitive
+  // in `diorama-ui`, and adjustable by dragging the edge or with the arrow keys
+  // on it. A fixed 260px was the old answer (docs/m4/spec.md §6.4); long file
+  // names made it the wrong one.
+  const [width, setWidth] = usePaneSize(SIDEBAR_WIDTH_KEY, SIDEBAR_DEFAULT_PX)
+  const frame = useRef<HTMLDivElement | null>(null)
+  // While the pointer is down only the CSS variable moves (see `splitpane`):
+  // re-rendering the column on every frame would re-render the whole tree.
+  const preview = (next: number): void => {
+    frame.current?.style.setProperty('--dio-sidebar-width', `${next}px`)
+  }
   if (views.length > 0) {
     return (
-      <div className="diorama-layout diorama-layout--split" data-layout="split">
+      <div
+        ref={frame}
+        className="diorama-layout diorama-layout--split"
+        data-layout="split"
+        style={{ '--dio-sidebar-width': `${width}px` } as CSSProperties}
+      >
         <Sidebar views={views} />
+        <Splitter
+          side="start"
+          size={width}
+          onPreview={preview}
+          onCommit={setWidth}
+          label="调整侧栏宽度"
+          testId="sidebar-splitter"
+        />
         <MainColumn />
       </div>
     )

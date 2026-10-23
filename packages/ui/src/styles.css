@@ -189,7 +189,9 @@ code {
 }
 
 .diorama-layout--split {
-  grid-template-columns: 260px 1fr;
+  /* The column's width is the reader's (contract.md §5.2): the frame writes it
+     as a custom property, the separator between the columns moves it. */
+  grid-template-columns: var(--dio-sidebar-width, 260px) auto minmax(0, 1fr);
 }
 
 .diorama-layout__sidebar {
@@ -239,6 +241,14 @@ code {
   box-shadow: inset 2px 0 0 var(--dio-accent);
 }
 
+/* Panes scroll **both ways** (docs/m15/spec.md, contract.md §5.2).
+   Every list row of a pane — the file tree, the changes, the history, the
+   search results — sizes to its content (`width: max-content; min-width: 100%`)
+   and its names never shrink, so the pane's own `overflow: auto` is what shows
+   a long name: a sideways scroll instead of an ellipsis that hides the part the
+   reader is looking for. A new list view inherits the rule by using the row
+   classes below; a pane of its own must give its scroller the same treatment
+   rather than truncating. */
 .diorama-sidebar__panes {
   min-width: 0;
   overflow: auto;
@@ -246,6 +256,39 @@ code {
 
 .diorama-sidebar__pane {
   min-width: 0;
+}
+
+/* The draggable edge between two panes (docs/m15/spec.md, contract.md §5.2).
+   A grid column of its own, so it never overlaps what it separates; the
+   visible hairline is drawn by the pane's own border, this strip only shows
+   itself on hover and while dragging. */
+.diorama-splitter {
+  flex: none;
+  width: 5px;
+  margin: 0 -3px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: col-resize;
+  outline: none;
+  touch-action: none;
+  z-index: 2;
+}
+
+.diorama-splitter:hover,
+.diorama-splitter[data-dragging='true'] {
+  background: var(--dio-accent-underline);
+}
+
+.diorama-splitter:focus-visible {
+  background: var(--dio-accent);
+}
+
+/* While an edge is being dragged: the pointer is a resize cursor over the
+   whole page and nothing gets selected by the drag. */
+body.diorama-resizing {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .diorama-layout__main {
@@ -272,7 +315,11 @@ code {
   display: flex;
   align-items: center;
   gap: 4px;
-  width: 100%;
+  /* Rows size to their content and the pane scrolls sideways (see "Panes
+     scroll both ways" below): a long file name is read by scrolling, not by
+     truncating it into an ellipsis. */
+  width: max-content;
+  min-width: 100%;
   padding: 2px 8px;
   border: 0;
   background: none;
@@ -302,8 +349,8 @@ code {
 }
 
 .diorama-tree__name {
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* Never shrinks: the row grows instead, and the pane scrolls. */
+  flex: none;
 }
 
 .diorama-tree__error {
@@ -317,7 +364,8 @@ code {
   display: flex;
   align-items: center;
   gap: 4px;
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   padding: 3px 8px;
   border: 0;
   background: none;
@@ -814,6 +862,8 @@ code {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  width: max-content;
+  min-width: 100%;
   padding: 2px 10px 6px;
   color: var(--dio-muted);
   font-size: 11px;
@@ -838,7 +888,8 @@ code {
   display: flex;
   align-items: center;
   gap: 6px;
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   padding: 2px 10px;
   border: 0;
   background: none;
@@ -881,13 +932,11 @@ code {
 }
 
 .diorama-changes__name {
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex: none;
 }
 
 .diorama-changes__dir {
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex: none;
   color: var(--dio-muted);
   font-size: 11px;
 }
@@ -904,7 +953,8 @@ code {
   display: flex;
   align-items: center;
   gap: 6px;
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   padding: 3px 10px;
   border: 0;
   background: none;
@@ -921,8 +971,7 @@ code {
 }
 
 .diorama-changes__repo-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex: none;
 }
 
 .diorama-changes__empty {
@@ -1196,7 +1245,8 @@ code {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   padding: 5px 10px;
   border: 0;
   border-left: 2px solid transparent;
@@ -1217,8 +1267,7 @@ code {
 }
 
 .diorama-history__subject {
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex: none;
   white-space: nowrap;
 }
 
@@ -1234,8 +1283,7 @@ code {
 }
 
 .diorama-history__author {
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex: none;
   white-space: nowrap;
 }
 
@@ -1296,14 +1344,19 @@ code {
 
 .diorama-git-commit__body {
   display: grid;
-  grid-template-columns: minmax(180px, 260px) 1fr;
+  /* The file list's width is the reader's (contract.md §5.2): the seat writes
+     it as a custom property, the separator beside it moves it. */
+  grid-template-columns: var(--dio-commit-files-width, 260px) auto minmax(0, 1fr);
   min-height: 0;
   flex: 1;
   border-top: 1px solid var(--dio-border);
 }
 
 .diorama-git-commit__files {
+  /* Both ways, like the sidebar's panes: a long path scrolls instead of
+     disappearing into an ellipsis. */
   overflow: auto;
+  min-width: 0;
   border-right: 1px solid var(--dio-border);
   padding: 6px 0;
 }
@@ -1565,6 +1618,8 @@ code {
 .diorama-search__results {
   flex: 1;
   min-height: 0;
+  /* Both ways: a long hit line is read by scrolling (see "Panes scroll both
+     ways" above). */
   overflow: auto;
   padding: 4px 0;
 }
@@ -1572,6 +1627,8 @@ code {
 .diorama-search__group {
   display: flex;
   align-items: center;
+  width: max-content;
+  min-width: 100%;
 }
 
 .diorama-search__group-toggle {
@@ -1589,6 +1646,8 @@ code {
 }
 
 .diorama-search__row {
+  width: max-content;
+  min-width: 100%;
   padding-left: 18px;
 }
 
@@ -1596,7 +1655,8 @@ code {
   display: flex;
   align-items: center;
   gap: 6px;
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   padding: 3px 8px;
   border: 0;
   background: none;
@@ -1612,15 +1672,12 @@ code {
 }
 
 .diorama-search__name {
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex: none;
   white-space: nowrap;
 }
 
 .diorama-search__dir {
   flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
   color: var(--dio-muted);
   font-size: 11px;
   white-space: nowrap;
@@ -1636,7 +1693,8 @@ code {
   display: flex;
   align-items: baseline;
   gap: 8px;
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   padding: 2px 8px 2px 18px;
   border: 0;
   background: none;
@@ -1655,8 +1713,7 @@ code {
 }
 
 .diorama-search__text {
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex: none;
   white-space: pre;
 }
 

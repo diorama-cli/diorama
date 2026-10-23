@@ -18,10 +18,19 @@
  * column shows only what is there.
  */
 import type { Context } from 'cordis'
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactElement } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type CSSProperties,
+  type ReactElement,
+} from 'react'
 import type { ChangeTreeNode, CommitDetail, DiffEntry, DiffResult, FileInfo, GitLogEntry, GitStatusEntry } from 'diorama-kernel'
 import { buildChangeTree, hasGit, type GitClient, type TabsService } from 'diorama-kernel/client'
-import { FileIcon, Icon, iconSvg, provideEntry, useKernel } from 'diorama-ui'
+import { FileIcon, Icon, iconSvg, provideEntry, Splitter, useKernel, usePaneSize } from 'diorama-ui'
 import type {} from 'diorama-plugin-slots'
 import type { CommitSeatProps, TabDiffProps } from 'diorama-plugin-slots'
 import {
@@ -1303,6 +1312,12 @@ function useHistory(git: GitClient): {
 /** The most commits this view asks for at once (the service caps at 500). */
 const MAX_LOG_LIMIT_PAGE = 500
 
+/** Where the commit seat's file-list width is remembered (`localStorage`). */
+export const COMMIT_FILES_WIDTH_KEY = 'diorama.git.commitFilesWidth'
+
+/** That list's width before the reader drags its edge (px). */
+export const COMMIT_FILES_DEFAULT_PX = 260
+
 /** When a commit was made, in the reader's locale (date + time, minute precision). */
 function formatWhen(at: number): string {
   const date = new Date(at)
@@ -1485,6 +1500,15 @@ function CommitSeat({ commit, repo }: CommitSeatProps) {
   const git = mount.git
   const [state, setState] = useState<{ status: string; detail?: CommitDetail; error?: string }>({ status: 'loading' })
   const [picked, setPicked] = useState<string | undefined>(undefined)
+  // The file list is a pane of its own, and its width is the reader's: a long
+  // path must be readable by dragging (or by scrolling) rather than truncated
+  // into an ellipsis (contract.md §5.2). Both hooks live above the early
+  // returns below — a hook after a conditional return changes the hook order.
+  const [filesWidth, setFilesWidth] = usePaneSize(COMMIT_FILES_WIDTH_KEY, COMMIT_FILES_DEFAULT_PX)
+  const body = useRef<HTMLDivElement | null>(null)
+  const previewFiles = (next: number): void => {
+    body.current?.style.setProperty('--dio-commit-files-width', `${next}px`)
+  }
   useEffect(() => {
     let live = true
     setState({ status: 'loading' })
@@ -1536,7 +1560,11 @@ function CommitSeat({ commit, repo }: CommitSeatProps) {
           改动的文件过多，只列出了一部分
         </div>
       )}
-      <div className="diorama-git-commit__body">
+      <div
+        ref={body}
+        className="diorama-git-commit__body"
+        style={{ '--dio-commit-files-width': `${filesWidth}px` } as CSSProperties}
+      >
         <div className="diorama-git-commit__files">
           <div className="diorama-changes__group">
             <span>{detail.files.length} 个文件</span>
@@ -1557,6 +1585,14 @@ function CommitSeat({ commit, repo }: CommitSeatProps) {
             </button>
           ))}
         </div>
+        <Splitter
+          side="start"
+          size={filesWidth}
+          onPreview={previewFiles}
+          onCommit={setFilesWidth}
+          label="调整文件列表宽度"
+          testId="git-commit-files-splitter"
+        />
         <div className="diorama-git-commit__panel">
           {file === undefined && (
             <div className="diorama-renderer__empty" role="status" data-testid="git-commit-empty">

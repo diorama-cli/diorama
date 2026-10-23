@@ -1096,6 +1096,15 @@ interface SidebarViewSpec {
 - **视图内部怎么画是视图自己的事**：git 的「变更」把 `status()` 的扁平行折成**目录树**
   （目录优先、单一子目录链合并成一行、展开状态属于该视图，不与文件树共享）。`ctx.git.status()`
   保持扁平（§3.2），折叠由视图完成。
+- **列表窗格必须横向可滚（v0.11，docs/m15/spec.md）**：一栏里的列表行按**内容**长
+  （`width: max-content; min-width: 100%`），名字元素**不收缩、不省略**；要读全就滚那一栏的
+  `overflow: auto`。**任何新视图 / 新列表窗格都照此办理**，不要把长名字截成省略号——截断掉的
+  往往正是读者在找的那一段。文件树、变更、历史、搜索、提交座位的文件清单是现有例子。
+- **可调宽的窗格用同一个原语（v0.11）**：宽度属于读者的偏好，用 `diorama-ui` 的
+  `Splitter` + `usePaneSize`（边界 160–720px、`localStorage` 记忆、方向键 / Home / End 可调），
+  不要在插件里各写一套指针处理。分隔条**自己占一个网格列**，不压在内容上；拖动期间只写 CSS
+  变量，松手才进 React state（否则整栏内容每帧重渲染）。现有的两处是左栏（`layout`）与提交
+  座位的文件清单（`git-changes`）。
 
 ### 5.1 `file.renderer` 匹配规则
 
@@ -1756,6 +1765,24 @@ RPC 广播 `{ topic: 'mount.state', payload: MountStatus }`。
 `log` 50/500、`blob` 8 MiB）、错误码表、`#diff` / `#history` 的 hash 语义、tab 的
 `(path, view)` 键、slot 清单。
 
+## 25. `0.0.2` 之后：可拖动的窗格与看得全的长名字（未发版，与 §20 同一档）
+
+> 2026-10-23。用户要求：**文件导航、diff 文件列表、git history 文件列表、commit 列表、搜索结果
+> 列表等窗格内容都不支持左右滑动，文件名一长就看不全；窗格也要支持鼠标拉动扩大缩小**，并要求
+> **以后实现类似窗格都要支持**。契约号不动（§6）：没有新增服务、没有改 `ctx.*` 与座位签名，
+> 变的是**页面怎么画一条栏**（§5.2 的规则）与 `diorama-ui` 的一个原语。
+
+| 条款 | `0.0.2` | 本档 |
+|---|---|---|
+| §5.2 列表窗格的横向滚动 | 未规定；各行 `width: 100%` + 名字 `text-overflow: ellipsis`，长名字只能看前半截 | 列表行按内容长（`max-content` + `min-width: 100%`）、名字不收缩不省略，窗格自己的 `overflow: auto` 横向滚；**新窗格一律照此办理** |
+| §5.2 窗格宽度 | 左栏固定 260px、提交座位的文件清单 `minmax(180px, 260px)`（docs/m4/spec.md §6.4 明写「未做拖拽」） | 两处都可拖：`diorama-ui` 的 `Splitter`（`role="separator"`，指针 + ← → / Home / End）+ `usePaneSize`（160–720px，`localStorage` 记忆） |
+| §5.2 拖动时的渲染 | — | 拖动期间只写 CSS 变量（`--dio-sidebar-width` / `--dio-commit-files-width`），松手才进 React state：整栏内容不跟着每帧重渲染 |
+| §5.2 偏好记在哪 | 无（宽度是常量） | `localStorage`：`diorama.layout.sidebarWidth`、`diorama.git.commitFilesWidth`（与 `diorama.theme` / `diorama.git.diffMode` 同一口径；`ctx.storage` 仍留给 K14） |
+| `diorama-ui` 的导出 | `Slot` / `useKernel` / `overlayStore` / `reveal` / 图标… | 另加 `Splitter`、`usePaneSize`、`clampPane`、`readPaneSize`、`storePaneSize`、`MIN_PANE_PX` / `MAX_PANE_PX` / `PANE_STEP_PX`（**不是**内核服务，是渲染原语） |
+
+**没有变的东西**：`ctx.*` 的全部签名、slot 清单与座位类型、RPC 与控制面协议、`diorama.toml`、
+URL / hash 语义、主题 token 表（新样式只用既有 token，无新 token）。
+
 ## 待定清单（v0.4 后仍 🔲）
 
 - [x] `ctx.git` 具体签名（只读：diff / status / log）— v0.5 定（§3.2）
@@ -1765,6 +1792,7 @@ RPC 广播 `{ topic: 'mount.state', payload: MountStatus }`。
 - [ ] 插件异步任务托管 API — 待定
 - [x] O8 的 diff 部分：v0.10 定了**三档读法**（行内 / 整文件单栏 / 新旧双栏）+ 变更块间导航，开关归渲染器头部（§23）；图片缩放、Markdown 源码/预览仍在 O8 里
 - [ ] URL 里是否记多 tab（刷新恢复整组）— 与 U10 一起定
+- [x] 窗格可拖动 / 长名字可横向滚动 — v0.11 定（§5.2、§25）
 - [ ] 外部插件的发现、bundle 校验、`--plugins-dir` — 最后一个里程碑
 - [ ] gateway 控制面事件的 CLI 消费者（`diorama ls --watch`）— 以后再定（协议已定，见 §7.3）
 - [ ] gateway 单点的 supervisor 兜底（崩溃自拉起，O6）— 以后再定
