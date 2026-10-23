@@ -385,7 +385,9 @@ test('terminal: a TTY that ends mid-menu is reported as ended, not as a choice',
 
 test('wizard: a menu picks a candidate, and the change is summarized', async () => {
   const lines: string[] = []
-  const answers = ['2', '', '1,2', '3', '2', '', '']
+  // host(menu) '2', port '', plugins(menu) '1,2', ignore(menu) '3',
+  // watch.enabled(menu) '2', debounceMs '', maxDirectories '', html.scripts(menu) ''.
+  const answers = ['2', '', '1,2', '3', '2', '', '', '']
   let index = 0
   const result = await runWizard(
     {},

@@ -72,7 +72,7 @@ scripts/                  生成器（图标表；`pnpm icons` 重新生成）
 | gateway 的 mount 表、端口、degraded 状态机 | `kernel/src/server/gateway.ts` |
 | 控制面协议（帧、方法、错误码） | `kernel/src/shared/control.ts`、`kernel/src/server/control.ts` |
 | CLI 子命令、`ls` 表格、后台 gateway | `cli/src/main.ts`、`cli/src/control-client.ts`、`cli/src/gateway.ts`、`cli/src/gateway-command.ts` |
-| `diorama.toml` | `kernel/src/server/config.ts` |
+| `diorama.toml` | `kernel/src/server/config.ts`；页面能读的那一段（`mountCtx.config`）在 `kernel/src/shared/config.ts`（`MountConfig`） |
 | 新内核服务的「每 mount 一份」接线 | `KERNEL_SERVICE_IDS`（plan.ts）、`MOUNT_SERVICES`（plugins.ts）、CLI 的 `PROXYABLE` 与 server 半边选择（`cli/src/gateway.ts`、`run.ts`、`plugins-server.ts`）——**四处一起改**，漏一处就是 RPC `ESERVICE` |
 | 契约版本 | `kernel/src/contract.ts`（**只在这里改**） |
 
@@ -113,6 +113,7 @@ scripts/                  生成器（图标表；`pnpm icons` 重新生成）
 | git 读到别的仓库 / 历史与文件树不是同一个目录 | 进程环境里的 `GIT_DIR` / `GIT_WORK_TREE` 优先于 `-C` | `runGit` 用 `gitEnvironment()`（丢掉所有 `GIT_*`）；别把 `process.env` 直接交给 git（m4/spec §13）|
 | 日志里健康 mount 反复 `degraded: ENOENT` / `EBINARY` → `recovered` | RPC 调用报的**回答码**被当成 mount 故障 | 内核错误表里的码都不 degrade；只有无码/未知码才算故障（`cli/src/gateway.ts` 的 `ANSWER_CODES`）|
 | HTML 预览「样式全没了」 | DOMPurify 默认**只消毒 `<body>`**，`<head>` 里的 `<style>` 被整段丢掉 | `WHOLE_DOCUMENT: true`，再把返回文档的 head/body 分别取出来（m4/spec §14）|
+| 页面读不到配置（`mountCtx.config` 是 `undefined`） | `MountHandle` 的 `config` 只在 `createMountHandle` 里从 `/plugin.json` 的 `config` 取；渲染器自己 `stat`/读字节，但**配置不是它取的** | 要新配置项：`EffectiveConfig` + `MountConfig`（`kernel/src/shared/config.ts`）+ `createMountHandle` 三处一起加，缺一处页面就退回默认（contract §28）|
 | `node --test` 报 `ERR_UNKNOWN_FILE_EXTENSION: .tsx` | Node 不认 `.tsx` | 单测只导入 `.ts`；把要测的纯函数从组件文件里拆出来（m4/spec §12）|
 | 「找不到成员 `mountCtx`」/ props 里还有 `bytes` | `FileRendererProps` 曾在内核与 slots 各有一份且漂移 | 只有内核一份；slots re-export 它。`export type {X} from` 后同文件不能再用 `X` |
 | e2e 里快捷键不生效（mac 上写 `Control+Alt+x`） | `mod` 在 macOS 上是 Meta | 测试用 `MOD = darwin ? 'Meta' : 'Control'`；别用裸 `Control` |

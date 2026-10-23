@@ -23,11 +23,13 @@ export { mimeOf, extensionOf } from '../shared/mime.ts'
 
 export {
   createMountHandle,
+  DEFAULT_MOUNT_CONFIG,
   type BootPlugin,
   type MountHandle,
   type MountInfo,
   type MountManifest,
 } from './mount.ts'
+export type { MountConfig } from '../shared/config.ts'
 export { createFsClient, FS_METHODS, type FsClient } from './fs.ts'
 export { createGitClient, GIT_METHODS, hasGit, type GitClient } from './git.ts'
 export { createSearchClient, SEARCH_METHODS, type SearchClient } from './search.ts'

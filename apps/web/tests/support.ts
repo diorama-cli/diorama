@@ -233,7 +233,9 @@ export const DEFAULT_CONFIG = {
   port: 0,
   plugins: ['slots', 'layout', 'file-tree', 'tabs', 'renderer-registry', 'plaintext', 'markdown', 'code', 'palette'],
   ignore: ['.git', 'node_modules'],
-  watch: { debounceMs: 300, enabled: true },
+  watch: { debounceMs: 300, enabled: true, maxDirectories: 64 },
+  git: { maxDepth: 3, maxRepos: 32 },
+  html: { scripts: false },
 }
 
 /** Send one control request and resolve with its result (or reject with its code). */

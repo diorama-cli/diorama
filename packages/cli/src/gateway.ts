@@ -439,7 +439,19 @@ function isEffectiveConfig(value: unknown): value is EffectiveConfig {
     watch !== null &&
     typeof watch === 'object' &&
     typeof watch.debounceMs === 'number' &&
-    typeof watch.enabled === 'boolean'
+    typeof watch.enabled === 'boolean' &&
+    // `html` decides what a preview runs (contract.md §5.1). A mount that does
+    // not send it is not a mount this gateway knows how to serve.
+    isHtmlConfig(record.html)
+  )
+}
+
+function isHtmlConfig(value: unknown): boolean {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    typeof (value as Record<string, unknown>).scripts === 'boolean'
   )
 }
 

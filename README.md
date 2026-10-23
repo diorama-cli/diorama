@@ -100,6 +100,13 @@ ignore = [".git", "node_modules"]   # 隐藏规则（gitignore 语法子集；�
 debounceMs = 300            # 文件事件合并窗口（0–60000）
 enabled = true              # false 时完全关闭 watch
 maxDirectories = 64         # 每个目录同时监听的目录数上限（1–4096）
+
+[git]
+maxDepth = 3                # 向下找仓库的层数（0–64）
+maxRepos = 32               # 一个挂载最多报多少个仓库（1–4096）
+
+[html]
+scripts = false             # HTML 预览是否默认执行页面脚本（默认 false：逐文件确认）
 ```
 
 ### 改配置：`diorama config`

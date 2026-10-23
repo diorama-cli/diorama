@@ -103,9 +103,10 @@ export function parseConfigValue(key: string, raw: string): unknown {
       return parseInteger(key, raw, 0, 60_000)
     case 'watch.maxDirectories':
       return parseInteger(key, raw, 1, 4096)
-    case 'watch.enabled': {
+    case 'watch.enabled':
+    case 'html.scripts': {
       const value = BOOLEANS[raw.trim().toLowerCase()]
-      if (value === undefined) throw new UsageError(`--watch.enabled must be true or false (got "${raw}")`)
+      if (value === undefined) throw new UsageError(`--${key} must be true or false (got "${raw}")`)
       return value
     }
     default:
@@ -183,7 +184,7 @@ function menuFor(field: WizardField, current: unknown, defaults: EffectiveConfig
     case 'boolean': {
       const value = String(current ?? field.fallback(defaults))
       return {
-        title: `watch.enabled — ${field.hint}`,
+        title: `${field.key} — ${field.hint}`,
         candidates: booleanCandidates(value === 'true'),
         multi: false,
         selected: [value],
@@ -250,6 +251,13 @@ const FIELDS: readonly WizardField[] = [
     hint: '1–4096',
     fallback: defaults => defaults.watch.maxDirectories,
     parse: raw => parseConfigValue('watch.maxDirectories', raw),
+  },
+  {
+    key: 'html.scripts',
+    hint: 'true = an HTML preview runs the page\'s scripts without asking',
+    fallback: defaults => defaults.html.scripts,
+    parse: raw => parseConfigValue('html.scripts', raw),
+    menu: 'boolean',
   },
 ]
 
@@ -666,6 +674,7 @@ Keys for set/unset:
   watch.enabled           --watch.enabled false
   watch.debounceMs        --watch.debounceMs 300
   watch.maxDirectories    --watch.maxDirectories 64
+  html.scripts            --html.scripts true   (an HTML preview runs its scripts)
 
 Where it writes:
   no --dir/--config       $DIORAMA_HOME/diorama.toml (the global default)

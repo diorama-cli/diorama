@@ -21,6 +21,8 @@ test('config: defaults match contract §4.1', () => {
   assert.equal(defaults.port, 0)
   assert.deepEqual(defaults.ignore, ['.git', 'node_modules'])
   assert.deepEqual(defaults.watch, { debounceMs: 300, enabled: true, maxDirectories: 64 })
+  // HTML previews do not run page scripts until asked (contract.md §5.1).
+  assert.deepEqual(defaults.html, { scripts: false })
   // Every built-in client plugin, in boot order (contract.md §1: the selection
   // is the boot order). `fs`/`git`/`search` are kernel services, not client
   // pieces (contract.md §3.1, §3.2, §3.9): they never appear in the page's
@@ -59,6 +61,8 @@ test('config: precedence is CLI > file > default', () => {
     watch: { debounceMs: 50, enabled: true, maxDirectories: 64 },
     // No `[git]` table either: repository discovery keeps its defaults.
     git: { maxDepth: 3, maxRepos: 32 },
+    // Nor an `[html]` table: the preview stays script-free.
+    html: { scripts: false },
   })
   // CLI wins field by field; `--all` empties the ignore list.
   const merged = mergeConfig(file, { port: 0, host: '127.0.0.1', all: true })
@@ -78,6 +82,20 @@ test('config: watch.maxDirectories is a 1–4096 integer, merged like every othe
       bad,
     )
   }
+})
+
+test('config: html.scripts is a boolean and merges like every other field', () => {
+  assert.equal(mergeConfig(parseConfigFile(['[html]', 'scripts = true'].join('\n'), 'h.toml')).html.scripts, true)
+  assert.equal(mergeConfig(parseConfigFile(['[html]', 'scripts = false'].join('\n'), 'h.toml')).html.scripts, false)
+  assert.throws(
+    () => parseConfigFile(['[html]', 'scripts = "yes"'].join('\n'), 'h.toml'),
+    /h\.toml: "html\.scripts" must be a boolean/,
+  )
+  assert.throws(() => parseConfigFile(['[html]', 'script = true'].join('\n'), 'h.toml'), /unknown key "html\.script"/)
+  // An empty table is dropped on the way out, like `[watch]` and `[git]`.
+  assert.equal(formatFileConfig({ html: {} }), '')
+  assert.equal(formatFileConfig({ html: { scripts: true } }), '[html]\nscripts = true\n')
+  assert.deepEqual(patchFileConfig({ html: { scripts: true } }, { 'html.scripts': undefined }), {})
 })
 
 test('config: a syntax error and unknown keys fail loud, naming the file', () => {
