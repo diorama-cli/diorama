@@ -5,6 +5,7 @@ lib/
 *.tsbuildinfo
 .diorama-verify/
 .diorama-verify-b/
+.pnpm-store/
 test-results/
 playwright-report/
 

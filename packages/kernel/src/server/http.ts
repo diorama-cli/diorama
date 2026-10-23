@@ -141,8 +141,26 @@ async function handleRequest(
   }
 
   if (pathname.startsWith('/plugins/')) {
+    const rest = pathname.slice('/plugins/'.length)
+    // `/plugins/<id>/<path>` is a **file the plugin ships beside its client
+    // half** (a vendored library's stylesheet and fonts, say). The half is a
+    // self-contained closure, so a piece that needs a runtime asset too big to
+    // bundle serves it from its own package instead of inlining it.
+    const slash = rest.indexOf('/')
+    if (slash !== -1) {
+      const id = rest.slice(0, slash)
+      const entry = options.clientEntries.get(id)
+      if (entry === undefined) {
+        sendError(res, 404, 'ENOENT', `plugin "${id}" is not in this mount's boot graph`)
+        return
+      }
+      // `serveStatic` refuses a path that escapes the directory it is given.
+      if (await serveStatic(dirname(entry), rest.slice(slash), res)) return
+      sendError(res, 404, 'ENOENT', `plugin "${id}" ships no asset "${rest.slice(slash + 1)}"`)
+      return
+    }
     // `/plugins/<id>.js` is the public URL; the file on disk may be `.cjs`.
-    const id = pathname.slice('/plugins/'.length).replace(/\.js$/, '')
+    const id = rest.replace(/\.js$/, '')
     const entry = options.clientEntries.get(id)
     if (entry === undefined) {
       sendError(res, 404, 'ENOENT', `plugin "${id}" is not in this mount's boot graph`)

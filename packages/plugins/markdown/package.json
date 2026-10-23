@@ -34,14 +34,16 @@
     "displayName": "Markdown"
   },
   "scripts": {
-    "build": "vite build && tsc -p tsconfig.emit.json",
+    "build": "vite build && node scripts/vendor.mjs && tsc -p tsconfig.emit.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "cordis": "4.0.0-rc.11",
     "diorama-kernel": "workspace:*",
-    "react": "^19.3.1",
-    "marked": "^18.1.1"
+    "katex": "^0.16.47",
+    "marked": "^18.1.1",
+    "mermaid": "^11.17.2",
+    "react": "^19.3.1"
   },
   "peerDependencies": {
     "react": "^19.0.0"

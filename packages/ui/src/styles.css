@@ -545,11 +545,111 @@ body.diorama-resizing {
   font: 12px var(--dio-font);
 }
 
+/* The document and its outline share the content box (contract.md §5.1): the
+   rail is a column *inside the tab*, not a view of the left column — the
+   headings belong to this file, and the column is shared by every tab.
+
+   The pair is **centred as one block**. Left to itself the article keeps its
+   860px reading measure and everything else is a right-hand gutter, which on a
+   wide screen pins the text to the left edge and leaves the rail stranded in
+   the middle of the empty space. Centring the pair spends the extra width on
+   two equal margins instead. */
+.diorama-markdown-body {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  min-height: 100%;
+}
+
 .diorama-markdown {
+  /* `0 1 860px`: the reading measure is fixed, but it may **shrink** — a content
+     box narrower than article + rail (a 1024px window leaves 764px) must take
+     the width out of the text, never push the rail past the right edge. */
+  flex: 0 1 860px;
+  min-width: 0;
   max-width: 860px;
   padding: 16px 24px 64px;
   line-height: 1.65;
   font-size: 14px;
+}
+
+/* The rail sits on the right, sticks to the top while the article scrolls, and
+   is a column of its own so a long heading never squeezes the text.
+
+   It is deliberately narrow (180px) and set one step down in size: it is a
+   *map* of the document, read at a glance, not a second column of prose. */
+.diorama-outline {
+  position: sticky;
+  top: 0;
+  flex: 0 0 auto;
+  width: 180px;
+  max-height: 100vh;
+  overflow-y: auto;
+  margin-left: 8px;
+  padding: 16px 8px 24px 12px;
+  border-left: 1px solid var(--dio-border);
+}
+
+.diorama-outline__title {
+  padding: 0 0 6px 8px;
+  color: var(--dio-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+/* A row sizes to its content and never shrinks its name (contract.md §5.2):
+   the rail scrolls sideways rather than hiding the part being looked for. */
+.diorama-outline__row {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  padding: 2px 8px;
+  border: 0;
+  border-left: 2px solid transparent;
+  background: none;
+  color: var(--dio-muted);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.diorama-outline__row:hover {
+  color: var(--dio-text);
+  background: var(--dio-hover);
+}
+
+/* The section being read: the one whose heading is at the top of the view. */
+.diorama-outline__row--current {
+  border-left-color: var(--dio-accent);
+  color: var(--dio-text);
+}
+
+.diorama-outline__row[data-depth='1'] {
+  font-weight: 600;
+}
+
+/* A narrow content area has no room for two columns: the rail goes above the
+   text rather than squeezing it, and stops sticking. (Measured on the content
+   box, not the window: a 260px column plus its splitter is not available to the
+   article.) */
+@media (max-width: 900px) {
+  .diorama-markdown-body--outlined {
+    flex-direction: column-reverse;
+  }
+
+  .diorama-outline {
+    position: static;
+    width: auto;
+    max-height: none;
+    margin: 12px 24px 0;
+    padding: 8px 0;
+    border-left: 0;
+    border-bottom: 1px solid var(--dio-border);
+  }
 }
 
 .diorama-markdown h1,
@@ -631,6 +731,66 @@ body.diorama-resizing {
 /* A heading's `id` is a link target: leave room when scrolled to. */
 .diorama-markdown [id] {
   scroll-margin-top: 8px;
+}
+
+/* Math (KaTeX) and diagrams (Mermaid), contract.md §5.1.
+
+   The parser leaves a placeholder carrying the source (`data-math` /
+   `data-mermaid`) and the piece replaces its content once the library loads;
+   until then the placeholder shows the escaped source, which is honest and
+   never blank. KaTeX ships its own stylesheet (fonts included) from the
+   piece's package — nothing here may recolour it, so only layout is styled. */
+.diorama-markdown .diorama-math {
+  font-family: var(--dio-mono);
+  font-size: 0.95em;
+}
+
+.diorama-markdown .diorama-math--block {
+  display: block;
+  margin: 0.9em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  text-align: center;
+}
+
+/* KaTeX draws the formula inline-block; on a narrow page it scrolls rather
+   than forcing the article wide. */
+.diorama-markdown .diorama-math--block .katex-display {
+  margin: 0;
+}
+
+.diorama-markdown .diorama-mermaid {
+  margin: 0 0 0.9em;
+  padding: 8px 10px;
+  border: 1px solid var(--dio-border);
+  border-radius: 6px;
+  background: var(--dio-panel);
+  /* A diagram is wider than the column more often than not. */
+  overflow-x: auto;
+}
+
+.diorama-markdown .diorama-mermaid[data-state='rendered'] {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.diorama-markdown .diorama-mermaid svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+/* The source stays legible: it is what the reader fixes when Mermaid refuses
+   a diagram, and what the document says before the library arrives. */
+.diorama-markdown .diorama-mermaid__source {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--dio-muted);
+  font-size: 12px;
 }
 
 /* Code piece (M1) */

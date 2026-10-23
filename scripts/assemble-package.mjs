@@ -63,6 +63,14 @@ for (const id of ids) {
   if (!existsSync(clientFile)) throw new Error(`${id}: client entry ${clientEntry} is missing (run "pnpm build")`)
   cpSync(clientFile, join(to, clientEntry))
   process.stdout.write(`  plugins/${id}/${clientEntry}\n`)
+  // A half may also ship files *beside* it (a vendored library's stylesheet and
+  // fonts, contract.md §5.1). `lib/vendor/` is the only such directory today;
+  // the browser asks for it under `/plugins/<id>/vendor/`.
+  const vendor = join(from, 'lib/vendor')
+  if (existsSync(vendor)) {
+    cpSync(vendor, join(to, 'lib/vendor'), { recursive: true })
+    process.stdout.write(`  plugins/${id}/lib/vendor/\n`)
+  }
 }
 
 /**

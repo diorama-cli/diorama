@@ -218,7 +218,10 @@ function ViewSwitcher({
             data-testid="sidebar-view"
             onClick={() => onPick(key)}
           >
-            {view.icon === undefined ? (
+            {view.icon === undefined || view.icon === '' ? (
+              // No artwork: an external piece that authored none, or a page
+              // that installed no icon table — `iconSvg` returns `''` there
+              // (contract.md §5.2). An empty span would be an invisible button.
               <span aria-hidden="true">{title.slice(0, 1)}</span>
             ) : (
               // Inline SVG authored by the piece that owns the view.
