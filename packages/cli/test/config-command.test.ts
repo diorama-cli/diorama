@@ -96,6 +96,9 @@ test('config value grammar: booleans accept the usual spellings, nothing else', 
   for (const raw of ['true', 'yes', 'on', '1']) assert.equal(parseConfigValue('watch.enabled', raw), true)
   for (const raw of ['false', 'no', 'off', '0']) assert.equal(parseConfigValue('watch.enabled', raw), false)
   assert.throws(() => parseConfigValue('watch.enabled', 'maybe'), /must be true or false/)
+  // `html.scripts` is the same boolean grammar (contract.md §5.1).
+  assert.equal(parseConfigValue('html.scripts', 'on'), true)
+  assert.throws(() => parseConfigValue('html.scripts', 'maybe'), /--html\.scripts must be true or false/)
 })
 
 test('config value grammar: unknown keys are rejected with the known list', () => {
@@ -114,7 +117,7 @@ test('wizard: Enter keeps a field, a typed value replaces it, "-" clears it', as
   const seen: string[] = []
   const result = await runWizard(
     { port: 4000, ignore: ['dist'] },
-    scripted(['', '8080', '', '-', '2', '', '']),
+    scripted(['', '8080', '', '-', '2', '', '', '']),
     { defaults: defaultConfig(), out: message => seen.push(message) },
   )
   assert.deepEqual(result.config, {
@@ -136,8 +139,8 @@ test('wizard: Enter keeps a field, a typed value replaces it, "-" clears it', as
 test('wizard: a value the file would reject re-asks instead of aborting', async () => {
   const seen: string[] = []
   // host(menu) '', port 'eighty' then '9090', plugins(menu) '', ignore(menu) '',
-  // watch.enabled(menu) '', debounce '', maxDirectories ''.
-  const answers = ['', 'eighty', '9090', '', '', '', '', '']
+  // watch.enabled(menu) '', debounce '', maxDirectories '', html.scripts(menu) ''.
+  const answers = ['', 'eighty', '9090', '', '', '', '', '', '']
   let index = 0
   const questions: string[] = []
   const result = await runWizard(
@@ -163,7 +166,7 @@ test('wizard: a value the file would reject re-asks instead of aborting', async 
 })
 
 test('wizard: nothing typed writes nothing', async () => {
-  const result = await runWizard({ port: 4000 }, scripted(['', '', '', '', '', '', '']), {
+  const result = await runWizard({ port: 4000 }, scripted(['', '', '', '', '', '', '', '']), {
     defaults: defaultConfig(),
     out: () => {},
   })
@@ -204,6 +207,7 @@ test('wizard: numeric fields ask for a number; only listed fields open a menu', 
     'watch.enabled — false = no file watching at all',
     '  watch.debounceMs [300] (default, 0–60000): ',
     '  watch.maxDirectories [64] (default, 1–4096): ',
+    "html.scripts — true = an HTML preview runs the page's scripts without asking",
   ])
   assert.equal(result.changed, false)
 })
@@ -258,7 +262,7 @@ test('wizard: drawing goes through the raw sink, so a redraw replaces a frame', 
     input.send('\x1b[B')
     await until(lines, text => text.split('host — where the page listens').length > 2)
     // Then keep every field, and decline the write once the preview asks.
-    for (const key of ['\r', '\r', '\r', '\r', '\r', '\r', '\r', 'n\r']) {
+    for (const key of ['\r', '\r', '\r', '\r', '\r', '\r', '\r', '\r', 'n\r']) {
       input.send(key)
       await new Promise(done => setImmediate(done))
     }

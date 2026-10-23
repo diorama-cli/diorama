@@ -934,6 +934,9 @@ maxDirectories = 64         # 每个目录同时监听的目录数上限（§3.1
 maxDepth = 3                # 向下找仓库的层数（§3.2）；0–64
 maxRepos = 32               # 一个挂载最多报多少个仓库；1–4096
 # ignore = ["node_modules", "dist"]   # 走查时剪掉的目录；缺省 = 上面的 ignore
+
+[html]
+scripts = false             # HTML 预览是否默认执行页面脚本（§5.1）
 ```
 
 | 字段 | 类型 | 默认 | 说明 |
@@ -948,6 +951,7 @@ maxRepos = 32               # 一个挂载最多报多少个仓库；1–4096
 | `git.maxDepth` | integer 0–64 | `3` | 从挂载根向下找 `.git` 的层数；0 = 只看挂载根（§3.2） |
 | `git.maxRepos` | integer 1–4096 | `32` | 一个挂载最多报多少个仓库；到上限时 `repos()` 的 `truncated` 为 true |
 | `git.ignore` | string[] | 同 `ignore` | 走查时剪掉的目录；缺省沿用 `ignore`（即 `.git` + `node_modules`） |
+| `html.scripts` | boolean | `false` | HTML 预览是否**默认执行**页面脚本（§5.1）；`false` = 逐文件确认后才执行 |
 
 **优先级：CLI > `diorama.toml` > 默认值。**
 
@@ -1197,6 +1201,10 @@ interface FileRendererProps {
   **没有** `.html` / `.htm`，§5.1 rule 2）。只用预读的 `text`，不发任何请求。**两种显示方式**
   （按钮在渲染器自己的头部，不是工具栏，O8），状态属于渲染器实例（一个 tab 座位一个）：
   1. **预览**（缺省）：
+     - **起始阶段由 `[html] scripts` 决定**（§4.1）：`false`（缺省）从**样式阶段**开始，
+       `true` 时页面若含脚本就直接从**脚本阶段**开始（等于替读者按了「执行脚本」一次）。
+       无论哪种，**提示条都在**，随时可「停止执行」回到样式阶段；没有脚本的页面永远是样式阶段
+       （没有可确认的东西）。
      - **样式阶段**（缺省）：页面的 CSS 全部保留——`<style>`、`style=` 属性、外部样式表
        （`style-src 'unsafe-inline' https: http:`），外部图片与字体同样放行
        （`img-src` / `font-src` 含 `https: http:`）。**脚本不执行**：CSP 没有 `script-src`，frame 是
@@ -1207,12 +1215,14 @@ interface FileRendererProps {
        `allow-same-origin`：页面脚本能跑，但读不到本页、本页的 cookie 与文件。
      - **确认**：页面含脚本（`<script>`、`on*=` 或 `javascript:`）时，预览上方出现提示条
        「此页面含脚本，预览中未执行 · 执行脚本并预览」；确认后同一位置变为「已执行页面脚本」+
-       「停止执行」。**信任只属于渲染器实例**：换文件、换 tab、刷新页面都回到未确认。
+       「停止执行」。**信任只属于渲染器实例**：换文件、换 tab、刷新页面都回到「`[html] scripts`
+       给的起始阶段」，上一份文件的「停止执行」不跟着走。
      - 消毒（样式阶段）用 `WHOLE_DOCUMENT`：DOMPurify 不带它时**只处理 `<body>`**，页面放在 `<head>`
        里的 `<style>` 会被整段丢掉（v0.6 修：这就是「CSS 没加载」）。
   2. **源码**：文件的原文用 `<pre>` 显示（转义为文本，不解释）。没有 `html` 插件时 `.html` 落到兜底
      `plaintext`（普通文本），**不**回到 `code`。
-  同一 tab 换成另一个文件时回到**预览**且**未确认**（深链、刷新恢复都是“打开一个页面”）。
+  同一 tab 换成另一个文件时回到**预览**、**起始阶段按 `[html] scripts`**（深链、刷新恢复都是
+  “打开一个页面”）。
   **不使用 blob URL**：`srcdoc` 是内联文档，不需要在本站 origin 上开一个 URL。
   边界：**预览会执行读者确认过的页面脚本**——只读承诺覆盖的是 `ctx.fs` / `ctx.git`（本工具从不写
   被浏览的目录），不覆盖页面自身的脚本行为；脚本阶段不携 `allow-same-origin` 正是为了让页面脚本
@@ -1885,6 +1895,37 @@ URL / hash 语义、主题 token 表（新样式只用既有 token，无新 toke
   （一个写错的公式不该让整段消失）。两者都只接收**消毒后**的元素内容。
 - **发布**：`scripts/assemble-package.mjs` 把 `lib/vendor/` 一起带进 CLI 包，否则浏览器在那里
   会 404（`/plugins/markdown/vendor/…` 找不到）。
+## 28. `[html] scripts`：预览要不要默认执行页面脚本（未发版，与 §20、§27 同一档）
+
+> 2026-10-23。契约号不动（§6）：没有新增服务、没有改 `ctx.*` 的签名、**没有加座位**；变的是
+> **§4.1 的一张新表**（`[html] scripts`）与 **§5.1 里 HTML 预览的起始阶段**，以及
+> **`MountHandle` 上多出的 `config`**（页面读得懂的那一段配置）。
+
+| 条款 | 本档之前 | 本档 |
+|---|---|---|
+| §4.1 `diorama.toml` | `host` / `port` / `plugins` / `ignore` / `[watch]` / `[git]` | 另加 `[html] scripts`（boolean，默认 `false`） |
+| §4.1 下发到页面 | `/plugin.json` 带整个 `EffectiveConfig`，但**没有页面读它** | 不变（仍然带整个），但页面**有了一处读法**：`mountCtx.config` |
+| §5.1 HTML 预览的起始阶段 | 恒为**样式阶段**，脚本要逐文件确认 | `scripts = true` 时**含脚本的页面直接进脚本阶段**；提示条仍在，可「停止执行」 |
+| §5.1 无脚本的页面 | 样式阶段 | **不变**（没有可确认的东西，配置不改变它） |
+| §5.1 换文件 / 刷新 | 回到「预览、未确认」 | 回到「预览、配置给的起始阶段」（上一份文件的「停止执行」不跟着走） |
+
+**没有变的东西**：`file.renderer` 的匹配规则与回退链、两个阶段的 CSP 与 sandbox（脚本阶段仍然
+**没有** `allow-same-origin`）、消毒策略、错误码表、slot 清单。默认值 `false` 让「打开一个 HTML
+文件」这件事保持原来的安全语义：**配置是读者显式放宽的，不是默认给的**。
+
+细则：
+
+- **页面怎么拿到它**：`createMountHandle` 从 `/plugin.json` 的 `config` 里取出 `MountConfig`
+  那一段（目前只有 `html.scripts`），挂在 `mountCtx.config` 上；服务端没给（单测、旧清单）时
+  用 `DEFAULT_MOUNT_CONFIG`，与内核 `defaultConfig()` 的值一致。类型在 `shared/config.ts`
+  （没有 Cordis、没有 React），由 `diorama-kernel` 与 `diorama-kernel/client` 各导出一次。
+- **只管「起始」**：读者点「停止执行」之后不会被配置拽回脚本阶段——配置回答「打开时怎样」，
+  不回答「读者刚刚点了什么」。
+- **写它**：`diorama config set --html.scripts true`、`diorama config unset html.scripts`；
+  交互式里是一个 true/false 菜单。写到哪个文件仍是 §4.2 的规则（默认 `$DIORAMA_HOME/diorama.toml`）。
+- **gateway 的校验**：`mount` 请求的 `config` 现在要求带 `html.scripts`（`isEffectiveConfig`），
+  少一个字段就是 `EBADREQUEST`——与 `watch.*` 一样，配置是 CLI 合成后整份交过去的。
+
 ## 待定清单（v0.4 后仍 🔲）
 
 - [x] `ctx.git` 具体签名（只读：diff / status / log）— v0.5 定（§3.2）

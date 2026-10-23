@@ -5,6 +5,7 @@
  * copy of this module; the handle itself travels through the page bridge, so
  * nothing here is shared module state (docs/m0/spec.md §10.3).
  */
+import type { MountConfig } from '../shared/config.ts'
 import { createFsClient, type FsClient } from './fs.ts'
 import { createGitClient, type GitClient } from './git.ts'
 import { createRpcClient, rpcUrl, type RpcClient } from './rpc.ts'
@@ -34,6 +35,11 @@ export interface MountManifest extends MountInfo {
   kernel: string
   /** Kernel contract version; checked against the shell's build. */
   contract?: string
+  /**
+   * The mount's effective configuration (contract.md §4.1). The server sends
+   * the whole `EffectiveConfig`; the page reads the slice in `MountConfig`.
+   */
+  config?: MountConfig
   plugins: BootPlugin[]
 }
 
@@ -53,9 +59,18 @@ export interface MountHandle extends MountInfo {
    * so a page that shows search always has it).
    */
   search: SearchClient
+  /**
+   * The mount's configuration as the page sees it (contract.md §4.1): the
+   * fields a piece may act on. Read-only; defaults apply when the server sent
+   * none (a unit test, an older `/plugin.json`).
+   */
+  config: MountConfig
   /** The RPC channel: escape hatch plus event subscription (contract.md §4). */
   rpc: RpcClient
 }
+
+/** The page's defaults, matching `defaultConfig()` on the server (contract.md §4.1). */
+export const DEFAULT_MOUNT_CONFIG: MountConfig = { html: { scripts: false } }
 
 /** Build the page handle from the boot manifest. */
 export function createMountHandle(manifest: MountManifest): MountHandle {
@@ -68,6 +83,9 @@ export function createMountHandle(manifest: MountManifest): MountHandle {
     fs: createFsClient(rpc),
     git: createGitClient(rpc),
     search: createSearchClient(rpc),
+    // Copied, not shared: a piece must not be able to edit the page's defaults
+    // by writing to the handle.
+    config: { html: { scripts: manifest.config?.html?.scripts ?? DEFAULT_MOUNT_CONFIG.html.scripts } },
     rpc,
   }
 }

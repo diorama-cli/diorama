@@ -7,6 +7,7 @@ import {
   frameSandbox,
   hasScript,
   previewDocument,
+  previewStage,
   type PreviewStage,
 } from '../src/policy.ts'
 
@@ -73,6 +74,17 @@ test('html: the header counts lines and sizes', () => {
   assert.equal(formatSize(12), '12 字节')
   assert.equal(formatSize(2048), '2.0 KiB')
   assert.equal(formatSize(3 * 1024 * 1024), '3.0 MiB')
+})
+
+test('html: [html] scripts = true only moves a page that has scripts', () => {
+  // The default (untrusted) is the styles stage either way.
+  assert.equal(previewStage(false, true), 'styles')
+  assert.equal(previewStage(false, false), 'styles')
+  // Confirmed (or configured) runs the scripts stage — but only for a page
+  // that actually has one: there is nothing to run in a script-free page, and
+  // the scripts stage skips the sanitiser.
+  assert.equal(previewStage(true, true), 'scripts')
+  assert.equal(previewStage(true, false), 'styles')
 })
 
 test('html: every stage names a sandbox and a policy', () => {

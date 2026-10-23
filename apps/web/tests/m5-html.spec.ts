@@ -147,6 +147,44 @@ test('html: another file in the same tab starts in preview, unconfirmed', async 
     .contentFrame().locator('p')).toHaveText('two')
 })
 
+test('html: [html] scripts = true opens the preview already running the page scripts', async ({ page: browser }) => {
+  directory = fixture(
+    { 'site/styled.html': new TextDecoder().decode(STYLED), 'diorama.toml': '[html]\nscripts = true\n' },
+  )
+  server = await startDiorama(directory.root)
+  await browser.goto(`${server.url}~/site/styled.html`)
+
+  // The mount asked for scripts: the preview starts in the scripts stage, and
+  // the bar offers to stop rather than to run.
+  await expect(browser.getByTestId('html')).toHaveAttribute('data-mode', 'preview')
+  await expect(browser.getByTestId('html')).toHaveAttribute('data-stage', 'scripts')
+  const frame = browser.getByTestId('html-frame')
+  const sandbox = (await frame.getAttribute('sandbox')) ?? ''
+  expect(sandbox).toContain('allow-scripts')
+  expect(sandbox).not.toContain('allow-same-origin')
+  const inner = browser.frameLocator('[data-testid="html-frame"]')
+  await expect(inner.locator('body')).toHaveAttribute('data-ran', 'yes')
+  // It still cannot reach the viewer (no same-origin), and the reader can stop it.
+  expect(await browser.evaluate(() => (window as unknown as { __escaped__?: boolean }).__escaped__ === true)).toBe(false)
+  await expect(browser.getByTestId('html-script-revoke')).toBeVisible()
+  await browser.getByTestId('html-script-revoke').click()
+  await expect(browser.getByTestId('html')).toHaveAttribute('data-stage', 'styles')
+})
+
+test('html: [html] scripts = true leaves a page without scripts in the styles stage', async ({ page: browser }) => {
+  directory = fixture({
+    'site/plain.html': new TextDecoder().decode(pageOf('<p id="p" style="color: rgb(9, 9, 9)">plain</p>')),
+    'diorama.toml': '[html]\nscripts = true\n',
+  })
+  server = await startDiorama(directory.root)
+  await browser.goto(`${server.url}~/site/plain.html`)
+  // Nothing to confirm: the page stays sanitised, with its styles.
+  await expect(browser.getByTestId('html')).toHaveAttribute('data-stage', 'styles')
+  await expect(browser.getByTestId('html-script-notice')).toHaveCount(0)
+  expect(await browser.frameLocator('[data-testid="html-frame"]').locator('#p')
+    .evaluate(node => getComputedStyle(node).color)).toBe('rgb(9, 9, 9)')
+})
+
 test('html: without the html piece a page falls back to plaintext source', async ({ page: browser }) => {
   directory = fixture({}, { 'site/plain.html': pageOf('<p>plain</p>') })
   server = await startDiorama(directory.root, [

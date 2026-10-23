@@ -44,6 +44,18 @@ const CSP_SCRIPTS = [
   `media-src data: blob: ${REMOTE}`,
 ].join('; ')
 
+/**
+ * The stage a preview is in, given what the reader (or `[html] scripts`, §4.1)
+ * asked for and whether the page carries a script at all.
+ *
+ * A page with no script has nothing to confirm: it stays in the styles stage
+ * (sanitised) even when the mount runs scripts by default — the scripts stage
+ * exists to run scripts, and it deliberately skips the sanitiser.
+ */
+export function previewStage(trusted: boolean, scripted: boolean): PreviewStage {
+  return trusted && scripted ? 'scripts' : 'styles'
+}
+
 /** The frame's `sandbox` per stage: never `allow-scripts` with `allow-same-origin`. */
 export function frameSandbox(stage: PreviewStage): string {
   return stage === 'scripts' ? 'allow-scripts' : 'allow-same-origin'

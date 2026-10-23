@@ -10,7 +10,10 @@
  *   A page that carries a script gets a bar saying so with a "run scripts"
  *   button; confirming rebuilds the frame with `allow-scripts` and no
  *   `allow-same-origin`, so the page runs but cannot reach this page, its
- *   cookies or its files.
+ *   cookies or its files. `[html] scripts = true` in `diorama.toml`
+ *   (contract.md §4.1, §5.1) makes that confirmation the **default** for every
+ *   file: the preview opens already running the page's scripts, and the same
+ *   bar offers "stop" instead of "run".
  * - **source**: the file's own text in a `<pre>`, escaped (never interpreted).
  *   `code` does not claim `.html` (contract §5.1 rule 2: one owner per
  *   extension), so the source view lives here.
@@ -26,7 +29,7 @@ import type {} from 'diorama-plugin-slots'
 import type { FileRendererProps } from 'diorama-kernel'
 import { FileIcon, Icon, provideEntry } from 'diorama-ui'
 import { formatSize, HTML_EXTENSIONS, lineCount, type HtmlMode } from './frame.ts'
-import { documentTitle, hasScript, previewDocument, type PreviewStage } from './policy.ts'
+import { documentTitle, hasScript, previewDocument, previewStage, type PreviewStage } from './policy.ts'
 
 export const name = 'html'
 export const inject = ['slots']
@@ -68,21 +71,25 @@ function bodyOf(markup: string): string {
   return match?.[1] ?? markup
 }
 
-export function HtmlRenderer({ file, text }: FileRendererProps) {
+export function HtmlRenderer({ file, text, mountCtx }: FileRendererProps) {
   // The seat keeps the component mounted across file changes; another file in
-  // the same tab starts from the top: preview, and scripts unconfirmed.
+  // the same tab starts from the top: preview, and the scripts stage the mount
+  // asked for (`[html] scripts`, contract.md §4.1 — off unless configured).
+  // Defensive: a handle built outside `createMountHandle` (a test, an older
+  // shell) may carry no configuration — the safe default is "do not run".
+  const startTrusted = mountCtx.config?.html?.scripts ?? false
   const [state, setState] = useState<{ path: string; mode: HtmlMode; trusted: boolean }>({
     path: file.path,
     mode: 'preview',
-    trusted: false,
+    trusted: startTrusted,
   })
-  const current = state.path === file.path ? state : { path: file.path, mode: 'preview' as HtmlMode, trusted: false }
+  const current = state.path === file.path ? state : { path: file.path, mode: 'preview' as HtmlMode, trusted: startTrusted }
   const setMode = (mode: HtmlMode): void => setState({ ...current, mode })
   const trust = (): void => setState({ ...current, mode: 'preview', trusted: true })
   const revoke = (): void => setState({ ...current, trusted: false })
 
-  const stage: PreviewStage = current.trusted ? 'scripts' : 'styles'
   const scripted = text !== undefined && hasScript(text)
+  const stage: PreviewStage = previewStage(current.trusted, scripted)
   const document = useMemo(() => {
     if (text === undefined) return ''
     // The scripts stage must keep the page's script elements: sanitising would

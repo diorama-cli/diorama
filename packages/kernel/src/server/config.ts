@@ -43,6 +43,11 @@ export interface EffectiveConfig {
     /** Patterns pruned from the walk; absent = the mount's `ignore`. */
     ignore?: string[]
   }
+  /** HTML preview behaviour (contract.md §5.1). */
+  html: {
+    /** Whether the preview runs a page's scripts without asking, per file. */
+    scripts: boolean
+  }
 }
 
 /** What a `diorama.toml` may say (every field optional). */
@@ -53,6 +58,7 @@ export interface FileConfig {
   ignore?: string[]
   watch?: { debounceMs?: number; enabled?: boolean; maxDirectories?: number }
   git?: { maxDepth?: number; maxRepos?: number; ignore?: string[] }
+  html?: { scripts?: boolean }
 }
 
 /** Where the configuration came from. */
@@ -97,6 +103,9 @@ export function defaultConfig(): EffectiveConfig {
     ignore: [...DEFAULT_IGNORE],
     watch: { debounceMs: 300, enabled: true, maxDirectories: 64 },
     git: { maxDepth: DEFAULT_GIT_MAX_DEPTH, maxRepos: DEFAULT_GIT_MAX_REPOS },
+    // Scripts stay off until the reader says so, per file (contract.md §5.1):
+    // an HTML file is not trusted because it was opened.
+    html: { scripts: false },
   }
 }
 
@@ -106,9 +115,10 @@ export function dioramaHome(env: NodeJS.ProcessEnv = process.env): string {
   return home !== undefined && home !== '' ? resolve(home) : join(homedir(), '.diorama')
 }
 
-const ROOT_KEYS = new Set(['host', 'port', 'plugins', 'ignore', 'watch', 'git'])
+const ROOT_KEYS = new Set(['host', 'port', 'plugins', 'ignore', 'watch', 'git', 'html'])
 const WATCH_KEYS = new Set(['debounceMs', 'enabled', 'maxDirectories'])
 const GIT_KEYS = new Set(['maxDepth', 'maxRepos', 'ignore'])
+const HTML_KEYS = new Set(['scripts'])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -189,6 +199,18 @@ export function validateFileConfig(raw: unknown, where: string): FileConfig {
     if (raw.git.ignore !== undefined) git.ignore = stringArray(raw.git.ignore, `${where}: "git.ignore"`)
     out.git = git
   }
+  if (raw.html !== undefined) {
+    if (!isRecord(raw.html)) throw new ConfigError(`${where}: "html" must be a table`)
+    for (const key of Object.keys(raw.html)) {
+      if (!HTML_KEYS.has(key)) throw new ConfigError(`${where}: unknown key "html.${key}" (known: ${[...HTML_KEYS].join(', ')})`)
+    }
+    const html: NonNullable<FileConfig['html']> = {}
+    if (raw.html.scripts !== undefined) {
+      if (typeof raw.html.scripts !== 'boolean') throw new ConfigError(`${where}: "html.scripts" must be a boolean`)
+      html.scripts = raw.html.scripts
+    }
+    out.html = html
+  }
   return out
 }
 
@@ -250,6 +272,9 @@ export function mergeConfig(file: FileConfig, cli: ResolveOptions['cli'] = {}): 
       maxRepos: file.git?.maxRepos ?? base.git.maxRepos,
       ...(file.git?.ignore === undefined ? {} : { ignore: [...file.git.ignore] }),
     },
+    html: {
+      scripts: file.html?.scripts ?? base.html.scripts,
+    },
   }
 }
 
@@ -265,13 +290,15 @@ export function resolveConfig(options: ResolveOptions): { config: EffectiveConfi
  * The keys a written file may carry, in the order they are emitted: the order
  * of the example in contract.md §4.1, so a written file reads like the docs.
  */
-export const CONFIG_KEYS = ['host', 'port', 'plugins', 'ignore', 'watch', 'git'] as const
+export const CONFIG_KEYS = ['host', 'port', 'plugins', 'ignore', 'watch', 'git', 'html'] as const
 export const WATCH_CONFIG_KEYS = ['debounceMs', 'enabled', 'maxDirectories'] as const
 export const GIT_CONFIG_KEYS = ['maxDepth', 'maxRepos', 'ignore'] as const
+export const HTML_CONFIG_KEYS = ['scripts'] as const
 
 export type ConfigKey = (typeof CONFIG_KEYS)[number]
 export type WatchConfigKey = (typeof WATCH_CONFIG_KEYS)[number]
 export type GitConfigKey = (typeof GIT_CONFIG_KEYS)[number]
+export type HtmlConfigKey = (typeof HTML_CONFIG_KEYS)[number]
 
 /**
  * One field to write. `watch.*` is addressed as a dotted key (`watch.enabled`),
@@ -283,7 +310,7 @@ export type ConfigPatch = Record<string, unknown>
 export function readConfigValue(config: FileConfig, key: string): unknown {
   const [head, tail] = key.split('.')
   if (tail !== undefined) {
-    if (head !== 'watch' && head !== 'git') return undefined
+    if (head !== 'watch' && head !== 'git' && head !== 'html') return undefined
     return (config[head] as Record<string, unknown> | undefined)?.[tail]
   }
   return (config as Record<string, unknown>)[head as string]
@@ -301,10 +328,17 @@ export function patchFileConfig(base: FileConfig, patch: ConfigPatch, where = 'c
   const next: Record<string, unknown> = { ...base }
   if (next.watch !== undefined) next.watch = { ...(next.watch as Record<string, unknown>) }
   if (next.git !== undefined) next.git = { ...(next.git as Record<string, unknown>) }
+  if (next.html !== undefined) next.html = { ...(next.html as Record<string, unknown>) }
   for (const [key, value] of Object.entries(patch)) {
     const [head = '', tail] = key.split('.')
     if (tail !== undefined) {
-      const table = head === 'watch' ? WATCH_CONFIG_KEYS : head === 'git' ? GIT_CONFIG_KEYS : undefined
+      const table = head === 'watch'
+        ? WATCH_CONFIG_KEYS
+        : head === 'git'
+          ? GIT_CONFIG_KEYS
+          : head === 'html'
+            ? HTML_CONFIG_KEYS
+            : undefined
       if (table === undefined || !(table as readonly string[]).includes(tail)) {
         throw new ConfigError(`${where}: unknown key "${key}" (known: ${knownKeys().join(', ')})`)
       }
@@ -327,9 +361,10 @@ export function patchFileConfig(base: FileConfig, patch: ConfigPatch, where = 'c
 /** Every addressable key, for messages: `host, port, plugins, ignore, watch.debounceMs, …`. */
 export function knownKeys(): string[] {
   return [
-    ...CONFIG_KEYS.filter(key => key !== 'watch' && key !== 'git'),
+    ...CONFIG_KEYS.filter(key => key !== 'watch' && key !== 'git' && key !== 'html'),
     ...WATCH_CONFIG_KEYS.map(key => `watch.${key}`),
     ...GIT_CONFIG_KEYS.map(key => `git.${key}`),
+    ...HTML_CONFIG_KEYS.map(key => `html.${key}`),
   ]
 }
 
@@ -361,6 +396,12 @@ export function formatFileConfig(config: FileConfig): string {
     if (value !== undefined) git[key] = Array.isArray(value) ? [...value] : value
   }
   if (Object.keys(git).length > 0) table.git = git
+  const html: Record<string, unknown> = {}
+  for (const key of HTML_CONFIG_KEYS) {
+    const value = config.html?.[key]
+    if (value !== undefined) html[key] = value
+  }
+  if (Object.keys(html).length > 0) table.html = html
   if (Object.keys(table).length === 0) return ''
   // smol-toml already ends with a newline; a file should not end with a blank line.
   return `${stringifyToml(table).replace(/\n+$/, '')}\n`
