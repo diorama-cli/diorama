@@ -13,9 +13,12 @@
 | 3 | [docs/features.md](docs/features.md) | **有什么**：能力清单与档位（✅ / v1 / 未来 / 不做） |
 | 4 | 最近一档的 `docs/mN/spec.md` | **怎么实现的** + **§6.2 的坑**（见下面 §5） |
 
-最近一档是 [docs/m18/spec.md](docs/m18/spec.md)（侧栏可收起：切换器脚下有「收起 / 展开」按钮与
+最近一档是 [docs/m19/spec.md](docs/m19/spec.md)（diff 的单栏「整个文件」与双栏「新旧对照」按文件语言
+上色：引擎由 `code` 半边发布到页面全局 `__diorama_highlight__`，`git-changes` 读它，每行一个完整
+HTML 片段；行内那档是 git 的文本，不上色）；
+上一档是 [docs/m18/spec.md](docs/m18/spec.md)（侧栏可收起：切换器脚下有「收起 / 展开」按钮与
 `mod+b`，收起后只剩 36px 的一竖条、面板隐藏不卸载，收起是**偏好**、与"选了哪个视图"正交）；
-上一档是 [docs/m17/spec.md](docs/m17/spec.md)（Markdown 的文档内大纲、KaTeX 公式、Mermaid 图表，
+更早是 [docs/m17/spec.md](docs/m17/spec.md)（Markdown 的文档内大纲、KaTeX 公式、Mermaid 图表，
 以及 `/plugins/<id>/<path>` 这条运行时文件路由；大纲栏在宽屏上与文章**整体居中**）。
 
 `docs/plan.md` 是**阶段性排期**，会退役；不要把它当长期真源，也不要在新代码里引用它。
@@ -150,6 +153,10 @@ scripts/                  生成器（图标表；`pnpm icons` 重新生成）
 | 侧栏「收起」做成宽度 0，收起后点不到展开 | 宽度归零把切换器一起带走了，页面上再没有能展开它的控件 | 收起后仍可见的那一竖条（`SIDEBAR_RAIL_PX`）里放展开按钮；收起 ≠ 选了一个空视图（两个 store）；收起时 `Splitter` **不挂载**（m18/spec §6 坑 1–3）|
 | 折叠状态下点视图图标「什么都没发生」 | 改的是 `display: none` 的面板 | 折叠时切换器与 `sidebar.show*` 都先展开再切视图（m18/spec §6 坑 4）；**活动图标点击 = 收起**（activity bar 手势，m18/spec §3）|
 | 点了「收起」没反应 | 看的是**旧页面**（layout 半边带 hash 缓存），代码已更新 | 半边 URL 是 `?h=<hash>` 缓存的：重建后**刷新页面**（或重启 gateway）再验 |
+| diff 的整文件 / 双栏里「有的行没颜色、有的行整行变色」 | highlight.js 的块注释、多行字符串是**一个** span；按 `\n` 直接切会留下没闭合的标签 | 引擎按行输出：断行处闭合、下一行重开（`splitHighlightedHtml` 的开标签栈）；读法的每一行拿到的都是完整片段（m19/spec §6 坑 1）|
+| 双栏里配对行（`-` 与 `+` 同行）的新增格没有颜色 | 把"左侧是删除"当成了"整行只有删除" | 左格取成段的删除文本，**右格各自**按自己的行号从文件里取（m19/spec §6 坑 2）|
+| 用了页面全局的引擎之后一直重渲染 / 「正在读取…」 | 把引擎**对象**当 `useSyncExternalStore` 的快照 | 快照必须是**版本号**（数字）；引擎本身在订阅之后另读（m19/spec §6 坑 3）|
+| 想让 A 半边用 B 半边的表 / 库 | 半边是自足闭包，import 会把库复制进第二个 bundle，两份表还会漂 | 跨半边共享的只读能力由发布方写到页面全局（`__diorama_highlight__` / `__diorama_layout__` / `__diorama_reveal__`），另一方读它（contract §8、m19/spec §6 坑 4）|
 | 侧栏视图按钮是个空白方块 | `iconSvg` 在没装图标表的页面返回 `''`；切换器原先只判 `undefined` | 新按钮图标先进 `scripts/generate-icons.mjs` 的 `BUTTON_ICONS`、跑 `pnpm icons`，再重建**页面壳**（表由壳安装）；`icon` 为空也要退回标题首字（m17/spec §6 坑 9）|
 
 ## 6. 边界（不要越过的线）

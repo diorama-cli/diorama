@@ -45,6 +45,13 @@ export {
 } from './splitpane.ts'
 export { Splitter, type SplitterProps } from './splitter.tsx'
 export {
+  highlighter,
+  highlighterStore,
+  publishHighlighter,
+  useHighlighter,
+  type Highlighter,
+} from './highlight.ts'
+export {
   baseName,
   fileGlyph,
   FALLBACK_FILE,

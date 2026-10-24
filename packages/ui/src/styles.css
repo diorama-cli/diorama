@@ -1247,6 +1247,46 @@ body.diorama-resizing {
   padding-left: 6px;
 }
 
+/* Token colours inside a diff row (the whole-file and side-by-side readers).
+   The row's tone still owns the background and the default text colour; a
+   token only overrides the colour of the run it marks, the same six tokens the
+   `code` renderer uses, so a file reads the same in both places. The prefix of
+   the inline reader's unified diff is not source code and stays plain. */
+.diorama-diff__code .hljs-comment,
+.diorama-diff__code .hljs-quote {
+  color: var(--dio-syn-comment);
+}
+
+.diorama-diff__code .hljs-keyword,
+.diorama-diff__code .hljs-selector-tag,
+.diorama-diff__code .hljs-literal,
+.diorama-diff__code .hljs-type {
+  color: var(--dio-syn-keyword);
+}
+
+.diorama-diff__code .hljs-string,
+.diorama-diff__code .hljs-regexp {
+  color: var(--dio-syn-string);
+}
+
+.diorama-diff__code .hljs-number,
+.diorama-diff__code .hljs-attr,
+.diorama-diff__code .hljs-variable,
+.diorama-diff__code .hljs-template-variable {
+  color: var(--dio-syn-number);
+}
+
+.diorama-diff__code .hljs-title,
+.diorama-diff__code .hljs-name,
+.diorama-diff__code .hljs-section {
+  color: var(--dio-syn-title);
+}
+
+.diorama-diff__code .hljs-built_in,
+.diorama-diff__code .hljs-symbol {
+  color: var(--dio-syn-builtin);
+}
+
 .diorama-diff__line--add {
   background: var(--dio-diff-add-bg);
   color: var(--dio-diff-add-text);

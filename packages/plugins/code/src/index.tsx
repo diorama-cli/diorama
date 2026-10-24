@@ -7,139 +7,23 @@
  *
  * Highlighting is done in the browser from the text the kernel pre-read; the
  * markup comes from highlight.js itself (no repository HTML is interpreted).
+ *
+ * This half also **publishes the engine** on the page (`__diorama_highlight__`,
+ * see `diorama-ui`'s `highlight.ts`): the diff readers of `git-changes` colour
+ * their rows with the same languages, and a client half cannot import another
+ * half (each is its own build). One registration list, two readers.
  */
 import type { Context } from 'cordis'
 import { useMemo, useRef } from 'react'
-import { provideEntry, useRevealLine } from 'diorama-ui'
-import hljs from 'highlight.js/lib/core'
-import bash from 'highlight.js/lib/languages/bash'
-import c from 'highlight.js/lib/languages/c'
-import cpp from 'highlight.js/lib/languages/cpp'
-import csharp from 'highlight.js/lib/languages/csharp'
-import css from 'highlight.js/lib/languages/css'
-import diff from 'highlight.js/lib/languages/diff'
-import go from 'highlight.js/lib/languages/go'
-import ini from 'highlight.js/lib/languages/ini'
-import java from 'highlight.js/lib/languages/java'
-import javascript from 'highlight.js/lib/languages/javascript'
-import json from 'highlight.js/lib/languages/json'
-import kotlin from 'highlight.js/lib/languages/kotlin'
-import php from 'highlight.js/lib/languages/php'
-import python from 'highlight.js/lib/languages/python'
-import ruby from 'highlight.js/lib/languages/ruby'
-import rust from 'highlight.js/lib/languages/rust'
-import sql from 'highlight.js/lib/languages/sql'
-import swift from 'highlight.js/lib/languages/swift'
-import typescript from 'highlight.js/lib/languages/typescript'
-import xml from 'highlight.js/lib/languages/xml'
-import yaml from 'highlight.js/lib/languages/yaml'
+import { provideEntry, publishHighlighter, useRevealLine } from 'diorama-ui'
 import type {} from 'diorama-plugin-slots'
 import type { FileRendererProps } from 'diorama-kernel'
+import { CODE_EXTENSIONS, CODE_LANGUAGES, escapeHtml, highlight, highlightLines, languageOf } from './highlight.ts'
 
 export const name = 'code'
 export const inject = ['slots']
 
-/** Extension → highlight.js language id. */
-export const CODE_LANGUAGES: Readonly<Record<string, string>> = {
-  js: 'javascript',
-  mjs: 'javascript',
-  cjs: 'javascript',
-  jsx: 'javascript',
-  ts: 'typescript',
-  mts: 'typescript',
-  cts: 'typescript',
-  tsx: 'typescript',
-  json: 'json',
-  jsonc: 'json',
-  map: 'json',
-  css: 'css',
-  xml: 'xml',
-  // No `svg`: an SVG is a picture. The image piece claims it through the
-  // `image/*` mime tier, and an ext entry here would beat that tier (contract
-  // §5.1 rule 2). Seeing SVG source needs the source/preview switch (O8, not v1).
-  // No `html` / `htm` either: the html piece owns them (contract §5.1 rule 2)
-  // and shows the source itself when the preview is switched off.
-  py: 'python',
-  go: 'go',
-  rs: 'rust',
-  java: 'java',
-  kt: 'kotlin',
-  swift: 'swift',
-  rb: 'ruby',
-  php: 'php',
-  c: 'c',
-  h: 'c',
-  cpp: 'cpp',
-  cc: 'cpp',
-  hpp: 'cpp',
-  cs: 'csharp',
-  sh: 'bash',
-  bash: 'bash',
-  zsh: 'bash',
-  yml: 'yaml',
-  yaml: 'yaml',
-  toml: 'ini',
-  ini: 'ini',
-  sql: 'sql',
-  diff: 'diff',
-  patch: 'diff',
-}
-
-const REGISTERED: Record<string, Parameters<typeof hljs.registerLanguage>[1]> = {
-  bash,
-  c,
-  cpp,
-  csharp,
-  css,
-  diff,
-  go,
-  ini,
-  java,
-  javascript,
-  json,
-  kotlin,
-  php,
-  python,
-  ruby,
-  rust,
-  sql,
-  swift,
-  typescript,
-  xml,
-  yaml,
-}
-
-for (const [language, definition] of Object.entries(REGISTERED)) {
-  hljs.registerLanguage(language, definition)
-}
-
-/**
- * Extensions this renderer claims: every extension that maps to a language.
- * Markdown is deliberately absent — `.md` belongs to the `markdown` renderer,
- * and without it the file falls back to `plaintext`, not to highlighted source.
- */
-export const CODE_EXTENSIONS = Object.keys(CODE_LANGUAGES)
-
-function extensionOf(path: string): string {
-  const name = path.slice(path.lastIndexOf('/') + 1)
-  const dot = name.lastIndexOf('.')
-  return dot <= 0 ? '' : name.slice(dot + 1).toLowerCase()
-}
-
-/** Highlight one file's text; falls back to escaped plain text. */
-export function highlight(text: string, path: string): { html: string; language: string } {
-  const language = CODE_LANGUAGES[extensionOf(path)]
-  if (language === undefined) return { html: escapeHtml(text), language: 'plaintext' }
-  try {
-    return { html: hljs.highlight(text, { language }).value, language }
-  } catch {
-    return { html: escapeHtml(text), language: 'plaintext' }
-  }
-}
-
-function escapeHtml(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-}
+export { CODE_EXTENSIONS, CODE_LANGUAGES, escapeHtml, highlight, highlightLines, languageOf }
 
 function Code({ file, text }: FileRendererProps) {
   const result = useMemo(() => highlight(text ?? '', file.path), [text, file.path])
@@ -174,6 +58,12 @@ function Code({ file, text }: FileRendererProps) {
 }
 
 export function apply(ctx: Context) {
+  // The engine every diff reader of this page colours its rows with. Disposing
+  // this piece takes it back off the page (another publisher is left alone).
+  ctx.effect(
+    () => publishHighlighter({ languageOf, lines: highlightLines }),
+    'code: publish the highlighter',
+  )
   provideEntry(ctx, {
       id: 'code:renderer',
       name: 'file.renderer',

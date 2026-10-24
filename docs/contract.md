@@ -1076,7 +1076,7 @@ scripts = false             # HTML 预览是否默认执行页面脚本（§5.1�
 | `--dio-text` / `--dio-muted` | 正文 / 弱化文字 |
 | `--dio-accent` / `--dio-danger` / `--dio-danger-bg` | 强调（链接、活动态）/ 危险 / 危险底 |
 | `--dio-hover` / `--dio-hover-strong` / `--dio-hover-faint` / `--dio-selected` / `--dio-selected-soft` / `--dio-accent-underline` / `--dio-backdrop` / `--dio-shadow` / `--dio-keycap` | 复合表面：行 hover、选中、活动 tab 下划线、覆盖层背板与阴影、键帽 |
-| `--dio-syn-comment` / `--dio-syn-keyword` / `--dio-syn-string` / `--dio-syn-number` / `--dio-syn-title` / `--dio-syn-builtin` | 语法高亮六色（`code` piece） |
+| `--dio-syn-comment` / `--dio-syn-keyword` / `--dio-syn-string` / `--dio-syn-number` / `--dio-syn-title` / `--dio-syn-builtin` | 语法高亮六色（`code` piece；diff 的整文件 / 双栏读法用**同一组**，§30） |
 | `--dio-added-bg` / `--dio-diff-add-*` / `--dio-diff-del-*` / `--dio-diff-hunk-*` | diff 的加 / 删 / hunk 行（`git-changes`） |
 | `--dio-status-modified` / `--dio-status-added` | 变更视图的 M / A 徽标色 |
 | `--dio-hit-bg` / `--dio-reveal-bg` / `--dio-reveal-border` | 搜索命中与跳转高亮带（§3.9） |
@@ -1148,6 +1148,12 @@ interface SidebarViewSpec {
   （`width: max-content; min-width: 100%`），名字元素**不收缩、不省略**；要读全就滚那一栏的
   `overflow: auto`。**任何新视图 / 新列表窗格都照此办理**，不要把长名字截成省略号——截断掉的
   往往正是读者在找的那一段。文件树、变更、历史、搜索、提交座位的文件清单是现有例子。
+- **diff 的读法（v0.10 / v0.14）**：`seats.git-diff` 与 `seats.git-commit` 里的同一个 `DiffView`
+  给三档读法（「改动」行内 /「整个文件」单栏 /「新旧对照」双栏，§23）。**后两档画的是源码，要按文件的
+  语言上色**（§30）：颜色来自 `code` piece 发布到页面的引擎（页面全局 `__diorama_highlight__`），
+  六色仍是 `--dio-syn-*`（§5.3）；「改动」那档是 git 自己的文本（`+` 前缀、`@@` 头），**不**上 token 色。
+  引擎回答的是**每行一个完整 HTML 片段**（跨行 token 在断行处闭合、下一行重开），因为这两个读法
+  一行一行画（折带、行号槽、双栏里一侧留空）。没有引擎时画纯文本，不空白也不报错。
 - **可调宽的窗格用同一个原语（v0.11）**：宽度属于读者的偏好，用 `diorama-ui` 的
   `Splitter` + `usePaneSize`（边界 160–720px、`localStorage` 记忆、方向键 / Home / End 可调），
   不要在插件里各写一套指针处理。分隔条**自己占一个网格列**，不压在内容上；拖动期间只写 CSS
@@ -1981,6 +1987,45 @@ URL / hash 语义、主题 token 表（新样式只用既有 token，无新 toke
   再重建**页面壳**（表是壳装的，不是半边装的，docs/m17/spec.md §6 坑 9）。页面没有图标表时
   （外部宿主、单测）按钮退回标题首字，与切换器同一条规则。
 
+## 30. `0.0.2` 之后：diff 的两种内容读法加语法高亮（未发版，与 §20、§23、§29 同一档）
+
+> 2026-10-24。用户要求：**diff 单栏 / 双栏模式都增加语法高亮**。契约号不动（§6）：没有新增服务、
+> 没有改 `ctx.*` 的签名、没有加座位；`seats.git-diff` / `seats.git-commit` 的 props 不变（§5）。
+> 变的是 **§5.2 里两个内容读法画什么**，以及 `diorama-ui` 多了一个页面级的引擎位置。
+
+| 条款 | 本档之前 | 本档 |
+|---|---|---|
+| §5.2 「整个文件」（单栏） | 每行一种色调（未改动 / 新增 / 删除），正文是纯文本 | 正文按文件的语言上色：关键字、字符串、注释、数字、函数名、内建符号六类，**用与 `code` 渲染器同一套 token**（§5.3）；行的色调（背景 + 默认文字色）不变，token 只覆盖它标出的那一段 |
+| §5.2 「新旧对照」（双栏） | 同上，两栏都纯文本 | 两栏各自上色。未改动的行两栏是**同一份**文件文本，所以一份标记两栏共用；被删除的格子不在当前文件里，取 diff 自己的文本 |
+| §5.2 「改动」（行内） | 着色的 unified diff | **不变**：那是 git 自己的文本（`+` 前缀、`@@` 头），不是源码，不给它上 token 色 |
+| 引擎从哪来 | — | `code` piece 在 boot 时把引擎**发布到页面**（`__diorama_highlight__`，与 `__diorama_reveal__` / `__diorama_overlay__` / `__diorama_layout__` 同一口径的页面全局），`git-changes` 从那里读。**半边不能 import 另一个半边**（每个半边是自足的闭包，§8），也不能为此开内核服务：语言表与配色是页面 UI 状态 |
+| 引擎的形状 | — | 两件事，都是纯函数：`languageOf(path)`（路径 → 语言，`plaintext` 表示"不认识"）与 `lines(text, path)`（一段文本 → **每行一个 HTML 片段**）。第二个是关键：diff 一行一行画（折带、行号槽、双栏里一侧留空），**跨行断开的 span 必须在这一行闭合、下一行重开** |
+| 没有引擎时 | — | 画纯文本（与上一档完全一样），不是空白也不是报错：`code` 不在 boot 图里、或还没发布时，`git-changes` 照常可读 |
+| 不认识的语言 | — | `languageOf` 回答 `plaintext`，文本转义后原样画（不解释、不丢行） |
+
+**没有变的东西**：`ctx.git` 全部方法与上限（§3.2）、`#diff` / `#history` 语义（§3.8）、
+三档读法与它们之间的导航（§23）、模式偏好与折带（§5.2）、slot 清单（§5）、
+`FileRendererProps`（§5.1）、RPC 协议、错误码表。
+
+细则：
+
+- **为什么不是 `ctx.highlight`**：这是"这段文本该是什么颜色"，纯页面的事，没有 IO、没有跨 mount
+  语义、没有可被别的插件依赖的服务面。开一个内核服务还要在四处接线（`KERNEL_SERVICE_IDS`、
+  `MOUNT_SERVICES`、CLI 的 `PROXYABLE`、server 半边选择），换来的只是同一份 highlight.js 在服务端
+  再跑一遍——而 `ctx.fs` 已经是只读文本，颜色在浏览器里算就够了。
+- **为什么发布者可以是 `code`**：语言表与语言注册只该有一份（`.ts` 是 TypeScript、`.md` 不是源码，
+  这些判断在 `code` 里已经是既成事实）。`git-changes` 不再复制一张表，两份表也就不会漂。
+- **发布是版本化的**：读者先于发布者渲染时（boot 顺序是插件图的，不是这里的）要在引擎到达后重画；
+  所以页面全局带一个版本号，组件用 `useSyncExternalStore` 读它（快照是数字，不是对象）。
+- **每一行都是完整的 HTML**：一条块注释、一个多行字符串在 highlight.js 里是**一个** token；直接按
+  `\n` 切开会让某一行留着没闭合的 `<span>`（画出来就是后一行整行变色，或者干脆没有闭合标签）。
+  引擎在断行处闭合再重开，代价是每行多两个标签。
+- **删除行成段上色**：被删除的行不在当前文件里（只有 diff 里的那份文本），所以一段连续的删除行
+  **一起**交给引擎再切回来——这样它们之间的多行字符串仍是同一个构造。双栏里与被删除行配对的新增
+  格子仍从文件里取（它在文件里），各自独立上色。
+- **颜色只用 token**（§5.3）：六个 `--dio-syn-*` 一个不多、light / dark 成对，所以暗色下与
+  `code` 渲染器一模一样。
+
 ## 待定清单（v0.4 后仍 🔲）
 
 - [x] `ctx.git` 具体签名（只读：diff / status / log）— v0.5 定（§3.2）
@@ -1992,6 +2037,8 @@ URL / hash 语义、主题 token 表（新样式只用既有 token，无新 toke
 - [ ] URL 里是否记多 tab（刷新恢复整组）— 与 U10 一起定
 - [x] 窗格可拖动 / 长名字可横向滚动 — v0.11 定（§5.2、§25）
 - [x] 侧栏可收起（只剩切换器）— v0.13 定（§5.2、§3.7、§29）
+- [x] diff 的单栏 / 双栏加语法高亮 — v0.14 定（§5.2、§30）：引擎由 `code` 发布到页面，
+  `git-changes` 读它；行内那档是 git 的文本，不上色
 - [x] RPC 断线自动重连与订阅重放 — v0.11 定（§4、§26）
 - [x] Markdown 的大纲 / 公式 / 图表 — v0.12 定（§5.1、§27）；`$` 的判定、Mermaid 的主题跟随、
   以及「大纲放在文档里而不是侧栏」也一并定了
