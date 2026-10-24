@@ -74,6 +74,8 @@ const BUTTON_ICONS = {
   'regex': 'regex',
   'reload': 'reload',
   'search': 'search',
+  'sidebar-fold': 'layout-sidebar-left-collapse',
+  'sidebar-unfold': 'layout-sidebar-left-expand',
   'stop': 'player-stop',
   'text-case': 'letter-case',
   'warning': 'alert-triangle',

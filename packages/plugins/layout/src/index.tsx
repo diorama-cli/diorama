@@ -18,10 +18,11 @@
 import type { Context } from 'cordis'
 import type { MountHandle } from 'diorama-kernel'
 import type { CommandsService } from 'diorama-kernel/client'
-import { useLayoutEffect, useRef, useSyncExternalStore, type CSSProperties, type ReactElement } from 'react'
-import { provideEntry, Slot, Splitter, useKeyedSeat, usePaneSize } from 'diorama-ui'
+import { useCallback, useLayoutEffect, useRef, useSyncExternalStore, type CSSProperties, type ReactElement } from 'react'
+import { iconSvg, provideEntry, Slot, Splitter, useKeyedSeat, usePaneSize } from 'diorama-ui'
 import type {} from 'diorama-plugin-slots'
 import type { SidebarViewProps, SlotEntry } from 'diorama-plugin-slots'
+import { readFolded, SIDEBAR_RAIL_PX, storeFolded } from './sidebar.ts'
 
 export const name = 'layout'
 export const inject = ['slots']
@@ -39,6 +40,18 @@ export const SIDEBAR_WIDTH_KEY = 'diorama.layout.sidebarWidth'
 
 /** The width the column starts at, before the reader drags its edge (px). */
 export const SIDEBAR_DEFAULT_PX = 260
+
+/**
+ * The two glyphs of the fold button (`sidebar.toggleFolded`): the page's button
+ * table, like every other switcher icon (docs/m7/spec.md §3). They are read at
+ * module load, so a page with no table gets `''` and the button falls back to
+ * its title's first character (contract.md §5.2).
+ */
+export const SIDEBAR_FOLD_ICON = iconSvg('sidebar-fold')
+export const SIDEBAR_UNFOLD_ICON = iconSvg('sidebar-unfold')
+
+/** The command that folds / unfolds the column (contract.md §3.7). */
+export const SIDEBAR_FOLD_COMMAND = 'sidebar.toggleFolded'
 
 /**
  * Which view the column shows. Page-level state, not a component's: the
@@ -113,6 +126,11 @@ class ViewChoice {
     return this.known.has(key)
   }
 
+  /** Whether the column currently has any view at all (a command's `when`). */
+  any(): boolean {
+    return this.known.size > 0
+  }
+
   show(view: string): void {
     if (this.chosen === view) return
     this.chosen = view
@@ -129,6 +147,65 @@ const viewChoice = new ViewChoice()
 
 /** The store's snapshot, as a stable function (see `ViewChoice.getSnapshot`). */
 const viewVersion = (): number => viewChoice.getSnapshot()
+
+/**
+ * Whether the column is folded (contract.md §5.2, v0.13).
+ *
+ * A store of its own, not a field of `ViewChoice`: folding is **not** choosing
+ * a view. The reader folds the column while reading, unfolds it, and expects
+ * the view they had — and a view command (or the URL hash) must not silently
+ * unfold it either. Same shape as `ViewChoice` (a number as the snapshot, a
+ * bound getter) so a component can subscribe to it the same way.
+ */
+class FoldChoice {
+  private folded: boolean
+  private version = 0
+  private readonly listeners = new Set<() => void>()
+
+  constructor() {
+    // Read once, at module load: this is a preference, and a reload should come
+    // back the way the reader left it (a blocked storage means "open").
+    this.folded = readFolded()
+  }
+
+  getSnapshot = (): number => this.version
+
+  subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener)
+    return () => {
+      this.listeners.delete(listener)
+    }
+  }
+
+  /** Whether the column is folded right now. */
+  get(): boolean {
+    return this.folded
+  }
+
+  getVersion(): number {
+    return this.version
+  }
+
+  /** Fold / unfold, and remember it. */
+  toggle(): boolean {
+    this.set(!this.folded)
+    return this.folded
+  }
+
+  /** Set the state (the button and the command both end up here). */
+  set(folded: boolean): void {
+    if (this.folded === folded) return
+    this.folded = folded
+    storeFolded(folded)
+    this.version++
+    for (const listener of [...this.listeners]) listener()
+  }
+}
+
+const foldChoice = new FoldChoice()
+
+/** The store's snapshot, as a stable function (see `FoldChoice.getSnapshot`). */
+const foldVersion = (): number => foldChoice.getSnapshot()
 
 /**
  * Publish the column's choice on the page. Each half is its own build, so a
@@ -189,14 +266,23 @@ function useSidebarViews(): readonly SlotEntry<'sidebar.views'>[] {
   return useKeyedSeat('sidebar.views') as readonly SlotEntry<'sidebar.views'>[]
 }
 
-/** The view switcher: one button per registered view, in entry order. */
+/**
+ * The view switcher: one button per registered view, in entry order.
+ *
+ * An icon is also the column's fold handle (contract.md §5.2): the one that is
+ * already showing folds the column, the others switch to their view. The
+ * tooltip says so, because "press the active icon again" is not something a
+ * reader can guess from the artwork alone.
+ */
 function ViewSwitcher({
   views,
   active,
+  folded,
   onPick,
 }: {
   views: readonly SlotEntry<'sidebar.views'>[]
   active: string | undefined
+  folded: boolean
   onPick(view: string): void
 }) {
   return (
@@ -205,13 +291,16 @@ function ViewSwitcher({
         const key = view.key ?? ''
         const title = view.title ?? key
         const selected = key === active
+        // The tooltip names the fold gesture for the icon that is already up
+        // (the accessible name stays the view's own: `aria-label` below).
+        const hint = selected ? (folded ? title + '（点击展开侧栏）' : title + '（再点收起侧栏）') : title
         return (
           <button
             key={view.id}
             type="button"
             role="tab"
             aria-selected={selected}
-            title={title}
+            title={hint}
             aria-label={title}
             className={`diorama-sidebar__view${selected ? ' diorama-sidebar__view--active' : ''}`}
             data-view={key}
@@ -241,11 +330,56 @@ function SidebarView({ view, active }: { view: SlotEntry<'sidebar.views'>; activ
 }
 
 /**
+ * The fold button, at the foot of the switcher: it sits where the switcher
+ * already is, so folding the column does not take its own control away with it
+ * (contract.md §5.2). `aria-expanded` says which way it goes, `aria-controls`
+ * points at the panes it hides.
+ */
+function FoldButton({ folded, onToggle }: { folded: boolean; onToggle(): void }) {
+  const label = folded ? '展开侧栏' : '收起侧栏'
+  const icon = folded ? SIDEBAR_UNFOLD_ICON : SIDEBAR_FOLD_ICON
+  return (
+    <button
+      type="button"
+      className="diorama-sidebar__view diorama-sidebar__fold"
+      aria-expanded={!folded}
+      aria-controls="diorama-sidebar-panes"
+      title={label}
+      aria-label={label}
+      data-testid="sidebar-fold"
+      onClick={onToggle}
+    >
+      {icon === '' ? (
+        // No icon table on this page (an external host, a unit test): the
+        // switcher's own fallback rule — the title's first character — rather
+        // than an invisible button (contract.md §5.2).
+        <span aria-hidden="true">{label.slice(0, 1)}</span>
+      ) : (
+        <span aria-hidden="true" dangerouslySetInnerHTML={{ __html: icon }} />
+      )}
+    </button>
+  )
+}
+
+/**
  * The left column: the switcher plus one pane per view. The active view is
  * layout's own state; a choice that is no longer registered falls back to the
  * first view, so removing a piece never leaves the column blank.
+ *
+ * The column can be **folded** (contract.md §5.2): the switcher stays, the
+ * panes go. The state is a preference of the reader's, held here and remembered
+ * across reloads; the frame reads it for the width, so it is passed down rather
+ * than owned by `SplitFrame` alone.
  */
-function Sidebar({ views }: { views: readonly SlotEntry<'sidebar.views'>[] }) {
+function Sidebar({
+  views,
+  folded,
+  onToggleFold,
+}: {
+  views: readonly SlotEntry<'sidebar.views'>[]
+  folded: boolean
+  onToggleFold(): void
+}) {
   // The column's own state (view choice) is below; its **width** belongs to the
   // frame that lays it out (see `SplitFrame`).
   // The store's version is the snapshot: the chosen id itself is read separately,
@@ -261,13 +395,47 @@ function Sidebar({ views }: { views: readonly SlotEntry<'sidebar.views'>[] }) {
   viewChoice.register(keys)
   // `active` drives the views' `props.active`; it is computed on every render
   // from the store, so a command's change reaches the views in the same pass.
-  const setChosen = (view: string): void => viewChoice.show(view)
   const active = chosen !== undefined && keys.includes(chosen) ? chosen : (keys.includes(DEFAULT_VIEW) ? DEFAULT_VIEW : keys[0])
+  /**
+   * An icon of the switcher, pressed (contract.md §5.2, v0.13). The gesture is
+   * the activity bar's: **the icon that is already showing folds the column**,
+   * any other icon switches to its view and unfolds — that is what the reader
+   * means by "click the left-hand icon" when the column is in the way, and a
+   * folded column only has its icons to offer, so pressing one there has to
+   * unfold rather than change a pane nobody can see.
+   */
+  const setChosen = (view: string): void => {
+    if (folded) {
+      viewChoice.show(view)
+      foldChoice.set(false)
+      return
+    }
+    if (view === active) {
+      foldChoice.set(true)
+      return
+    }
+    viewChoice.show(view)
+  }
   if (views.length === 0) return null
   return (
-    <aside className="diorama-layout__sidebar" data-slot="sidebar.views">
-      <ViewSwitcher views={views} active={active} onPick={setChosen} />
-      <div className="diorama-sidebar__panes">
+    <aside
+      className={`diorama-layout__sidebar${folded ? ' diorama-layout__sidebar--folded' : ''}`}
+      data-slot="sidebar.views"
+      data-folded={folded ? 'true' : 'false'}
+    >
+      <div className="diorama-sidebar__rail">
+        <ViewSwitcher views={views} active={active} folded={folded} onPick={setChosen} />
+        <FoldButton folded={folded} onToggle={onToggleFold} />
+      </div>
+      {/* Folded panes are hidden, not unmounted — the same rule as an inactive
+          view, so unfolding comes back to the same scroll and expansion
+          (contract.md §5.2). */}
+      <div
+        className="diorama-sidebar__panes"
+        id="diorama-sidebar-panes"
+        data-testid="sidebar-panes"
+        style={folded ? { display: 'none' } : undefined}
+      >
         {views.map(view => (
           <div
             key={view.id}
@@ -317,29 +485,40 @@ function SplitFrame() {
   // on it. A fixed 260px was the old answer (docs/m4/spec.md §6.4); long file
   // names made it the wrong one.
   const [width, setWidth] = usePaneSize(SIDEBAR_WIDTH_KEY, SIDEBAR_DEFAULT_PX)
+  // Folding is a preference too, and it belongs to the frame for the same
+  // reason: the frame is what gives the column its width (contract.md §5.2).
+  useSyncExternalStore(foldChoice.subscribe, foldVersion, foldVersion)
+  const folded = foldChoice.get()
   const frame = useRef<HTMLDivElement | null>(null)
   // While the pointer is down only the CSS variable moves (see `splitpane`):
   // re-rendering the column on every frame would re-render the whole tree.
   const preview = (next: number): void => {
     frame.current?.style.setProperty('--dio-sidebar-width', `${next}px`)
   }
+  const toggleFold = useCallback(() => foldChoice.toggle(), [])
   if (views.length > 0) {
     return (
       <div
         ref={frame}
-        className="diorama-layout diorama-layout--split"
+        className={`diorama-layout diorama-layout--split${folded ? ' diorama-layout--folded' : ''}`}
         data-layout="split"
-        style={{ '--dio-sidebar-width': `${width}px` } as CSSProperties}
+        data-folded={folded ? 'true' : 'false'}
+        style={{ '--dio-sidebar-width': `${width}px`, '--dio-sidebar-rail': `${SIDEBAR_RAIL_PX}px` } as CSSProperties}
       >
-        <Sidebar views={views} />
-        <Splitter
-          side="start"
-          size={width}
-          onPreview={preview}
-          onCommit={setWidth}
-          label="调整侧栏宽度"
-          testId="sidebar-splitter"
-        />
+        <Sidebar views={views} folded={folded} onToggleFold={toggleFold} />
+        {/* A folded column has no edge to drag: its width is the switcher's.
+            The edge is unmounted rather than hidden, so it cannot take focus
+            or a drag that would set a width nobody can see. */}
+        {folded ? null : (
+          <Splitter
+            side="start"
+            size={width}
+            onPreview={preview}
+            onCommit={setWidth}
+            label="调整侧栏宽度"
+            testId="sidebar-splitter"
+          />
+        )}
         <MainColumn />
       </div>
     )
@@ -405,10 +584,26 @@ export function apply(ctx: Context) {
       // A view that is not registered cannot be shown: the command is then not
       // executable (absent from the palette, and its keys do nothing, §3.7).
       when: () => viewChoice.available(command.key),
-      run: () => viewChoice.show(command.key),
+      run: () => {
+        viewChoice.show(command.key)
+        // Same rule as the switcher: showing a view shows the column.
+        foldChoice.set(false)
+      },
     })
     commands.bind({ keys: command.keys, command: command.id })
   }
+  // Folding the column (contract.md §3.7, v0.13). A command like the view
+  // switches above — the palette lists it, and `mod+b` is its key — and it is
+  // only executable while there is a column at all.
+  commands.register({
+    id: SIDEBAR_FOLD_COMMAND,
+    title: '侧栏：收起 / 展开',
+    when: () => viewChoice.any(),
+    run: () => {
+      foldChoice.toggle()
+    },
+  })
+  commands.bind({ keys: 'mod+b', command: SIDEBAR_FOLD_COMMAND })
 }
 
 /**
@@ -428,6 +623,9 @@ function trackViewInHash(ctx: Context): void {
     const slot = router.state(key)
     if (slot.get() !== undefined) {
       viewChoice.show(key)
+      // The URL says which view, not whether the column is folded: a reader who
+      // folded it and refreshed gets the view back **inside** a folded column
+      // (the fold is a preference of its own, contract.md §5.2).
       return
     }
   }

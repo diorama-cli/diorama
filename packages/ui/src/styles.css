@@ -194,6 +194,13 @@ code {
   grid-template-columns: var(--dio-sidebar-width, 260px) auto minmax(0, 1fr);
 }
 
+/* Folded, the column is its switcher's width and there is no separator (the
+   frame does not draw one), so the grid has two columns, not three
+   (contract.md §5.2). */
+.diorama-layout--folded {
+  grid-template-columns: var(--dio-sidebar-rail, 36px) minmax(0, 1fr);
+}
+
 .diorama-layout__sidebar {
   display: grid;
   /* The view switcher (contract.md §5.2), then the active view. */
@@ -204,14 +211,37 @@ code {
   border-right: 1px solid var(--dio-border);
 }
 
+/* Folded: the switcher's rail is the whole column, the panes are gone
+   (contract.md §5.2). The frame's own rule gives the column the rail's width. */
+.diorama-layout__sidebar--folded {
+  grid-template-columns: 1fr;
+}
+
+/* The rail: the view buttons, and at its foot the button that folds the
+   column. It keeps the switcher's own background and hairline, so folding
+   changes the column's width and nothing else. */
+.diorama-sidebar__rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  border-right: 1px solid var(--dio-border);
+  background: var(--dio-bg);
+}
+
 .diorama-sidebar__views {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   align-items: center;
   gap: 2px;
   padding: 6px 0;
-  border-right: 1px solid var(--dio-border);
-  background: var(--dio-bg);
+}
+
+/* The fold button sits under the view buttons: the one control that must stay
+   reachable while the column is folded, so it lives inside the rail. */
+.diorama-sidebar__fold {
+  margin-bottom: 6px;
+  flex: none;
 }
 
 .diorama-sidebar__view {

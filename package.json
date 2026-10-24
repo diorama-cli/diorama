@@ -12,7 +12,7 @@
     "demo": "node packages/cli/bin/diorama .diorama-verify",
     "test": "pnpm --filter diorama-web run test",
     "typecheck": "pnpm -r run typecheck",
-    "test:unit": "node --test --experimental-transform-types \"packages/kernel/test/*.test.ts\" \"packages/ui/test/*.test.ts\" \"packages/plugins/slots/test/*.test.ts\" \"packages/plugins/git-changes/test/*.test.ts\" \"packages/plugins/html/test/*.test.ts\" \"packages/plugins/help/test/*.test.ts\" \"packages/plugins/search-view/test/*.test.ts\" \"packages/plugins/markdown/test/*.test.ts\" \"packages/cli/test/*.test.ts\"",
+    "test:unit": "node --test --experimental-transform-types \"packages/kernel/test/*.test.ts\" \"packages/ui/test/*.test.ts\" \"packages/plugins/slots/test/*.test.ts\" \"packages/plugins/git-changes/test/*.test.ts\" \"packages/plugins/html/test/*.test.ts\" \"packages/plugins/help/test/*.test.ts\" \"packages/plugins/layout/test/*.test.ts\" \"packages/plugins/search-view/test/*.test.ts\" \"packages/plugins/markdown/test/*.test.ts\" \"packages/cli/test/*.test.ts\"",
     "icons": "node scripts/generate-icons.mjs",
     "pack:prepare": "pnpm build && node scripts/assemble-package.mjs",
     "release": "node scripts/release/cli.mjs",

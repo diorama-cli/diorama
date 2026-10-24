@@ -13,9 +13,10 @@
 | 3 | [docs/features.md](docs/features.md) | **有什么**：能力清单与档位（✅ / v1 / 未来 / 不做） |
 | 4 | 最近一档的 `docs/mN/spec.md` | **怎么实现的** + **§6.2 的坑**（见下面 §5） |
 
-最近一档是 [docs/m17/spec.md](docs/m17/spec.md)（Markdown 的文档内大纲、KaTeX 公式、Mermaid 图表，
-以及 `/plugins/<id>/<path>` 这条运行时文件路由；大纲栏在宽屏上与文章**整体居中**）；
-上一档是 [docs/m16/spec.md](docs/m16/spec.md)（RPC 断线自动重连、保活帧与订阅重放）。
+最近一档是 [docs/m18/spec.md](docs/m18/spec.md)（侧栏可收起：切换器脚下有「收起 / 展开」按钮与
+`mod+b`，收起后只剩 36px 的一竖条、面板隐藏不卸载，收起是**偏好**、与"选了哪个视图"正交）；
+上一档是 [docs/m17/spec.md](docs/m17/spec.md)（Markdown 的文档内大纲、KaTeX 公式、Mermaid 图表，
+以及 `/plugins/<id>/<path>` 这条运行时文件路由；大纲栏在宽屏上与文章**整体居中**）。
 
 `docs/plan.md` 是**阶段性排期**，会退役；不要把它当长期真源，也不要在新代码里引用它。
 一次会话的最小读法：`contract.md` 目录 → `features.md` 表 → 最近 spec 的「坑」一节。
@@ -146,6 +147,9 @@ scripts/                  生成器（图标表；`pnpm icons` 重新生成）
 | 跳转之后「当前」标记停在上一项 | 跳转的落点与判定的阅读线用了同一个常量（`scroll-margin-top: 8px` 让标题停在 +8，阅读线也取 +8） | 阅读线要**越过**落点（+24），别和 `scroll-margin` 相等（m17/spec §6 坑 4）|
 | 「旁边的栏占了太多空间」（宽屏上内容贴一边、栏悬在空白里） | 两栏布局忘了把**整块内容居中**；多余的宽度全堆到一侧 | `.diorama-markdown-body` 用 `justify-content: center` 让文章 + 目录作为一块居中；定宽文章的 flex 要写 `0 1 <measure>`（可收缩），别写 `1 1 auto`（m17/spec §6 坑 10）|
 | 插件的运行时文件（字体、样式表、大库）浏览器 404 | 半边是自足的闭包，只有 `client.cjs` 被服务；放它旁边的文件没有路由 | 放 `<pkg>/lib/vendor/`，浏览器从 `/plugins/<id>/vendor/…` 取（contract §4）；`scripts/assemble-package.mjs` 会一起带进发布包（m17/spec §6 坑 6–7）|
+| 侧栏「收起」做成宽度 0，收起后点不到展开 | 宽度归零把切换器一起带走了，页面上再没有能展开它的控件 | 收起后仍可见的那一竖条（`SIDEBAR_RAIL_PX`）里放展开按钮；收起 ≠ 选了一个空视图（两个 store）；收起时 `Splitter` **不挂载**（m18/spec §6 坑 1–3）|
+| 折叠状态下点视图图标「什么都没发生」 | 改的是 `display: none` 的面板 | 折叠时切换器与 `sidebar.show*` 都先展开再切视图（m18/spec §6 坑 4）；**活动图标点击 = 收起**（activity bar 手势，m18/spec §3）|
+| 点了「收起」没反应 | 看的是**旧页面**（layout 半边带 hash 缓存），代码已更新 | 半边 URL 是 `?h=<hash>` 缓存的：重建后**刷新页面**（或重启 gateway）再验 |
 | 侧栏视图按钮是个空白方块 | `iconSvg` 在没装图标表的页面返回 `''`；切换器原先只判 `undefined` | 新按钮图标先进 `scripts/generate-icons.mjs` 的 `BUTTON_ICONS`、跑 `pnpm icons`，再重建**页面壳**（表由壳安装）；`icon` 为空也要退回标题首字（m17/spec §6 坑 9）|
 
 ## 6. 边界（不要越过的线）
@@ -160,6 +164,8 @@ scripts/                  生成器（图标表；`pnpm icons` 重新生成）
 
 ## 7. 提交与验证纪律
 
+- **只有用户明确要求提交时才提交**：没有当次对话里的「提交」/「commit」字样，就停在工作区——
+  不建分支、不 commit、不 push。验证（§3 四件套）照常跑，那是改完的证明，不是提交的理由。
 - 一个能力一块提交，提交信息写清"做了什么 + 为什么"。
 - 每块完成前跑 §3 四件套；**M0/M1 的验收用例必须保持绿**（它们是多 tab / 命令 / watch 改动的回归）。
 - 契约或座位类型变了：同步 `contract.md` 的正文与变更清单、`docs/features.md` 的档位——但**不升契约号**（§2、contract §6）。
