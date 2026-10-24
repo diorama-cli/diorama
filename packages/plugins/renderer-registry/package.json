@@ -1,6 +1,6 @@
 {
   "name": "diorama-plugin-renderer-registry",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "private": true,
   "description": "Diorama piece: pure list dispatcher for file.renderer entries",
   "type": "module",
@@ -26,7 +26,7 @@
     "src"
   ],
   "diorama": {
-    "contract": ">=0.0.3 <0.1.0",
+    "contract": ">=0.0.4 <0.1.0",
     "id": "renderer-registry",
     "client": {
       "entry": "./lib/client.cjs"

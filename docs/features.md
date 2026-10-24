@@ -8,7 +8,7 @@
 > 图片与 PDF 渲染器见 [实施说明](m4/spec.md)（§1–§6 是第一轮，§7–§11 是第二轮）；
 > 文件搜索见 [m6/spec.md](m6/spec.md)；界面图标见 [m7/spec.md](m7/spec.md)；
 > Markdown 的大纲 / 公式 / 图表见 [m17/spec.md](m17/spec.md)。其余仍是 v1 目标。
-> 契约见 [contract.md](contract.md) **v0.0.3**（§19 是主题切换的变更清单；§27 是本档）。
+> 契约见 [contract.md](contract.md) **v0.0.4**（§19 是主题切换的变更清单；§27 是本档）。
 
 ## 一、CLI
 

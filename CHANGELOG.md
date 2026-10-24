@@ -3,6 +3,24 @@
 Every published version of `@diorama-cli/diorama`, newest first. Generated from
 the commit log by `pnpm release` — see [docs/release.md](docs/release.md).
 
+## 0.0.4 (2026-10-24)
+
+### Features
+
+- **html:** [html] scripts decides whether a preview runs page scripts
+- **markdown:** an in-document outline, KaTeX math and Mermaid diagrams
+- **ui:** panes the reader can drag, and long names read by scrolling
+- **git:** read every repository a mounted directory holds
+- **git-changes:** read a diff three ways, and move between its changes
+
+### Fixes
+
+- **rpc:** the page reconnects and re-subscribes after a dropped network
+
+### Other
+
+- diff readers onto main
+
 ## 0.0.3 (2026-10-21)
 
 ### Features
