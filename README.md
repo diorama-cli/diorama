@@ -50,12 +50,18 @@ diorama serving /path/to/your/project
 ```bash
 diorama [dir] [options]        # 挂载一个目录（gateway 未运行时自动拉起），打印 URL
 diorama ls [--json]            # 列出所有挂载：目录、URL、状态、配置来源
+diorama stop [dir] [--all]     # 停止服务一个目录（缺省 = 当前目录）；--all 停全部挂载
 diorama restart <mount|dir>    # 卸载后重新挂载（加载新配置或从故障中恢复）
 diorama gateway start|stop|status|restart
 diorama gateway run            # 前台运行 gateway
 diorama config [show|set|unset]  # 读 / 改 / 交互式生成 diorama.toml
 diorama --version
 ```
+
+`diorama stop` 停的是**一个目录**：不带参数就停当前目录所在的挂载（在项目的任何子目录里执行都行），
+给了目录就停那个目录的挂载；`--all` 停掉这个 gateway 的全部挂载。gateway 进程本身照旧运行——
+要停进程用 `diorama gateway stop`。目录本来就没挂载、或 gateway 没在跑，都是**成功的空操作**
+（退出码 0），脚本可以放心重试。
 
 `diorama [dir]` 的常用选项：
 

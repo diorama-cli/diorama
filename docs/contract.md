@@ -1461,7 +1461,7 @@ v1 **没有 CLI 命令消费它**（`diorama ls` 不做 `--watch`）；它存在
 | 显式端口被占（`EADDRINUSE`） | 1 |
 | 插件加载失败（boot 图有 failure） | 1 |
 | `status` 时 gateway 未运行 | 1 |
-| `stop` 时 gateway 未运行 | 0（幂等） |
+| `stop` 时 gateway 未运行 / 目录不在挂载里 | 0（幂等） |
 | 连不上 / 启动超时 | 1 |
 
 `diorama [dir]` 打印（保持 M1 起的三行，便于 e2e 抓 URL）：
@@ -1511,6 +1511,31 @@ def67890   54322  degraded   /Users/me/notes           http://127.0.0.1:54322/  
 - gateway 未运行：打印 `gateway is not running (run "diorama gateway start")`，**退出码 0**
   （`ls` 是查询，不是错误）。
 - `--json`：输出 `{ gateway: StatusResult, mounts: MountStatus[] }`（字段与 §7.3 一致）。
+
+`diorama stop [dir] [--all] [--json]`——**停止服务一个目录**（不是停 gateway）：
+
+```text
+diorama stopped /Users/me/proj
+  [mount:abc12345] http://127.0.0.1:54321/
+```
+
+- **无参数 = 当前目录**：停掉**包含** `process.cwd()` 的那个挂载（所以在项目里的任何子目录
+  `diorama stop` 都停得掉它）。显式给目录时先按 realpath 比，再按 `resolve` 的字符串比
+  （目录已被删掉也认得）。
+- **包含关系只向上，不向下**：`stop proj` 停 `proj` 自己的挂载；`proj/vendor/lib` 上的挂载
+  **不受影响**。反过来 `stop proj/src` 停的是 `proj` 的挂载（挂载嵌套时取**最深**的那个），
+  并额外打印一行 `(matched the mount containing <dir>)`。
+- **`--all`**：停掉这个 gateway 的**全部**挂载（gateway 进程照旧运行）；一个都没有时打印
+  `no mounts to stop`，退出码 0。
+- **不匹配不是错误**：打印 `no mount for "<dir>" (run "diorama ls" to see the mounts)` 并列出
+  现有挂载，**退出码 0**（与 `gateway stop` 未运行时同一口径）。gateway 未运行时打印
+  `gateway is not running (nothing to stop)`，退出码 0。
+- **只卸这一个**：走控制面的 `unmount`（§7.3），其它挂载与 gateway 进程都不动；`stop` **不**
+  等于 `gateway stop`。要停进程用 `diorama gateway stop`。
+- **`--json`**：`{ stopped: [{ mountId, root, url }], target: string | null, all: boolean }`
+  （`--all` 时 `target` 是 `null`；一个都没停时 `stopped` 是空数组，退出码仍是 0）。
+  部分失败（某个 mount 关不掉）时 stdout 只报**真停掉的**，stderr 逐个报失败的，退出码 1。
+- 用法错误（未知选项、给了两个目录、目录与 `--all` 同用）退出码 **2**。
 
 `diorama config …` 的行为与退出码见 §4.2：成功 0，用法错误 / 文件写错 2（`config show` 在目录
 不可读时也是 2）。它**不**连 gateway，也不要求 gateway 在跑。
@@ -2093,6 +2118,25 @@ URL / hash 语义、主题 token 表（新样式只用既有 token，无新 toke
 - **`alt+1..9` 的代价**：`Alt+digit` 在部分 Linux 桌面上是输入法 / 终端切换键，但浏览器里不被保留，
   且与 `mod+alt+*` 那一族同一个理由（`matchesKeys` 对 `alt` 绑定有物理键兜底，macOS 的 `¡` 也能命中）。
 - **窗口失焦要清**：切走再回来时浏览器不会补发 keyup，所以 `window.blur` 也清状态，否则提示会一直亮着。
+
+## 32. `0.0.2` 之后：停止服务一个目录（`diorama stop`）（未发版，属下一个 `0.0.x`）
+
+> 2026-10-26。用户要求：**增加命令，用于停止当前目录/指定目录实例**。契约号不动（§6）：控制面
+> 早就有 `unmount`（§7.3），缺的只是 CLI 的一个入口——本档只加 CLI 行为，不改 `ctx.*`、slot、
+> RPC 与控制面协议。
+
+| 条款 | 本档之前 | 本档 |
+|---|---|---|
+| §7.6 停止一个挂载 | 只有 `restart <dir>`（卸了又挂）与 `gateway stop`（停整个进程） | 新增 `stop [dir] [--all] [--json]`：只卸挂载，gateway 与其它挂载不动 |
+| §7.6 `stop` 的目标 | — | 无参数 = **当前目录**（包含 `process.cwd()` 的那个挂载）；显式目录先比 realpath、再比 `resolve` 的字符串（已删掉的目录也认得）；挂载嵌套时取**最深**的包含者 |
+| §7.6 `stop` 的方向 | — | **只向上匹配**：`stop proj` 不动 `proj/vendor/lib` 上的挂载；`stop proj/src` 停的是 `proj` 的挂载 |
+| §7.6 `stop --all` | — | 停掉这个 gateway 的**全部**挂载，进程照旧运行；零挂载是 `no mounts to stop` + 退出码 0 |
+| §7.6 `stop` 的退出码 | — | 不匹配 / gateway 未运行都是 **0**（幂等，与 `gateway stop` 同口径）；用法错误 2；部分失败 1 |
+| §7.6 `stop --json` | — | `{ stopped: [{ mountId, root, url }], target, all }`（`target` 是字符串或 `null`）；stdout 只有一个文档 |
+
+**没有变的东西**：控制面的 `unmount`（§7.3）与其幂等语义、`restart`、`gateway stop|restart`、
+`MountStatus` 的字段、`ls` 的输出形状、`diorama.toml`。`stop` 不新增任何服务端行为——
+它只是把「按 `mountId` 卸一个」包成一个按**目录**说话的 CLI 动词。
 
 ## 待定清单（v0.4 后仍 🔲）
 

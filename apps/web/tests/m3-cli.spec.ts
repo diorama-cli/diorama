@@ -15,11 +15,20 @@ import { fixture, repoRoot } from './support.ts'
 const run = promisify(execFile)
 const cli = join(repoRoot, 'packages/cli/bin/diorama-beta')
 
-/** Run one CLI command against a temp state directory. */
-async function diorama(home: string, args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+/**
+ * Run one CLI command against a temp state directory.
+ *
+ * `cwd` is where the CLI runs: `diorama stop` with no argument stops the mount
+ * of **the current directory**, so the tests have to stand somewhere.
+ */
+async function diorama(
+  home: string,
+  args: string[],
+  options: { cwd?: string } = {},
+): Promise<{ code: number; stdout: string; stderr: string }> {
   try {
     const { stdout, stderr } = await run(process.execPath, [cli, ...args], {
-      cwd: repoRoot,
+      cwd: options.cwd ?? repoRoot,
       env: { ...process.env, DIORAMA_HOME: home },
       timeout: 30_000,
     })
@@ -27,6 +36,16 @@ async function diorama(home: string, args: string[]): Promise<{ code: number; st
   } catch (failure) {
     const error = failure as { code?: number; stdout?: string; stderr?: string }
     return { code: error.code ?? 1, stdout: error.stdout ?? '', stderr: error.stderr ?? '' }
+  }
+}
+
+/** Whether a URL still answers (the unmounted port must be closed). */
+async function serves(url: string): Promise<boolean> {
+  try {
+    await fetch(url, { signal: AbortSignal.timeout(2_000) })
+    return true
+  } catch {
+    return false
   }
 }
 
@@ -165,6 +184,86 @@ test('5e. a global ~/.diorama/diorama.toml applies when the directory has none',
       expect(ls.stdout).toContain('diorama.toml')
     } finally {
       directory.dispose()
+    }
+  })
+})
+
+test('5g. stop: stops the current directory only, and leaves the gateway running', async () => {
+  await withHome(async home => {
+    const first = fixture()
+    const second = fixture()
+    try {
+      const mountedFirst = await diorama(home, [first.root])
+      const mountedSecond = await diorama(home, [second.root])
+      expect(mountedFirst.code).toBe(0)
+      expect(mountedSecond.code).toBe(0)
+      const firstUrl = mountedFirst.stdout.match(/http:\/\/\S+\//)?.[0] ?? ''
+      const secondUrl = mountedSecond.stdout.match(/http:\/\/\S+\//)?.[0] ?? ''
+      expect(await serves(firstUrl)).toBe(true)
+
+      // No argument: the directory the CLI runs in (here a subdirectory of the mount).
+      const stop = await diorama(home, ['stop'], { cwd: join(first.root, 'src') })
+      expect(stop.code).toBe(0)
+      expect(stop.stdout).toContain(`stopped ${first.realRoot}`)
+      expect(stop.stdout).toContain(firstUrl)
+
+      // The mount is gone from the table, its port is closed, the other one is untouched.
+      const ls = await diorama(home, ['ls'])
+      expect(ls.stdout).not.toContain(first.realRoot)
+      expect(ls.stdout).toContain(second.realRoot)
+      expect(await serves(firstUrl)).toBe(false)
+      expect(await serves(secondUrl)).toBe(true)
+
+      // The gateway is still up (that is `gateway stop`, not `stop`).
+      expect((await diorama(home, ['gateway', 'status'])).code).toBe(0)
+
+      // Stopping the same directory again is a successful no-op (exit 0).
+      const again = await diorama(home, ['stop'], { cwd: first.root })
+      expect(again.code).toBe(0)
+      expect(again.stdout).toContain('no mount for')
+
+      // An explicit directory works too, and --json is one document.
+      const json = await diorama(home, ['stop', second.root, '--json'])
+      expect(json.code).toBe(0)
+      const parsed = JSON.parse(json.stdout) as { stopped: { root: string; url: string }[]; target: string; all: boolean }
+      expect(parsed.stopped.map(entry => entry.root)).toEqual([second.realRoot])
+      expect(parsed.stopped[0]?.url).toBe(secondUrl)
+      expect(parsed.all).toBe(false)
+      expect((await diorama(home, ['ls'])).stdout).toContain('no mounts')
+    } finally {
+      first.dispose()
+      second.dispose()
+    }
+  })
+})
+
+test('5h. stop --all stops every mount; a wrong usage exits 2; no gateway exits 0', async () => {
+  await withHome(async home => {
+    const directory = fixture()
+    const other = fixture()
+    try {
+      // Nothing running: a no-op, not an error (same as `gateway stop`).
+      const idle = await diorama(home, ['stop'])
+      expect(idle.code).toBe(0)
+      expect(idle.stdout).toContain('gateway is not running')
+
+      expect((await diorama(home, [directory.root])).code).toBe(0)
+      expect((await diorama(home, [other.root])).code).toBe(0)
+
+      const all = await diorama(home, ['stop', '--all'])
+      expect(all.code).toBe(0)
+      expect(all.stdout).toContain('stopped 2 mounts')
+      expect((await diorama(home, ['ls'])).stdout).toContain('no mounts')
+      // The gateway itself is still running: stopping it is `gateway stop`.
+      expect((await diorama(home, ['gateway', 'status'])).code).toBe(0)
+
+      // Usage errors are 2, like every other verb.
+      expect((await diorama(home, ['stop', '--nope'])).code).toBe(2)
+      expect((await diorama(home, ['stop', 'a', 'b'])).code).toBe(2)
+      expect((await diorama(home, ['stop', directory.root, '--all'])).code).toBe(2)
+    } finally {
+      directory.dispose()
+      other.dispose()
     }
   })
 })

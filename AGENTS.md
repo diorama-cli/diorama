@@ -13,14 +13,17 @@
 | 3 | [docs/features.md](docs/features.md) | **有什么**：能力清单与档位（✅ / v1 / 未来 / 不做） |
 | 4 | 最近一档的 `docs/mN/spec.md` | **怎么实现的** + **§6.2 的坑**（见下面 §5） |
 
-最近一档是 [docs/m20/spec.md](docs/m20/spec.md)（快捷键能力增强，v0.16 按 cmux 的体验重做：tab 条
+最近一档是 [docs/m21/spec.md](docs/m21/spec.md)（CLI 新增 `diorama stop [dir] [--all]`：只卸**一个**
+挂载（无参数 = 当前目录**所在的**那个，嵌套取最深的包含者），gateway 与其它挂载照旧——停进程仍是
+`gateway stop`；不匹配 / 未运行 gateway 都是退出码 0）；
+上一档是 [docs/m20/spec.md](docs/m20/spec.md)（快捷键能力增强，v0.16 按 cmux 的体验重做：tab 条
 键位对齐 IDE（`mod+w` 关、`mod+shift+[ / ]` 循环、`mod+1..9` 跳，撞浏览器也不让步）、中键关 tab，
 以及**按住 ⌘ / Ctrl 或 ⌥ 时关键快捷键以浮层标签显示**——浮层不参与布局，几何不变；只显示 tab 键与
 切换器键，关闭 / 收起不显示；状态在页面全局 `__diorama_keys__`，文本来自注册表快照的 `label`）；
-上一档是 [docs/m19/spec.md](docs/m19/spec.md)（diff 的单栏「整个文件」与双栏「新旧对照」按文件语言
+更早是 [docs/m19/spec.md](docs/m19/spec.md)（diff 的单栏「整个文件」与双栏「新旧对照」按文件语言
 上色：引擎由 `code` 半边发布到页面全局 `__diorama_highlight__`，`git-changes` 读它，每行一个完整
 HTML 片段；行内那档是 git 的文本，不上色）；
-更早是 [docs/m18/spec.md](docs/m18/spec.md)（侧栏可收起：切换器脚下有「收起 / 展开」按钮与
+再往前是 [docs/m18/spec.md](docs/m18/spec.md)（侧栏可收起：切换器脚下有「收起 / 展开」按钮与
 `mod+b`，收起后只剩 36px 的一竖条、面板隐藏不卸载，收起是**偏好**、与"选了哪个视图"正交）。
 
 `docs/plan.md` 是**阶段性排期**，会退役；不要把它当长期真源，也不要在新代码里引用它。
@@ -79,6 +82,7 @@ scripts/                  生成器（图标表；`pnpm icons` 重新生成）
 | gateway 的 mount 表、端口、degraded 状态机 | `kernel/src/server/gateway.ts` |
 | 控制面协议（帧、方法、错误码） | `kernel/src/shared/control.ts`、`kernel/src/server/control.ts` |
 | CLI 子命令、`ls` 表格、后台 gateway | `cli/src/main.ts`、`cli/src/control-client.ts`、`cli/src/gateway.ts`、`cli/src/gateway-command.ts` |
+| `diorama stop`（按目录卸一个挂载；选择规则是纯函数） | `cli/src/stop.ts`（`planStop` 不连 gateway，`node --test` 直接测） |
 | `diorama.toml` | `kernel/src/server/config.ts`；页面能读的那一段（`mountCtx.config`）在 `kernel/src/shared/config.ts`（`MountConfig`） |
 | 新内核服务的「每 mount 一份」接线 | `KERNEL_SERVICE_IDS`（plan.ts）、`MOUNT_SERVICES`（plugins.ts）、CLI 的 `PROXYABLE` 与 server 半边选择（`cli/src/gateway.ts`、`run.ts`、`plugins-server.ts`）——**四处一起改**，漏一处就是 RPC `ESERVICE` |
 | 契约版本 | `kernel/src/contract.ts`（**只在这里改**） |
@@ -183,6 +187,6 @@ scripts/                  生成器（图标表；`pnpm icons` 重新生成）
 - 一个能力一块提交，提交信息写清"做了什么 + 为什么"。
 - 每块完成前跑 §3 四件套；**M0/M1 的验收用例必须保持绿**（它们是多 tab / 命令 / watch 改动的回归）。
 - 契约或座位类型变了：同步 `contract.md` 的正文与变更清单、`docs/features.md` 的档位——但**不升契约号**（§2、contract §6）。
-- 演示脚本：`node packages/cli/bin/diorama-beta <dir>`（或 `./link.sh` 后直接用 `diorama-beta`）。短命 CLI：确保 gateway → 挂载 → 打印 URL；输出里的 `config:` 与 `hidden:` 两行能直接看出 `diorama.toml` 是否生效。其它：`diorama-beta ls`、`diorama-beta gateway start|stop|status|restart`、`diorama-beta restart <dir>`。
+- 演示脚本：`node packages/cli/bin/diorama-beta <dir>`（或 `./link.sh` 后直接用 `diorama-beta`）。短命 CLI：确保 gateway → 挂载 → 打印 URL；输出里的 `config:` 与 `hidden:` 两行能直接看出 `diorama.toml` 是否生效。其它：`diorama-beta ls`、`diorama-beta stop [dir]`（缺省停当前目录）、`diorama-beta gateway start|stop|status|restart`、`diorama-beta restart <dir>`。
 - **两个入口、两条通道**：`bin/diorama`（发布名）与 `bin/diorama-beta`（`DIORAMA_CHANNEL=beta`，link 进来的 checkout 用）。beta 的 socket/pid/日志都带 `-beta`，所以与已安装的 `diorama` 可以并存；`link.sh` 只创建 `diorama-beta`。e2e 一律走 `diorama-beta`。
 - **测试隔离**：e2e 每个用例用自己的 `DIORAMA_HOME`（临时目录）与自己的 gateway；不要把测试指向真实的 `~/.diorama`。

@@ -1,6 +1,6 @@
 /**
- * CLI entry: `diorama [dir] [options]`, `diorama ls`, `diorama gateway …`,
- * `diorama restart <mount>` (contract.md §7.5–§7.6).
+ * CLI entry: `diorama [dir] [options]`, `diorama ls`, `diorama stop`,
+ * `diorama gateway …`, `diorama restart <mount>` (contract.md §7.5–§7.6).
  *
  * `diorama <dir>` is short-lived: ensure the gateway runs, ask it to mount the
  * directory, print the URL, exit. `--foreground` runs the gateway in this
@@ -19,6 +19,7 @@ import {
   cliName,
   defaultIo,
   gatewayLogPath,
+  gatewayStatus,
   listMounts,
   restartGateway,
   startGateway,
@@ -29,6 +30,7 @@ import { configCommand } from './config-command.ts'
 import { runGateway, socketPath } from './gateway-command.ts'
 import { mountDocument, mountLines, type MountOutput } from './mount-output.ts'
 import { main as serveMain, parseArgs, USAGE, usage } from './run.ts'
+import { noMountMessage, parseStopArgs, planStop, stopDocument, stopLines, stopPath } from './stop.ts'
 
 export { USAGE, parseArgs, usage }
 
@@ -37,6 +39,7 @@ export function controlUsage(name = 'diorama'): string {
   return `Usage:
   ${name} [dir] [options]        mount a directory (starts the gateway if needed)
   ${name} ls [--json]            list mounts: directory, URL, status
+  ${name} stop [dir] [--all]     stop serving a directory (default: this one)
   ${name} restart <mount|dir>    unmount and mount again (--json for scripts)
   ${name} config [show|set|unset]  read or edit a diorama.toml (see "${name} config --help")
   ${name} gateway start|stop|status|restart
@@ -69,6 +72,7 @@ export async function main(argv: readonly string[], env: NodeJS.ProcessEnv = pro
     return listMounts(io, { json: rest.includes('--json') })
   }
 
+  if (command === 'stop') return stopMount(io, rest)
   if (command === 'restart') return restartMount(io, rest)
   if (command === 'config') return configCommand(io, rest)
   if (command === 'gateway') return gatewayCommand(io, rest)
@@ -152,6 +156,60 @@ async function gatewayCommand(io: CliIo, argv: readonly string[]): Promise<numbe
   } catch (failure) {
     return reportFailure(io, failure)
   }
+}
+
+/**
+ * `diorama stop [dir] [--all]` (contract.md §7.6): stop serving a directory and
+ * leave the gateway — and every other mount — running.
+ *
+ * With no argument it stops **the current directory**: the mount that contains
+ * `process.cwd()`, so `diorama stop` works from anywhere inside the project.
+ * `--all` stops every mount of this gateway (`gateway stop` stays the way to
+ * stop the process itself).
+ */
+export async function stopMount(io: CliIo, argv: readonly string[]): Promise<number> {
+  const { options, error } = parseStopArgs(argv)
+  if (error !== undefined) {
+    io.err(`${cliName(io)}: ${error}\n\n${controlUsage(cliName(io))}`)
+    return 2
+  }
+  const target = options.all ? undefined : stopPath(options.target, process.cwd())
+  const status = await gatewayStatus(io)
+  if (status === undefined) {
+    // No gateway, nothing served: a successful no-op, like `gateway stop` (§7.6).
+    if (options.json) io.out(JSON.stringify({ stopped: [], target: target ?? null, all: options.all }))
+    else io.out('gateway is not running (nothing to stop)')
+    return 0
+  }
+  const real = target === undefined ? undefined : await realDirectory(target).catch(() => undefined)
+  const { plan, error: miss } = planStop(status.mounts, options, {
+    resolved: target ?? '',
+    ...(real === undefined ? {} : { real }),
+  })
+  if (plan === undefined || miss !== undefined) {
+    // Not an error: the directory is simply not served (exit 0, contract §7.6).
+    if (options.json) io.out(JSON.stringify({ stopped: [], target: target ?? null, all: options.all }))
+    else for (const line of noMountMessage(target ?? '', status.mounts, cliName(io))) io.out(line)
+    return 0
+  }
+
+  // Unmount one by one: a mount that fails to close does not hide the others.
+  const stopped: typeof plan.mounts = []
+  const failures: string[] = []
+  for (const mount of plan.mounts) {
+    try {
+      await controlCall(io, 'unmount', { mountId: mount.mountId })
+      stopped.push(mount)
+    } catch (failure) {
+      failures.push(`${mount.root}: ${failure instanceof Error ? failure.message : String(failure)}`)
+    }
+  }
+  const done = { ...plan, mounts: stopped }
+  // A partial run still reports what did stop (stdout) and what did not (stderr).
+  if (options.json) io.out(JSON.stringify(stopDocument(done)))
+  else for (const line of stopLines(done, cliName(io))) io.out(line)
+  for (const failure of failures) io.err(`${cliName(io)}: could not stop ${failure}`)
+  return failures.length > 0 ? 1 : 0
 }
 
 /** `diorama restart <mountId|dir>` (contract.md §11.1: manual recovery). */
