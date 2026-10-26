@@ -13,7 +13,7 @@
 import type { Context } from 'cordis'
 import { useCallback, useEffect, useRef, useSyncExternalStore, type ReactElement } from 'react'
 import type {} from 'diorama-plugin-slots'
-import { bindMethods, FileIcon, Icon, provideEntry, Slot, useKernel, useStore } from 'diorama-ui'
+import { bindMethods, FileIcon, Icon, KeyHint, provideEntry, Slot, useHeldModifier, useKernel, useStore } from 'diorama-ui'
 import { createTabsService, type CommandsService, type TabInfo } from 'diorama-kernel/client'
 
 export const name = 'tabs'
@@ -44,6 +44,27 @@ interface ContentProps {
  * recognise it to know whether the picked commit is still on screen.
  */
 const HISTORY_VIEW = 'history'
+
+/**
+ * How many tabs can be picked by number (contract.md §3.7, v0.16): ⌘1 … ⌘9
+ * switch to the tab at that position — the gesture every editor has, and the
+ * one the tab strip advertises while the modifier is held. A tenth tab is
+ * reachable by cycling (`⌃Tab` / `⇧⌃Tab`); a two-digit chord is not something
+ * a reader's hands do.
+ *
+ * The chord is `mod+<n>`, **not** `alt+<n>`: v0.15 avoided ⌘1 because the
+ * browser also claims it, and that was the wrong trade. An editor's fingers
+ * reach for ⌘1; a viewer whose tab keys are Option+digits teaches the wrong
+ * reflex. Where the browser takes the key first the page never sees it — the
+ * reader still has the click and the cycling keys — but the shortcut is the
+ * one they already know (contract.md §3.7「浏览器保留键」).
+ */
+export const TAB_SLOTS = 9
+
+/** The command that activates the tab at `slot` (1-based). */
+export function tabSlotCommand(slot: number): string {
+  return `tabs.select:${slot}`
+}
 
 /**
  * The page's layout face (the sidebar's chosen view). `layout` publishes it on
@@ -282,10 +303,31 @@ function TabContent({ tab }: ContentProps) {
   )
 }
 
+/** The registry's hint for one command, or `undefined` on a page without it. */
+function hintOfCommand(commands: CommandsService | undefined, id: string): string | undefined {
+  if (commands === undefined) return undefined
+  try {
+    return commands.hintFor(id)
+  } catch {
+    return undefined
+  }
+}
+
 function TabsView() {
   const { ctx } = useKernel()
   const tabs = ctx.tabs
   const snapshot = useStore(tabs)
+  // Shortcut hints (contract.md §3.7, v0.16): while a modifier is held, each
+  // tab shows the key that activates it. Both are read here — before any early
+  // return, or the hook order would change between renders (docs/m15/spec.md
+  // §6 trap 1).
+  const commands = ctx.commands as CommandsService | undefined
+  const held = useHeldModifier()
+  useSyncExternalStore(
+    useCallback((listener: () => void) => commands?.subscribe(listener) ?? (() => {}), [commands]),
+    useCallback(() => commands?.version ?? 0, [commands]),
+    useCallback(() => commands?.version ?? 0, [commands]),
+  )
   // A commit being looked at takes the right column; the tabs (and their
   // per-tab state) stay mounted underneath the whole time.
   const commit = usePickedCommit(tabs)
@@ -302,9 +344,15 @@ function TabsView() {
   return (
     <section className="diorama-tabs" data-testid="tabs">
       <div className="diorama-tabs__strip" role="tablist">
-        {snapshot.tabs.map(tab => {
+        {snapshot.tabs.map((tab, index) => {
           const active = tab.id === snapshot.activeId
           const name = tab.path.slice(tab.path.lastIndexOf('/') + 1)
+          // Only the keys a reader needs are shown (contract.md §3.7, v0.16):
+          // **the nine tab picks**. Closing, cycling and the rest stay in the
+          // shortcut sheet (\`?\`), not on every tab's ✕ — a strip covered in
+          // chips stops reading as a strip.
+          const slot = index < TAB_SLOTS ? tabSlotCommand(index + 1) : undefined
+          const hint = slot === undefined ? undefined : hintOfCommand(commands, slot)
           return (
             <div
               key={tab.id}
@@ -314,6 +362,18 @@ function TabsView() {
               title={tab.path}
               data-tab-id={tab.id}
               data-testid={active ? 'active-tab' : 'tab'}
+              // Middle click closes the tab, as every tab strip does. The
+              // primary button is left to the label's own click handler.
+              onAuxClick={event => {
+                if (event.button !== 1) return
+                event.preventDefault()
+                tabs.close(tab.id)
+              }}
+              onMouseDown={event => {
+                // Stops the middle-click autoscroll puck the browser would
+                // otherwise drop on the page before `auxclick` fires.
+                if (event.button === 1) event.preventDefault()
+              }}
             >
               <button
                 type="button"
@@ -325,6 +385,11 @@ function TabsView() {
                 <FileIcon name={name} />
                 <span className="diorama-tabs__name">{name}</span>
               </button>
+              {/* The chip is a **floating label** over the tab, not a child of
+                  its label button: showing it must not widen, shorten or
+                  reflow the tab — the strip keeps its geometry while ⌘ is held
+                  (contract.md §3.7, v0.16). */}
+              <KeyHint label={hint} keys={slot === undefined ? undefined : `mod+${index + 1}`} held={held} />
               <button
                 type="button"
                 className="diorama-tabs__close"
@@ -402,11 +467,37 @@ export function apply(ctx: Context) {
   commands.register({ id: 'tabs.prev', title: '上一个标签页', when: many, run: () => step(-1, true) })
   commands.register({ id: 'tabs.nextEdge', title: '下一个标签页（到末尾停）', when: many, run: () => step(1, false) })
   commands.register({ id: 'tabs.prevEdge', title: '上一个标签页（到开头停）', when: many, run: () => step(-1, false) })
-  commands.bind({ keys: 'mod+alt+w', command: 'tabs.close' })
-  commands.bind({ keys: 'mod+alt+arrowright', command: 'tabs.next' })
-  commands.bind({ keys: 'mod+alt+arrowleft', command: 'tabs.prev' })
+  // The tab keys are an **editor's** keys (contract.md §3.7, v0.16): ⌘W closes,
+  // ⌘⇧[ / ⌘⇧] step (wrapping), ⌘1…⌘9 pick by position. v0.15 used
+  // `mod+alt+*` throughout to stay clear of the browser's own chords; that
+  // bought nothing — a reader whose hands know ⌘W does not learn ⌘⌥W — so the
+  // familiar chords win even where the browser claims them first (a page cannot
+  // prevent ⌘W, ⌘1, ⌘T…; where it eats the key the click and the cycling keys
+  // are still there).
+  commands.bind({ keys: 'mod+w', command: 'tabs.close' })
+  commands.bind({ keys: 'mod+shift+]', command: 'tabs.next' })
+  commands.bind({ keys: 'mod+shift+[', command: 'tabs.prev' })
+  // ⌃Tab / ⇧⌃Tab stop at the ends: the browser hands these to the page, and
+  // "walk to the last tab and stop" is what the key means in an editor.
   commands.bind({ keys: 'ctrl+tab', command: 'tabs.nextEdge' })
   commands.bind({ keys: 'ctrl+shift+tab', command: 'tabs.prevEdge' })
+
+  // ⌘1 … ⌘9 jump to the tab at that position. A slot with no tab behind it is
+  // simply not executable, so ⌘5 on three open tabs is a dead key rather than a
+  // surprise.
+  for (let slot = 1; slot <= TAB_SLOTS; slot++) {
+    const position = slot
+    commands.register({
+      id: tabSlotCommand(position),
+      title: `第 ${position} 个标签页`,
+      when: () => tabs.count >= position,
+      run: () => {
+        const target = tabs.getSnapshot().tabs[position - 1]
+        if (target !== undefined) tabs.activate(target.id)
+      },
+    })
+    commands.bind({ keys: `mod+${position}`, command: tabSlotCommand(position) })
+  }
 }
 
 /** `CommandContext.activeTab` carries the path, the id, and nothing else. */

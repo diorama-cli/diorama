@@ -4,6 +4,11 @@
  * Pure functions only: `node --test` cannot load `.tsx` (docs/m4/spec.md §9
  * trap 1), so everything the sheet computes lives here and the component in
  * `index.tsx` only draws it.
+ *
+ * The **notation → text** half used to live here too. It moved to the kernel
+ * (`diorama-kernel/client`'s `formatKeys`) when controls started showing their
+ * own shortcuts (contract.md §3.7, v0.15): two tables that print `⌘⌥W` would
+ * drift the first time one of them learned a new key name.
  */
 
 /** One command as the registry snapshot exposes it. */
@@ -28,55 +33,6 @@ export interface ShortcutRow {
   keys: readonly string[]
   /** Whether the command's `when` accepts the context right now. */
   available: boolean
-}
-
-const KEY_LABELS: Record<string, string> = {
-  arrowleft: '←',
-  arrowright: '→',
-  arrowup: '↑',
-  arrowdown: '↓',
-  tab: 'Tab',
-  escape: 'Esc',
-  enter: 'Enter',
-  space: 'Space',
-  backspace: 'Backspace',
-  delete: 'Del',
-  home: 'Home',
-  end: 'End',
-  pageup: 'PgUp',
-  pagedown: 'PgDn',
-}
-
-/**
- * Render one canonical binding (`mod+alt+w`) for a human.
- *
- * Apple platforms use the glyphs a Mac user expects, with no separators
- * (`⌘⌥W`); everywhere else spells the modifiers out and joins with `+`
- * (`Ctrl+Alt+W`). The `mod` token is what differs — `ctrl` is always `⌃` /
- * `Ctrl`, so `ctrl+tab` reads the same on both.
- */
-export function formatKeys(text: string, apple: boolean): string {
-  const parts = text.split('+').filter(part => part !== '')
-  if (parts.length === 0) return ''
-  const key = parts[parts.length - 1] as string
-  const modifiers = parts.slice(0, -1)
-  const label = keyLabel(key)
-  if (apple) {
-    const glyphs = modifiers.map(modifier => APPLE_MODIFIERS[modifier] ?? modifier).join('')
-    return `${glyphs}${label}`
-  }
-  const words = modifiers.map(modifier => OTHER_MODIFIERS[modifier] ?? modifier)
-  return [...words, label].join('+')
-}
-
-const APPLE_MODIFIERS: Record<string, string> = { mod: '⌘', ctrl: '⌃', alt: '⌥', shift: '⇧' }
-const OTHER_MODIFIERS: Record<string, string> = { mod: 'Ctrl', ctrl: 'Ctrl', alt: 'Alt', shift: 'Shift' }
-
-/** The key part's label: named keys get a symbol or a word, the rest uppercase. */
-function keyLabel(key: string): string {
-  const named = KEY_LABELS[key]
-  if (named !== undefined) return named
-  return key.length === 1 ? key.toUpperCase() : key
 }
 
 /**

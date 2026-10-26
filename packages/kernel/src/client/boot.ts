@@ -18,6 +18,8 @@
  */
 import { Context } from 'cordis'
 import { collectCommandContext, createCommandsService, type CommandContext, type CommandContextSources } from './commands.ts'
+import { isApplePlatform, modifierOf } from './keys.ts'
+import { ensureHeldModifierStore, heldModifier, holdModifier } from './modifiers.ts'
 import { createMountHandle, type MountHandle, type MountManifest } from './mount.ts'
 import { browserHistory, createRouterService, type RouterService, type RouterTabs } from './router.ts'
 import { browserThemeHost, createThemeService, THEME_HASH_KEY } from './theme.ts'
@@ -137,9 +139,18 @@ export async function bootClient(options: BootOptions): Promise<BootResult> {
   // `ctx.commands` is kernel infrastructure (contract.md §3.7): one registry,
   // bound to the page, present even when no palette piece is in the graph.
   const focus = createFocusTracker()
+  const apple = isApplePlatform()
+  // The store every control's hint chip subscribes to exists before the first
+  // piece renders (a component subscribes at its first render; a store created
+  // later would never be subscribed to).
+  ensureHeldModifierStore()
   const commands = createCommandsService({
     context: () => collectCommandContext({ ...focus.sources, mountId: handle.mountId }),
     warn: message => log(`[diorama] ${message}`),
+    apple,
+    // While a modifier is held the page shows every control's shortcut
+    // (contract.md §3.7, v0.15); a command's `when` may ask about it.
+    hints: heldModifier,
   })
   ctx.provide('commands', commands)
   // `ctx.router` is kernel infrastructure too (contract.md §3.8): the URL and
@@ -157,7 +168,7 @@ export async function bootClient(options: BootOptions): Promise<BootResult> {
     warn: message => log(`[diorama] ${message}`),
   })
   ctx.provide('theme', theme)
-  const disposeKeyboard = options.attachKeyboard === false ? () => {} : installKeyboard(commands, focus)
+  const disposeKeyboard = options.attachKeyboard === false ? () => {} : installKeyboard(commands, focus, apple)
 
   const failures = await loadManifest(ctx, options, log, handle ?? createMountHandle(options.manifest))
   // `tabs` is in by now (or it is not, and `open` has refused politely): a
@@ -371,10 +382,23 @@ function inTextEntry(target: EventTarget | null): boolean {
 /**
  * The page's only `keydown` listener (contract.md §3.7): one dispatcher, so
  * two pieces cannot fight over a key. Returns its disposer.
+ *
+ * It also keeps the **held modifier** up to date (contract.md §3.7, v0.15):
+ * the page shows every control's shortcut while ⌘ / Ctrl (or Option / Alt) is
+ * down. Nothing is run by the hold itself; the state is read through the
+ * page-global store `diorama-ui` exposes as `useHeldModifier`.
  */
-function installKeyboard(commands: { handleKey(event: KeyboardEvent & { repeat?: boolean }): boolean }, focus: { note(event: Event): void }): () => void {
+function installKeyboard(
+  commands: { handleKey(event: KeyboardEvent & { repeat?: boolean }): boolean },
+  focus: { note(event: Event): void },
+  apple: boolean,
+): () => void {
   if (typeof document === 'undefined') return () => {}
   const onKeyDown = (event: KeyboardEvent): void => {
+    // A held modifier (and any key pressed while it is down) keeps the hints
+    // up; this happens before the early returns below so typing in a field
+    // does not hide them either.
+    holdModifier(modifierOf(event, apple))
     if (event.defaultPrevented) return
     if (inTextEntry(event.target)) return
     if (commands.handleKey(event)) {
@@ -382,15 +406,27 @@ function installKeyboard(commands: { handleKey(event: KeyboardEvent & { repeat?:
       event.stopPropagation()
     }
   }
+  const onKeyUp = (event: KeyboardEvent): void => {
+    // Release of the *last* modifier clears the hints; `modifierOf` answers
+    // what is still down, so a ⌘→⌥ roll keeps them up.
+    holdModifier(modifierOf(event, apple))
+  }
+  // A window that loses focus never reports the keyup: without this the hints
+  // would stay on after the reader came back from another app.
+  const onBlur = (): void => holdModifier(undefined)
   const onPointerDown = (event: Event): void => focus.note(event)
   const onFocusIn = (event: Event): void => focus.note(event)
   document.addEventListener('keydown', onKeyDown, true)
+  document.addEventListener('keyup', onKeyUp, true)
   document.addEventListener('pointerdown', onPointerDown, true)
   document.addEventListener('focusin', onFocusIn, true)
+  window.addEventListener('blur', onBlur)
   return () => {
     document.removeEventListener('keydown', onKeyDown, true)
+    document.removeEventListener('keyup', onKeyUp, true)
     document.removeEventListener('pointerdown', onPointerDown, true)
     document.removeEventListener('focusin', onFocusIn, true)
+    window.removeEventListener('blur', onBlur)
   }
 }
 

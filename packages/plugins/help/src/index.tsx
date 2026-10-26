@@ -18,9 +18,9 @@
  */
 import type { Context } from 'cordis'
 import { useEffect, useRef, useSyncExternalStore } from 'react'
-import { isApplePlatform, type CommandsService } from 'diorama-kernel/client'
+import { formatKeys, isApplePlatform, type CommandsService } from 'diorama-kernel/client'
 import { hideOverlay, overlayOpen, overlayStore, provideEntry, toggleOverlay, useKernel } from 'diorama-ui'
-import { formatKeys, shortcutRows } from './bindings.ts'
+import { shortcutRows } from './bindings.ts'
 
 export const name = 'help'
 export const inject = ['slots']

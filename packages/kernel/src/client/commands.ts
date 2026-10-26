@@ -1,144 +1,41 @@
 /**
- * Keyboard binding notation (contract.md §3.7).
- *
- * A binding is `modifier+...+key`: `mod` (⌘ on macOS, Ctrl elsewhere), `ctrl`,
- * `alt`, `shift`, then exactly one key. The key is the lowercased
- * `KeyboardEvent.key` (`w`, `k`, `arrowleft`, `[`, `tab`). Modifiers are
- * order-independent; `mod` together with `ctrl` on the same platform is
- * ambiguous and refused.
- */
-
-/** The parts of a keyboard event the matcher needs (small on purpose: testable). */
-export interface KeyEventLike {
-  key: string
-  ctrlKey: boolean
-  metaKey: boolean
-  altKey: boolean
-  shiftKey: boolean
-  /**
-   * The physical key (`KeyW`, `Digit1`, `Slash`). Only consulted when the
-   * binding has `alt` and `key` did not match — see {@link matchesKeys}.
-   */
-  code?: string
-}
-
-export interface ParsedKeys {
-  /** The binding as written (canonical form: fixed modifier order). */
-  text: string
-  ctrl: boolean
-  meta: boolean
-  alt: boolean
-  shift: boolean
-  key: string
-}
-
-const MODIFIERS = new Set(['mod', 'ctrl', 'alt', 'shift'])
-
-/** Whether `mod` means ⌘ on this platform. */
-export function isApplePlatform(navigatorLike: { platform?: string; userAgent?: string } = globalThis.navigator ?? {}): boolean {
-  const text = `${navigatorLike.platform ?? ''} ${navigatorLike.userAgent ?? ''}`
-  return /mac|iphone|ipad/i.test(text)
-}
-
-/** Parse and normalise a binding; `undefined` when it is not one. */
-export function parseKeys(text: string, apple = isApplePlatform()): ParsedKeys | undefined {
-  const parts = text
-    .split('+')
-    .map(part => part.trim().toLowerCase())
-    .filter(part => part !== '')
-  if (parts.length < 1) return undefined
-  const key = parts[parts.length - 1] as string
-  const modifiers = parts.slice(0, -1)
-  if (key === '' || MODIFIERS.has(key)) return undefined
-  let ctrl = false
-  let meta = false
-  let alt = false
-  let shift = false
-  for (const modifier of modifiers) {
-    if (!MODIFIERS.has(modifier)) return undefined
-    if (modifier === 'mod') {
-      if (apple) meta = true
-      else ctrl = true
-    } else if (modifier === 'ctrl') ctrl = true
-    else if (modifier === 'alt') alt = true
-    else shift = true
-  }
-  // `mod` + `ctrl` on mac or mod + ctrl on windows: both are "the same" key.
-  if (modifiers.includes('mod') && modifiers.includes('ctrl')) return undefined
-  // Canonical text keeps the modifiers as *written* for `mod`, so `mod+k` and
-  // `ctrl+k` (or `meta+k`) do not describe the same physical key on every
-  // platform — see the reserved `meta` below.
-  const ordered = [modifiers.includes('mod') ? 'mod' : '', modifiers.includes('ctrl') ? 'ctrl' : '', alt ? 'alt' : '', shift ? 'shift' : '']
-    .filter(part => part !== '')
-    .join('+')
-  return { text: ordered === '' ? key : `${ordered}+${key}`, ctrl, meta, alt, shift, key }
-}
-
-/**
- * Whether an event matches the binding (modifiers exact, key equal).
- *
- * **The `alt` case on macOS** (contract.md §3.7): Option is a *compose* key
- * there, so the browser reports the character it produced rather than the
- * letter that was pressed — ⌘⌥W arrives as `key: '∑'`, ⌘⌥R as `'®'`, ⌘⌥1 as
- * `'¡'`. Comparing `key` alone therefore made every `mod+alt+*` binding dead on
- * a Mac and let the key through to the browser. For a binding that asks for
- * `alt`, a miss on `key` falls back to the **physical** key (`code`), which is
- * layout-independent and unaffected by composition.
- *
- * The fallback is deliberately narrow: only `alt` bindings take it, so a
- * non-Apple layout that types a different character with Alt (AltGr) still
- * cannot fire a plain binding it did not ask for.
- */
-export function matchesKeys(event: KeyEventLike, keys: ParsedKeys): boolean {
-  if (event.ctrlKey !== keys.ctrl) return false
-  if (event.metaKey !== keys.meta) return false
-  if (event.altKey !== keys.alt) return false
-  if (event.shiftKey !== keys.shift) return false
-  if (event.key.toLowerCase() === keys.key) return true
-  if (!keys.alt) return false
-  return codeMatches(event.code, keys.key)
-}
-
-/** `KeyboardEvent.code` names for the punctuation keys a binding may spell. */
-const CODE_NAMES: Record<string, string> = {
-  Slash: '/',
-  Backslash: '\\',
-  BracketLeft: '[',
-  BracketRight: ']',
-  Semicolon: ';',
-  Quote: "'",
-  Comma: ',',
-  Period: '.',
-  Minus: '-',
-  Equal: '=',
-  Backquote: '`',
-}
-
-/** Whether a `KeyboardEvent.code` names the same physical key as `key`. */
-function codeMatches(code: string | undefined, key: string): boolean {
-  if (code === undefined || code === '') return false
-  // `KeyW` → `w`, `Digit1` → `1`; punctuation has its own spelling.
-  if (code.startsWith('Key')) return code.slice(3).toLowerCase() === key
-  if (code.startsWith('Digit')) return code.slice(5) === key
-  const named = CODE_NAMES[code]
-  if (named !== undefined) return named === key
-  return code.toLowerCase() === key
-}
-
-
-/**
  * `ctx.commands` (contract.md §3.7): one registry for commands and key
  * bindings. The palette is a consumer of it, not a second registry.
  *
  * The kernel provides this service on the page's root context, so it exists
  * even when no piece offers a UI for it. `CommandContext` is collected here —
  * pieces never query focus or the active tab themselves.
+ *
+ * The key **notation** (parsing, matching, printing) lives in `keys.ts`, which
+ * `node --test` loads directly; this module adds the registry on top of it and
+ * re-exports the notation so every existing import keeps working.
+ */
+import { formatKeys, isApplePlatform, hintOf, matchesKeys, modifierOf, parseKeys, type KeyEventLike, type ParsedKeys } from './keys.ts'
+
+export {
+  formatKeys,
+  hintOf,
+  isApplePlatform,
+  matchesKeys,
+  modifierOf,
+  parseKeys,
+  type KeyEventLike,
+  type ParsedKeys,
+}
+
+/**
+ * The context a command sees. `hints` is about the **reader's hands**, not
+ * about the mount: while they hold ⌘ / Ctrl (or Option / Alt) the page shows
+ * each control's shortcut beside it (contract.md §3.7, v0.15), so a command
+ * that draws a control may ask "are hints up right now?".
  */
 export interface CommandContext {
   mountId: string
   activeTab?: { id: string; path: string }
   activeRenderer?: string
   focus: 'tabs' | 'tree' | 'editor' | 'other'
+  /** The modifier the reader is holding down, if any (see `heldModifier`). */
+  hints?: 'mod' | 'alt'
 }
 
 export type CommandWhen = (context: CommandContext) => boolean
@@ -158,9 +55,21 @@ export interface KeybindingSpec {
   when?: CommandWhen
 }
 
+/**
+ * One binding as the snapshot exposes it: the canonical text a shortcut is
+ * matched by (`mod+alt+w`) and the text a human reads (`⌘⌥W` / `Ctrl+Alt+W`).
+ * The formatted form is computed once, here, so a control that shows its own
+ * shortcut does not re-derive the notation per render.
+ */
+export interface KeybindingInfo {
+  keys: string
+  label: string
+  command: string
+}
+
 export interface CommandsSnapshot {
   commands: readonly { id: string; title: string }[]
-  bindings: readonly { keys: string; command: string }[]
+  bindings: readonly KeybindingInfo[]
 }
 
 /** A duplicate command id: a programming error (contract.md §3.7). */
@@ -178,6 +87,8 @@ export interface CommandsOptions {
   warn?: (message: string) => void
   /** Platform switch for `mod` (defaults to the browser platform). */
   apple?: boolean
+  /** The modifier the reader is holding, for `CommandContext.hints` (defaults to none). */
+  hints?(): 'mod' | 'alt' | undefined
 }
 
 interface StoredBinding {
@@ -294,6 +205,27 @@ export class CommandsService {
   }
 
   /**
+   * The binding a control should advertise for a command (contract.md §3.7,
+   * v0.15): the command's **first** binding, both as canonical text
+   * (`mod+alt+w`, what a test looks for) and as readable text (`⌘⌥W` /
+   * `Ctrl+Alt+W`, what the chip shows). `undefined` when the command is not
+   * registered or has no binding.
+   *
+   * Whether the command is *available* right now is deliberately not asked: a
+   * control that exists shows its key, and dispatch still refuses an
+   * unavailable command.
+   */
+  bindingFor(id: string): KeybindingInfo | undefined {
+    if (!this.commands.has(id)) return undefined
+    return this.snapshot.bindings.find(binding => binding.command === id)
+  }
+
+  /** The readable form of {@link bindingFor} (`⌘⌥W`), or `undefined`. */
+  hintFor(id: string): string | undefined {
+    return this.bindingFor(id)?.label
+  }
+
+  /**
    * Handle one key event. Returns whether a command ran. When several bindings
    * match and are available, the first registered wins and the rest warn.
    */
@@ -346,6 +278,8 @@ export class CommandsService {
   private context(): CommandContext {
     const base = this.options.context()
     let current: CommandContext = base
+    const hints = this.options.hints?.()
+    if (hints !== undefined) current = { ...current, hints }
     for (const source of this.sources) {
       const activeTab = source.activeTab?.()
       const activeRenderer = source.activeRenderer?.()
@@ -366,7 +300,9 @@ export class CommandsService {
       commands: [...this.commands.values()].map(command => ({ id: command.id, title: command.title })),
       // Every binding, not only the ones available right now: the snapshot is
       // a registry view (a palette lists the command; availability is `canRun`).
-      bindings: this.bindings.map(binding => ({ keys: binding.keys, command: binding.command })),
+      // The readable form is computed here, once per change, because every
+      // control with a hint reads it (contract.md §3.7, v0.15).
+      bindings: this.bindings.map(binding => ({ keys: binding.keys, label: formatKeys(binding.keys, this.apple), command: binding.command })),
     }
     for (const listener of [...this.listeners]) listener()
   }

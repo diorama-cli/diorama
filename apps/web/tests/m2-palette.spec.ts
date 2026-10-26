@@ -82,10 +82,10 @@ test('9. without the palette plugin the shortcuts still work', async ({ page }) 
     await tree.locator('[data-path="README.md"]').click()
     await tree.locator('[data-path="LICENSE"]').click()
     await expect(page.locator('.diorama-tabs__strip [role="tab"]')).toHaveCount(2)
-    // mod+k does nothing (nothing binds it), but mod+alt+w still closes.
+    // mod+k does nothing (nothing binds it), but mod+w still closes.
     await page.keyboard.press(`${MOD}+k`)
     await expect(page.getByTestId('palette')).toHaveCount(0)
-    await page.keyboard.press(`${MOD}+Alt+w`)
+    await page.keyboard.press(`${MOD}+w`)
     await expect(page.locator('.diorama-tabs__strip [role="tab"]')).toHaveCount(1)
   } finally {
     await server.stop()

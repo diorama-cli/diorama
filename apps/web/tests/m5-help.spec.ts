@@ -27,7 +27,7 @@ test('1. ? opens the sheet, ? or Escape closes it', async ({ page }) => {
     await expect(sheet.locator('[data-command="tabs.close"]')).toBeVisible()
     await expect(sheet.locator('[data-command="tree.focus"]')).toBeVisible()
     const closeKey = sheet.locator('[data-command="tabs.close"] kbd')
-    await expect(closeKey).toHaveText(process.platform === 'darwin' ? '⌘⌥W' : 'Ctrl+Alt+W')
+    await expect(closeKey).toHaveText(process.platform === 'darwin' ? '⌘W' : 'Ctrl+W')
 
     // The same key closes it (toggle), and so does Escape.
     await page.keyboard.press('Shift+Slash')

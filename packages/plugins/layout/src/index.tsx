@@ -19,7 +19,7 @@ import type { Context } from 'cordis'
 import type { MountHandle } from 'diorama-kernel'
 import type { CommandsService } from 'diorama-kernel/client'
 import { useCallback, useLayoutEffect, useRef, useSyncExternalStore, type CSSProperties, type ReactElement } from 'react'
-import { iconSvg, provideEntry, Slot, Splitter, useKeyedSeat, usePaneSize } from 'diorama-ui'
+import { iconSvg, KeyHint, provideEntry, Slot, Splitter, useHeldModifier, useKeyedSeat, useKernel, usePaneSize } from 'diorama-ui'
 import type {} from 'diorama-plugin-slots'
 import type { SidebarViewProps, SlotEntry } from 'diorama-plugin-slots'
 import { readFolded, SIDEBAR_RAIL_PX, storeFolded } from './sidebar.ts'
@@ -278,11 +278,17 @@ function ViewSwitcher({
   views,
   active,
   folded,
+  held,
+  hintOf,
   onPick,
 }: {
   views: readonly SlotEntry<'sidebar.views'>[]
   active: string | undefined
   folded: boolean
+  /** The modifier the reader is holding (contract.md §3.7, v0.15). */
+  held: 'mod' | 'alt' | undefined
+  /** The key a view's command answers (label to show, canonical to test). */
+  hintOf(view: string): { label: string; keys: string } | undefined
   onPick(view: string): void
 }) {
   return (
@@ -293,14 +299,18 @@ function ViewSwitcher({
         const selected = key === active
         // The tooltip names the fold gesture for the icon that is already up
         // (the accessible name stays the view's own: `aria-label` below).
-        const hint = selected ? (folded ? title + '（点击展开侧栏）' : title + '（再点收起侧栏）') : title
+        const tooltip = selected ? (folded ? title + '（点击展开侧栏）' : title + '（再点收起侧栏）') : title
+        // The shortcut is drawn beside the icon, never merged into the title:
+        // the chip is decoration (it goes when the modifier is released) while
+        // the title stays the button's accessible name (contract.md §3.7).
+        const hint = hintOf(key)
         return (
           <button
             key={view.id}
             type="button"
             role="tab"
             aria-selected={selected}
-            title={hint}
+            title={tooltip}
             aria-label={title}
             className={`diorama-sidebar__view${selected ? ' diorama-sidebar__view--active' : ''}`}
             data-view={key}
@@ -316,6 +326,7 @@ function ViewSwitcher({
               // Inline SVG authored by the piece that owns the view.
               <span aria-hidden="true" dangerouslySetInnerHTML={{ __html: view.icon }} />
             )}
+            <KeyHint label={hint?.label} keys={hint?.keys} held={held} />
           </button>
         )
       })}
@@ -387,6 +398,18 @@ function Sidebar({
   // The third argument (the server snapshot) is the same number: the shell
   // server-renders the page first, and React requires one to do it.
   useSyncExternalStore(viewChoice.subscribe, viewVersion, viewVersion)
+  // Shortcut hints (contract.md §3.7, v0.15). Both are read **before** the
+  // early return below: a hook after a conditional return changes the hook
+  // count between renders and takes the whole subtree down with it
+  // (docs/m15/spec.md §6 trap 1).
+  const { ctx } = useKernel()
+  const commands = ctx.commands as CommandsService | undefined
+  const held = useHeldModifier()
+  useSyncExternalStore(
+    useCallback((listener: () => void) => commands?.subscribe(listener) ?? (() => {}), [commands]),
+    useCallback(() => commands?.version ?? 0, [commands]),
+    useCallback(() => commands?.version ?? 0, [commands]),
+  )
   // Publish the store as the page's layout face once this column exists: pieces
   // in other halves read it (never import it — each half is its own build).
   useLayoutEffect(publishViewChoice, [])
@@ -422,9 +445,19 @@ function Sidebar({
       className={`diorama-layout__sidebar${folded ? ' diorama-layout__sidebar--folded' : ''}`}
       data-slot="sidebar.views"
       data-folded={folded ? 'true' : 'false'}
+      // While a modifier is held the rail lets its chips out of the 36px
+      // column (see the stylesheet): they are drawn beside the icon, not in it.
+      data-hints={held === undefined ? undefined : 'true'}
     >
       <div className="diorama-sidebar__rail">
-        <ViewSwitcher views={views} active={active} folded={folded} onPick={setChosen} />
+        <ViewSwitcher
+          views={views}
+          active={active}
+          folded={folded}
+          held={held}
+          hintOf={view => hintOfCommand(commands, SIDEBAR_COMMANDS.find(command => command.key === view)?.id)}
+          onPick={setChosen}
+        />
         <FoldButton folded={folded} onToggle={onToggleFold} />
       </div>
       {/* Folded panes are hidden, not unmounted — the same rule as an inactive
@@ -455,7 +488,6 @@ function Sidebar({
     </aside>
   )
 }
-
 function MainColumn() {
   return (
     <main className="diorama-layout__main" data-slot="layout.main">
@@ -628,6 +660,21 @@ function trackViewInHash(ctx: Context): void {
       // (the fold is a preference of its own, contract.md §5.2).
       return
     }
+  }
+}
+
+/**
+ * The registry's hint for one command, or `undefined` when the page has no
+ * registry (the server half) or the command has no binding. Reading it must
+ * never break the frame: a page without `ctx.commands` simply shows no chips.
+ */
+function hintOfCommand(commands: CommandsService | undefined, id: string | undefined): { label: string; keys: string } | undefined {
+  if (commands === undefined || id === undefined) return undefined
+  try {
+    const binding = commands.bindingFor(id)
+    return binding === undefined ? undefined : { label: binding.label, keys: binding.keys }
+  } catch {
+    return undefined
   }
 }
 

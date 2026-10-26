@@ -1,25 +1,14 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { formatKeys, shortcutRows } from '../src/bindings.ts'
+import { shortcutRows } from '../src/bindings.ts'
 
-test('formatKeys: apple uses glyphs, others spell the modifiers out', () => {
-  assert.equal(formatKeys('mod+alt+w', true), '⌘⌥W')
-  assert.equal(formatKeys('mod+alt+w', false), 'Ctrl+Alt+W')
-  assert.equal(formatKeys('mod+k', true), '⌘K')
-  assert.equal(formatKeys('mod+k', false), 'Ctrl+K')
-  // `ctrl` is not `mod`: it keeps its own glyph/word on both platforms.
-  assert.equal(formatKeys('ctrl+tab', true), '⌃Tab')
-  assert.equal(formatKeys('ctrl+tab', false), 'Ctrl+Tab')
-  assert.equal(formatKeys('ctrl+shift+tab', false), 'Ctrl+Shift+Tab')
-})
-
-test('formatKeys: named keys and single characters', () => {
-  assert.equal(formatKeys('shift+?', true), '⇧?')
-  assert.equal(formatKeys('shift+?', false), 'Shift+?')
-  assert.equal(formatKeys('mod+alt+arrowright', true), '⌘⌥→')
-  assert.equal(formatKeys('escape', true), 'Esc')
-  assert.equal(formatKeys('', true), '')
-})
+/**
+ * The shortcut sheet's rows (contract.md §3.7, §5).
+ *
+ * `formatKeys` used to be tested here too; it moved to the kernel when
+ * controls started showing their own shortcuts (v0.15), and its tests moved
+ * with it — `packages/kernel/test/keys.test.ts`. One table, one set of tests.
+ */
 
 test('shortcutRows: binding order, unknown commands dropped, unbound commands hidden', () => {
   const commands = [
@@ -65,4 +54,13 @@ test('shortcutRows: a command bound to several keys lists them in order', () => 
   ]
   const rows = shortcutRows(commands, bindings, () => true)
   assert.deepEqual(rows[0]?.keys, ['shift+?', 'mod+/'])
+})
+
+test('shortcutRows: every tab slot shows up as its own row', () => {
+  // ⌥1 … ⌥9 are nine commands, so the sheet lists nine rows — that is the
+  // point of the sheet (contract.md §3.7, v0.15).
+  const commands = Array.from({ length: 3 }, (_, index) => ({ id: `tabs.select:${index + 1}`, title: `第 ${index + 1} 个标签页` }))
+  const bindings = commands.map((command, index) => ({ keys: `alt+${index + 1}`, command: command.id }))
+  const rows = shortcutRows(commands, bindings, () => true)
+  assert.deepEqual(rows.map(row => row.keys[0]), ['alt+1', 'alt+2', 'alt+3'])
 })

@@ -75,6 +75,22 @@ function Palette() {
     .sort((a, b) => a.title.localeCompare(b.title, 'zh-Hans-CN'))
   const active = Math.min(selected, Math.max(rows.length - 1, 0))
 
+  /**
+   * The keys that run a command, as text (contract.md §3.7, v0.17). Read off the
+   * registry snapshot — the same `label` the on-screen chips and the shortcut
+   * sheet print, so the three surfaces can never spell one binding differently.
+   * A command bound to several keys lists them all: the palette is where a
+   * reader looks one up, and hiding the second key would send them to `?`.
+   */
+  const keysFor = (id: string): string[] => {
+    const labels: string[] = []
+    for (const binding of snapshot.bindings) {
+      if (binding.command !== id || labels.includes(binding.label)) continue
+      labels.push(binding.label)
+    }
+    return labels
+  }
+
   const run = (id: string): void => {
     setOpen(false)
     void commands.run(id)
@@ -119,20 +135,36 @@ function Palette() {
           }}
         />
         <ul className="diorama-palette__list" role="listbox">
-          {rows.map((command, index) => (
-            <li
-              key={command.id}
-              role="option"
-              aria-selected={index === active}
-              className={`diorama-palette__item${index === active ? ' diorama-palette__item--active' : ''}`}
-              data-command={command.id}
-              onMouseEnter={() => setSelected(index)}
-              onClick={() => run(command.id)}
-            >
-              <span className="diorama-palette__title">{command.title}</span>
-              <span className="diorama-palette__id">{command.id}</span>
-            </li>
-          ))}
+          {rows.map((command, index) => {
+            const keys = keysFor(command.id)
+            return (
+              <li
+                key={command.id}
+                role="option"
+                aria-selected={index === active}
+                className={`diorama-palette__item${index === active ? ' diorama-palette__item--active' : ''}`}
+                data-command={command.id}
+                onMouseEnter={() => setSelected(index)}
+                onClick={() => run(command.id)}
+              >
+                <span className="diorama-palette__title">{command.title}</span>
+                {/* A row with a shortcut says so, on the same line, right-aligned
+                    (contract.md §3.7, v0.17): a command a reader can also reach
+                    with a key should teach them that key. No key → nothing, not
+                    an empty slot. */}
+                {keys.length > 0 && (
+                  <span className="diorama-palette__keys" data-testid="palette-keys">
+                    {keys.map(label => (
+                      <kbd key={label} className="diorama-palette__key">
+                        {label}
+                      </kbd>
+                    ))}
+                  </span>
+                )}
+                <span className="diorama-palette__id">{command.id}</span>
+              </li>
+            )
+          })}
           {rows.length === 0 && (
             <li className="diorama-palette__empty" data-testid="palette-empty">
               没有可执行的命令

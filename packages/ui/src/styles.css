@@ -478,7 +478,6 @@ body.diorama-resizing {
   align-items: center;
   justify-content: center;
   flex: none;
-  width: 22px;
   height: 22px;
   margin-right: 4px;
   padding: 0;
@@ -515,6 +514,66 @@ body.diorama-resizing {
   justify-content: center;
   height: 100%;
   color: var(--dio-muted);
+}
+
+/* Shortcut hints (contract.md §3.7, v0.16): while the reader holds ⌘ / Ctrl
+   (or Option / Alt) each control shows its key.
+
+   The chip is a **floating label** (cmux's behaviour): it is absolutely
+   positioned over the control, never part of its layout, so appearing and
+   disappearing changes neither the control's size nor the position of anything
+   around it. The control's own text also stays readable underneath — the chip
+   sits on a solid keycap surface. */
+.diorama-keyhint {
+  position: absolute;
+  z-index: 6;
+  padding: 1px 5px;
+  border: 1px solid var(--dio-border);
+  border-radius: 4px;
+  background: var(--dio-panel);
+  color: var(--dio-text);
+  box-shadow: 0 1px 3px var(--dio-shadow);
+  font-family: var(--dio-mono);
+  font-size: 10px;
+  line-height: 14px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* A tab's chip floats in the tab's top-right corner, over the file name: the
+   strip is 32px tall, so the label fits above the name without touching it. */
+.diorama-tabs__tab {
+  position: relative;
+}
+
+.diorama-tabs__tab .diorama-keyhint {
+  right: 2px;
+  top: 2px;
+}
+
+/* In the activity bar the rail is only 36px wide: the chip floats beside the
+   icon (an editor's "tooltip next to the icon"), over the pane it opens. The
+   column clips its own overflow, so while hints are up it lets them out. */
+.diorama-sidebar__view {
+  position: relative;
+}
+
+.diorama-sidebar__view .diorama-keyhint {
+  left: calc(100% + 4px);
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.diorama-layout__sidebar {
+  overflow: hidden;
+}
+
+/* While hints are up the rail lets its chips out of the 36px column: they are
+   drawn beside the icon, not inside it (see the chip rule above), and the
+   column would otherwise clip them (the folded rail is the whole column). */
+.diorama-layout__sidebar[data-hints='true'],
+.diorama-layout__sidebar--folded[data-hints='true'] {
+  overflow: visible;
 }
 
 /* Renderer dispatch piece */
@@ -942,6 +1001,33 @@ body.diorama-resizing {
 .diorama-palette__id {
   color: var(--dio-muted);
   font-size: 11px;
+}
+
+/* The shortcut a row answers, right-aligned before the command id (contract.md
+   §3.7, v0.17): the same keycap chip the page uses while a modifier is held, in
+   flow here — a palette row is a list line, not a control whose geometry a
+   reader is tracking. Several keys sit side by side. */
+.diorama-palette__keys {
+  display: inline-flex;
+  flex: none;
+  gap: 3px;
+  margin-left: auto;
+}
+
+.diorama-palette__key {
+  padding: 1px 5px;
+  border: 1px solid var(--dio-border);
+  border-radius: 4px;
+  background: var(--dio-keycap);
+  color: var(--dio-muted);
+  font-family: var(--dio-mono);
+  font-size: 10px;
+  line-height: 14px;
+  white-space: nowrap;
+}
+
+.diorama-palette__item--active .diorama-palette__key {
+  color: inherit;
 }
 
 .diorama-palette__empty {

@@ -13,13 +13,15 @@
 | 3 | [docs/features.md](docs/features.md) | **有什么**：能力清单与档位（✅ / v1 / 未来 / 不做） |
 | 4 | 最近一档的 `docs/mN/spec.md` | **怎么实现的** + **§6.2 的坑**（见下面 §5） |
 
-最近一档是 [docs/m19/spec.md](docs/m19/spec.md)（diff 的单栏「整个文件」与双栏「新旧对照」按文件语言
+最近一档是 [docs/m20/spec.md](docs/m20/spec.md)（快捷键能力增强，v0.16 按 cmux 的体验重做：tab 条
+键位对齐 IDE（`mod+w` 关、`mod+shift+[ / ]` 循环、`mod+1..9` 跳，撞浏览器也不让步）、中键关 tab，
+以及**按住 ⌘ / Ctrl 或 ⌥ 时关键快捷键以浮层标签显示**——浮层不参与布局，几何不变；只显示 tab 键与
+切换器键，关闭 / 收起不显示；状态在页面全局 `__diorama_keys__`，文本来自注册表快照的 `label`）；
+上一档是 [docs/m19/spec.md](docs/m19/spec.md)（diff 的单栏「整个文件」与双栏「新旧对照」按文件语言
 上色：引擎由 `code` 半边发布到页面全局 `__diorama_highlight__`，`git-changes` 读它，每行一个完整
 HTML 片段；行内那档是 git 的文本，不上色）；
-上一档是 [docs/m18/spec.md](docs/m18/spec.md)（侧栏可收起：切换器脚下有「收起 / 展开」按钮与
-`mod+b`，收起后只剩 36px 的一竖条、面板隐藏不卸载，收起是**偏好**、与"选了哪个视图"正交）；
-更早是 [docs/m17/spec.md](docs/m17/spec.md)（Markdown 的文档内大纲、KaTeX 公式、Mermaid 图表，
-以及 `/plugins/<id>/<path>` 这条运行时文件路由；大纲栏在宽屏上与文章**整体居中**）。
+更早是 [docs/m18/spec.md](docs/m18/spec.md)（侧栏可收起：切换器脚下有「收起 / 展开」按钮与
+`mod+b`，收起后只剩 36px 的一竖条、面板隐藏不卸载，收起是**偏好**、与"选了哪个视图"正交）。
 
 `docs/plan.md` 是**阶段性排期**，会退役；不要把它当长期真源，也不要在新代码里引用它。
 一次会话的最小读法：`contract.md` 目录 → `features.md` 表 → 最近 spec 的「坑」一节。
@@ -63,7 +65,8 @@ scripts/                  生成器（图标表；`pnpm icons` 重新生成）
 | `ctx.fs` 语义、错误码、watch | `kernel/src/server/fs.ts`、`kernel/src/client/fs.ts` |
 | 忽略规则（`ignore`） | `kernel/src/shared/ignore.ts` |
 | RPC 帧、订阅端点、session | `kernel/src/shared/rpc.ts`、`server/rpc.ts`、`client/rpc.ts` |
-| `ctx.commands`、键记法、按键分发 | `kernel/src/client/commands.ts`、`client/boot.ts` |
+| `ctx.commands`、按键分发 | `kernel/src/client/commands.ts`、`client/boot.ts` |
+| 键记法（解析 / 匹配 / 打印）与「按住修饰键」状态 | `kernel/src/client/keys.ts`、`client/modifiers.ts`（页面全局 `__diorama_keys__`；控件显示快捷键用 `diorama-ui` 的 `useHeldModifier` + `KeyHint`） |
 | `ctx.tabs` / `ctx.tree` | `kernel/src/client/tabs.ts`、`client/tree.ts` |
 | `ctx.git`（仓库探测、status/diff/log/show/showCommit/blob、上限） | `kernel/src/server/git.ts`、`kernel/src/shared/types.ts`、`kernel/src/client/git.ts` |
 | 仓库发现（向下走查、深度/忽略/上限、嵌套） | `kernel/src/server/repos.ts`、`kernel/src/server/config.ts` 的 `[git]` 表 |
@@ -157,6 +160,10 @@ scripts/                  生成器（图标表；`pnpm icons` 重新生成）
 | 双栏里配对行（`-` 与 `+` 同行）的新增格没有颜色 | 把"左侧是删除"当成了"整行只有删除" | 左格取成段的删除文本，**右格各自**按自己的行号从文件里取（m19/spec §6 坑 2）|
 | 用了页面全局的引擎之后一直重渲染 / 「正在读取…」 | 把引擎**对象**当 `useSyncExternalStore` 的快照 | 快照必须是**版本号**（数字）；引擎本身在订阅之后另读（m19/spec §6 坑 3）|
 | 想让 A 半边用 B 半边的表 / 库 | 半边是自足闭包，import 会把库复制进第二个 bundle，两份表还会漂 | 跨半边共享的只读能力由发布方写到页面全局（`__diorama_highlight__` / `__diorama_layout__` / `__diorama_reveal__`），另一方读它（contract §8、m19/spec §6 坑 4）|
+| 按住 ⌘ 后「状态变了但芯片不出现」 | 页面全局 store 是**懒创建**的（第一次写才建），而组件在**首次渲染**就 `subscribe` 了——订阅到一个稍后出现的对象等于没订阅 | 页面全局 store 由发布方在 boot 时**先建出来**（`ensureHeldModifierStore`），别等第一次写；快照必须是字符串 / 数字，不是对象（m20/spec §6 坑 2）|
+| 新快捷键在真实浏览器里毫无反应、e2e 却全绿 | `mod+1..9`、`mod+w` 是**浏览器自己的**键，Chrome / Safari / Firefox 不交给页面；Playwright 的 `keyboard.press` 走 CDP 合成，绕过了保留键 | 键位对齐 IDE 是拍板的决定（m20/spec §6 坑 1）：键的正确性优先于「每次按键都到页面」；测 `alt` 绑定要 `dispatchEvent` 带组合字符 + `code` 的事件（m4/spec §16）|
+| 提示芯片一出现，tab / 按钮就挪动 | 芯片画进了控件的行内流，撑宽 / 撑高了它 | 芯片是**浮层**（`position: absolute`），不参与布局；e2e 用「按住前后几何不变」锁住（m20/spec §6 坑 2b）|
+| 编辑替换文本里写 `${…}`，构建报 `Expected ',' or '}' but found '?'` | 替换字符串里的 `${…}` 被当成插值，写出 `${{…}` | 改 `className={`…${…}`}` 这类模板后**回读一眼**（m20/spec §6 坑 4）|
 | 侧栏视图按钮是个空白方块 | `iconSvg` 在没装图标表的页面返回 `''`；切换器原先只判 `undefined` | 新按钮图标先进 `scripts/generate-icons.mjs` 的 `BUTTON_ICONS`、跑 `pnpm icons`，再重建**页面壳**（表由壳安装）；`icon` 为空也要退回标题首字（m17/spec §6 坑 9）|
 
 ## 6. 边界（不要越过的线）

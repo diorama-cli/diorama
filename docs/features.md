@@ -95,8 +95,9 @@
 | U1 | 左侧栏 + 右侧多 tab | ✅ M0→本轮 | 左栏是 `sidebar.views`（文件树 / 变更 / 历史 / 搜索，VS Code 式切换）；每个 tab 一个内容座位（隐藏不卸载）；**v0.11 起左栏宽度可拖**（U16）；**v0.13 起可收起**（U20）|
 | U15 | 文件类型图标 / 功能按钮图标 | ✅ v0.8 | 树、tab 条、搜索结果、变更列表的文件行带彩色类型图标（目录随展开态换画）；切换器、tab 关闭、搜索开关、刷新等按钮用同族描边图标；换掉文字的按钮都补 `aria-label`（[m7/spec.md](m7/spec.md)）|
 | U2 | 文件变化自动刷新（watch） | ✅ M2 | 内容与树；`view.toggleAutoRefresh` 可关 |
-| U3 | 快捷键 | ✅ M2 | 全局唯一绑定 + `when`；`mod` = ⌘/Ctrl；v0.6 加 `mod+alt+1/2/3` 切侧栏视图；v0.7 加 `?` 开快捷键说明；v0.8 加 `mod+alt+4`（搜索视图）、`mod+p`（快速打开）、`mod+shift+f`（搜索视图）；v0.9 加 `mod+alt+t`（主题循环） |
-| U4 | command palette | ✅ M2 | 只列可执行命令（不灰显），`Esc` 关、`Enter` 跑 |
+| U3 | 快捷键 | ✅ M2 | 全局唯一绑定 + `when`；`mod` = ⌘/Ctrl；v0.6 加 `mod+alt+1/2/3` 切侧栏视图；v0.7 加 `?` 开快捷键说明；v0.8 加 `mod+alt+4`（搜索视图）、`mod+p`（快速打开）、`mod+shift+f`（搜索视图）；v0.9 加 `mod+alt+t`（主题循环）；**v0.16 起 tab 条对齐 IDE**：`mod+w` 关、`mod+shift+[ / ]` 循环、`mod+1..9` 按序号跳，中键关闭 tab（与浏览器撞了也不让步——键位是肌肉记忆里的那个，§3.7、§31） |
+| U22 | 按住修饰键显示快捷键（cmux 式） | ✅ v0.15，v0.16 收紧 | 按住 ⌘ / Ctrl **或** Option / Alt，**关键**快捷键以浮层标签显示：tab 条右上角 `⌘<n>`、侧栏切换器图标旁 `⌘⌥<n>`；关闭 / 收起这类辅助键不显示（归 `?` 速查表）。浮层 `position: absolute` **不参与布局**——出现与消失不改变任何控件的大小与位置；松手消失，窗口失焦也清。状态在页面全局 `__diorama_keys__`，文本来自注册表快照的 `label`（`formatKeys` 是唯一翻译表）；芯片 `aria-hidden`，无障碍名不变（contract §3.7、§5.2、§31）|
+| U4 | command palette | ✅ M2 | 只列可执行命令（不灰显），`Esc` 关、`Enter` 跑；**v0.17 起有快捷键的行右侧显示它**（多个键并列，与页面芯片、速查表同读一份 `formatKeys`；没有绑定的行不占位，contract §3.7、§31）|
 | U14 | 搜索结果的落点（跳到那一行） | ✅ v0.8 | 点搜索结果打开文件并滚到该行、画出高亮带（`diorama-ui` 的 reveal store，页面全局）；`code` 与 `plaintext` 都实现了，Markdown 等不跳（其渲染不保行号）|
 | U13 | 快捷键说明（速查表） | ✅ v0.7 | `?` 开/关，`Esc` 关；全部绑定都在（不可用的灰显）；与 palette 同一时刻只开一个 |
 | U16 | 可拖动的窗格 | ✅ v0.11 | 左栏与提交座位的文件清单各有一条可拖的边（`diorama-ui` 的 `Splitter`）：指针拖动、← → / Shift / Home / End 可调，160–720px，宽度记在 `localStorage`；拖动期间只写 CSS 变量，松手才进 React state（contract §5.2、docs/m15/spec.md） |

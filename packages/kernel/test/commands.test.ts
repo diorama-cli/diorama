@@ -184,6 +184,53 @@ test('commands: contributed sources refine the context field by field', async ()
   assert.deepEqual(seen.at(-1), BASE)
 })
 
+test('commands: hintFor prints the one binding a control should show', () => {
+  const { commands } = service()
+  commands.register({ id: 'tabs.close', title: 'Close', run: () => {} })
+  commands.register({ id: 'tabs.select:1', title: 'Tab 1', run: () => {} })
+  commands.register({ id: 'view.toggleAutoRefresh', title: 'Auto', run: () => {} })
+  // No binding yet: nothing to show.
+  assert.equal(commands.hintFor('tabs.close'), undefined)
+  commands.bind({ keys: 'mod+alt+w', command: 'tabs.close' })
+  commands.bind({ keys: 'ctrl+w', command: 'tabs.close' })
+  commands.bind({ keys: 'mod+1', command: 'tabs.select:1' })
+  // The **first** binding, formatted for this platform (the service is built
+  // with `apple: true` here, so `mod` prints as ⌘).
+  assert.equal(commands.hintFor('tabs.close'), '⌘⌥W')
+  assert.equal(commands.hintFor('tabs.select:1'), '⌘1')
+  // A command with no binding and an unknown command both answer undefined.
+  assert.equal(commands.hintFor('view.toggleAutoRefresh'), undefined)
+  assert.equal(commands.hintFor('nope.nope'), undefined)
+})
+
+test('commands: the snapshot publishes the readable form beside every binding', () => {
+  const { commands } = service()
+  commands.register({ id: 'tabs.next', title: 'Next', run: () => {} })
+  commands.bind({ keys: 'alt+mod+arrowright', command: 'tabs.next' })
+  const [binding] = commands.getSnapshot().bindings
+  // Canonical text for matching, readable text for showing (contract.md §3.7).
+  assert.equal(binding?.keys, 'mod+alt+arrowright')
+  assert.equal(binding?.label, '⌘⌥→')
+})
+
+test('commands: the held modifier reaches a command through its context', async () => {
+  let held: 'mod' | 'alt' | undefined
+  const commands = createCommandsService({
+    context: () => BASE,
+    apple: true,
+    hints: () => held,
+    warn: () => {},
+  })
+  const seen: (string | undefined)[] = []
+  commands.register({ id: 'probe:hints', title: 'Probe', run: context => { seen.push(context.hints) } })
+  await commands.run('probe:hints')
+  held = 'mod'
+  await commands.run('probe:hints')
+  held = 'alt'
+  await commands.run('probe:hints')
+  assert.deepEqual(seen, [undefined, 'mod', 'alt'])
+})
+
 test('commands: snapshot is stable between changes', () => {
   const { commands } = service()
   const first = commands.getSnapshot()

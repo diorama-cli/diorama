@@ -525,6 +525,8 @@ interface CommandContext {
   activeRenderer?: string
   /** 焦点所在的编辑面（选单只记录来源，不记录节点）。 */
   focus: 'tabs' | 'tree' | 'editor' | 'other'
+  /** 读者此刻按住的修饰键（v0.15）：按住时页面显示各控件的快捷键。 */
+  hints?: 'mod' | 'alt'
 }
 
 type CommandWhen = (ctx: CommandContext) => boolean
@@ -556,6 +558,17 @@ interface CommandsService {
   /** 可观察快照（palette 用 useSyncExternalStore 读）。 */
   getSnapshot(): CommandsSnapshot
   subscribe(listener: () => void): () => void
+  /** 该命令**第一条**绑定：键记法与可读文本（v0.15，控件显示自己的快捷键用）。 */
+  bindingFor(id: string): KeybindingInfo | undefined
+  /** bindingFor 的可读那半（`⌘⌥W`），或 undefined。 */
+  hintFor(id: string): string | undefined
+}
+
+/** 快照里的一条绑定（v0.15 起带 `label`）。 */
+interface KeybindingInfo {
+  keys: string        // 规范键记法（mod+alt+w），匹配与测试用
+  label: string       // 给人看的文本（⌘⌥W / Ctrl+Alt+W），芯片显示用
+  command: string
 }
 ```
 
@@ -569,8 +582,10 @@ interface CommandsService {
 | **冲突（键相同）** | **字面重复才 fail loud**：同一个按键、且二者 `when` 都可能同时为真 → `bind` **抛错**。`when` 显式互斥的绑定可以共存。 |
 | **冲突（执行时）** | 某一按键在当前上下文命中的绑定 `canRun` 同时为真且来自不同命令 → **warn，只执行第一条**（先注册者优先） |
 | 触发条件 | 页面 mounted；按键命中且非 `repeat`；焦点不在 `input` / `textarea` / `[contenteditable]` 内；命中的绑定 `when` 为真 |
-| 浏览器保留键 | 拦不住（`mod+w`、`mod+t`…）。**关闭 tab = `mod+alt+w`**；`ctrl+tab` / `ctrl+shift+tab` 绑定“到边界不动”，`mod+alt+→` / `mod+alt+←` 绑定“循环切换” |
-| palette | 是插件（`requires: ['layout']`、`inject: ['commands']`），注册在 `layout.overlay`（v0.7 起是 **list**）上；打开时把按键交还给它（输入框内的按键不当作快捷键）。**默认只列可执行的命令**（不灰显），`Esc` 关闭，`Enter` 执行 |
+| 浏览器保留键 | 拦不住（`mod+w`、`mod+t`、`mod+1..9`…）。**键位与 IDE 对齐，不和浏览器争**（v0.16，§31）：`mod+w` 关 tab、`mod+1..9` 按序号跳——浏览器先吃掉时页面收不到，读者还有点击与循环键，但键位本身是肌肉记忆里的那个。`ctrl+tab` / `ctrl+shift+tab` 浏览器会交给页面，绑“到边界不动”；`mod+shift+[ / ]` 绑“循环切换”（记法按**键帽**写：`shift+[` 按下时报 `{`，`matchesKeys` 认得，v0.16） |
+| 快捷键提示（v0.15，v0.16 收紧） | 读者**按住** ⌘ / Ctrl 或 Option / Alt 时，**关键**快捷键以**浮层标签**显示：只显示 tab 条的 `⌘1…`（按序号跳）与侧栏切换器的 `⌘⌥1…`；关闭按钮、收起按钮这类辅助键**不显示**（那是 `?` 速查表的事）。浮层**不参与布局**——出现与消失不改变控件的大小、位置，也不推挤任何东西（cmux 的做法）。状态在**页面全局** `__diorama_keys__`（内核唯一的 keydown 监听器维护），组件用 `diorama-ui` 的 `useHeldModifier` + `KeyHint` 读；文本来自注册表快照的 `label`，**不自己拼键记法**。命令的 `when` 也可以看 `CommandContext.hints` |
+| 键记法 → 文本只有一份 | `formatKeys`（`diorama-kernel/client`）是唯一的翻译表：速查表与页面上的芯片都读它（v0.15 前速查表自带一份，已删） |
+| palette | 是插件（`requires: ['layout']`、`inject: ['commands']`），注册在 `layout.overlay`（v0.7 起是 **list**）上；打开时把按键交还给它（输入框内的按键不当作快捷键）。**默认只列可执行的命令**（不灰显），`Esc` 关闭，`Enter` 执行。**有快捷键的行右侧显示它**（v0.17）：多个键并列，文本来自注册表快照的 `label`；没有绑定的命令不占位 |
 | 快捷键说明（`help`，v0.7） | 同样是 `layout.overlay` 的条目。列出**全部**绑定，当前不可执行的**灰显而不隐藏**（与 palette 相反：速查表回答“有哪些键”，不是“现在能用哪些”）。`?` 开/关（键记法写 `shift+?`），`Esc` 关闭（`help.close`，`when` = 说明开着） |
 | 覆盖层互斥（v0.7） | `layout.overlay` 是 **list** 座位，但同一时刻只有一个覆盖层是“开着”的：开一个即关掉另一个。状态在**页面全局**（`diorama-ui` 的 `overlayStore`），不是内核服务——这是页面 UI 状态 |
 | 执行失败 | `run` 的 Promise 拒绝 → 控制台报错 + `warn`，不冒泡到按键处理（一次失败不拖垮页面） |
@@ -581,11 +596,12 @@ interface CommandsService {
 
 | id | 标题 | 快捷键 | when |
 |---|---|---|---|
-| `tabs.close` | 关闭当前标签页 | `mod+alt+w` | 有活动 tab |
-| `tabs.next` | 下一个标签页 | `mod+alt+arrowright` | tab 数 > 1 |
-| `tabs.prev` | 上一个标签页 | `mod+alt+arrowleft` | tab 数 > 1 |
+| `tabs.close` | 关闭当前标签页 | `mod+w`（v0.16；v0.15 曾用 `mod+alt+w`） | 有活动 tab |
+| `tabs.next` | 下一个标签页（循环） | `mod+shift+]`（v0.16） | tab 数 > 1 |
+| `tabs.prev` | 上一个标签页（循环） | `mod+shift+[`（v0.16） | tab 数 > 1 |
 | `tabs.nextEdge` | 下一个标签页（到末尾停） | `ctrl+tab` | tab 数 > 1 |
 | `tabs.prevEdge` | 上一个标签页（到开头停） | `ctrl+shift+tab` | tab 数 > 1 |
+| `tabs.select:<n>` | 第 n 个标签页 | `mod+<n>`（n = 1…9，v0.16；v0.15 曾用 `alt+<n>`） | tab 数 ≥ n |
 | `tree.focus` | 聚焦文件树 | `mod+alt+f` | 焦点不在树 |
 | `palette.toggle` | 打开命令面板 | `mod+k` | 焦点不在输入框 |
 | `view.refresh` | 重新读取当前文件 | `mod+alt+r` | 有活动 tab |
@@ -1119,6 +1135,10 @@ interface SidebarViewSpec {
 - **切换器有快捷键**（v0.6）：`layout` 注册 `sidebar.showFiles` / `sidebar.showChanges` /
   `sidebar.showHistory` / `sidebar.showSearch`（`mod+alt+1/2/3/4`，§3.7）；按到没有注册的视图时命令不可执行（`when` 为假），
   不报错。
+- **切换器显示自己的快捷键**（v0.15，v0.16 收紧）：读者按住 ⌘ / Ctrl（或 Option / Alt）时，每个图标**旁边**
+  浮出它那条命令的键（`⌘⌥1`…）；收起按钮**不**显示（辅助键归 `?` 速查表，§3.7）。芯片是浮层
+  装饰（`aria-hidden`，`position: absolute`，不参与布局），图标的无障碍名仍是视图自己的标题；
+  那一竖条 36px 放不下它，所以芯片**浮在图标右侧**、按住期间整栏的 `overflow` 放开。
 - **非活动视图隐藏不卸载**（与 `tabs.content` 同一做法）：展开、滚动、选择各自保留。
 - **没有视图被注册时，侧栏整栏不画**（M0 验收点 3 的语义，从 `sidebar.tree` 继承）。
 - **侧栏可以收起（v0.13）**：切换器脚下有一个「收起 / 展开」按钮（`aria-expanded` / `aria-controls`），
@@ -2026,6 +2046,49 @@ URL / hash 语义、主题 token 表（新样式只用既有 token，无新 toke
 - **颜色只用 token**（§5.3）：六个 `--dio-syn-*` 一个不多、light / dark 成对，所以暗色下与
   `code` 渲染器一模一样。
 
+## 31. `0.0.2` 之后：快捷键能力增强与「按住修饰键看快捷键」（未发版，与 §20、§27、§29、§30 同一档）
+
+> 2026-10-25。用户要求：**增强快捷键能力，如 mod+数字切换 tab 等跟常见 IDE 类似的能力；当按下 mod 键时，
+> 在对应组件上（tab / 按钮 / panel 图标等）用标签显示快捷键，类似 cmux 的体验**。契约号不动（§6）：
+> 没有新增服务、没有加座位、没有改 `ctx.*` 的既有签名；变的是 **§3.7 的命令表与命令服务多两个读法**、
+> **§5.2 里侧栏切换器多一条显示规则**，以及 `diorama-ui` 多一个原语。
+
+| 条款 | 本档之前 | 本档 |
+|---|---|---|
+| §3.7 按序号跳 tab | 无 | `tabs.select:<n>`，`when` = tab 数 ≥ n |
+| §3.7 tab 条的键位 | `mod+alt+w` 关、`mod+alt+←/→` 循环、`alt+1..9` 跳（v0.15，全避开浏览器） | **IDE 的键位**（v0.16，用户拍板「跟浏览器冲突也没关系，实现自己功能更重要」）：`mod+w` 关、`mod+shift+[ / ]` 循环、`mod+1..9` 跳。浏览器先吃掉的键（`mod+w`、`mod+1`）页面收不到——读者还有点击与 `⌃Tab`，但键位是肌肉记忆里的那个。`shift+[` 按下时报 `{`，`matchesKeys` 按**键帽**认识它（`SHIFTED` 表） |
+| §3.7 按住修饰键的提示 | 无（只有 `?` 打开的速查表） | 按住 ⌘ / Ctrl **或** Option / Alt 时，**关键**快捷键显示出来；`CommandContext.hints` 让 `when` 也能问。状态在页面全局 `__diorama_keys__`，由内核唯一的 keydown 监听器维护 |
+| §3.7 提示显示什么（v0.16 收紧） | （v0.15：每个有命令的控件都显示） | **只显示关键的**：tab 条的按序号跳（`⌘1…`）与侧栏切换器的视图键（`⌘⌥1…`）。关闭（`✕`）、收起（`⌘B`）这类辅助键不显示——一条 tab 上两个芯片、切换器脚下再来一个，就不是提示而是噪音；完整清单仍在 `?` 速查表 |
+| §3.7 提示怎么显示（v0.16） | （v0.15：画在控件自己的行内，控件会变宽/变高） | **浮层标签**（cmux 的做法）：芯片 `position: absolute` 悬在控件上方/旁边，**不参与布局**——出现与消失不改变控件的大小与位置（e2e 断言 tab 条几何不变） |
+| §3.7 注册表的读法 | `bindings()` / 快照只有 `keys`（规范记法） | 快照每条绑定多一个 `label`（给人看的 `⌘W` / `Ctrl+W`）；服务多 `bindingFor(id)` / `hintFor(id)`，控件显示自己的快捷键只读它，**不自己拼键记法** |
+| §3.7 键记法的唯一翻译表 | `help` 自带一份 `formatKeys` | 移到内核的 `diorama-kernel/client`（`formatKeys`），速查表与芯片同读一份 |
+| §5.2 侧栏切换器 | 图标 + tooltip（`title` 写明「再点收起侧栏」） | 另加：按住修饰键时每个图标**旁边**浮出它的键（`⌘⌥1`…）。芯片是装饰（`aria-hidden`），无障碍名不变；收起按钮**不**显示 |
+| tab 条 | 标签 + 关闭按钮 | 另加：按住修饰键时每个 tab 的**右上角**浮出 `⌘<n>`（前九个）；**中键点击关闭 tab**（与常见 tab 条一致） |
+| palette 的行 | 标题 + 命令 id | 另加（v0.17）：**有快捷键的行右侧显示它**（keycap 芯片，多个键并列）；文本来自注册表快照的 `label`，与芯片、速查表同读一份 `formatKeys`；没有绑定的行不显示、不占位 |
+
+**没有变的东西**：`ctx.commands` 的既有方法签名与语义（`register` / `bind` / `run` / `canRun` /
+`getSnapshot` / `subscribe` 全部照旧，`CommandContext` 只多一个可选字段）、`ctx.tabs`、
+`sidebar.views` 的座位形态、slot 清单、URL / hash 语义、RPC 协议、错误码表、`diorama.toml`。
+
+细则：
+
+- **为什么提示状态在页面全局、不在内核服务**：它是「读者的手此刻按着什么」，纯 UI 状态；与
+  `__diorama_overlay__` / `__diorama_reveal__` / `__diorama_layout__` 同一口径。每个 client 半边是
+  自足的闭包（§8），模块级对象会变成每半边一份；`globalThis` 是唯一共享的地方。**内核写、半边读**：
+  只有内核拥有那个唯一的 keydown 监听器，所以也只有它能维护这个状态。
+- **快照是字符串**（`''` / `'mod'` / `'alt'`），不是对象：`useSyncExternalStore` 按值比较，
+  每次读都返回新对象会无限重渲染（本仓反复踩到的坑）。store 的方法写成不依赖 `this` 的闭包，
+  React 拿去做 `subscribe` 时不会丢接收者。
+- **两种「按住」都算**：`⌘`（非 mac 上是 Ctrl）与 `⌥`（Alt）。绑定里两种家族都有（`⌘⌥W`、`⌥1`），
+  「按一个修饰键看看」必须对读者伸手按的那一个给出答案。macOS 上 `⌃` **不算**——那里 `mod` 是 `⌘`。
+- **芯片文本来自注册表**：`label` 由内核在 `bind` 时算好（一次），页面只负责画。这样速查表与
+  芯片不可能对同一个键给出两种写法。
+- **不拦按键**：按住本身不执行任何命令（只改显示状态），`handleKey` 的分发顺序与「第一个注册者
+  优先」的规则一个字都没动。
+- **`alt+1..9` 的代价**：`Alt+digit` 在部分 Linux 桌面上是输入法 / 终端切换键，但浏览器里不被保留，
+  且与 `mod+alt+*` 那一族同一个理由（`matchesKeys` 对 `alt` 绑定有物理键兜底，macOS 的 `¡` 也能命中）。
+- **窗口失焦要清**：切走再回来时浏览器不会补发 keyup，所以 `window.blur` 也清状态，否则提示会一直亮着。
+
 ## 待定清单（v0.4 后仍 🔲）
 
 - [x] `ctx.git` 具体签名（只读：diff / status / log）— v0.5 定（§3.2）
@@ -2039,6 +2102,10 @@ URL / hash 语义、主题 token 表（新样式只用既有 token，无新 toke
 - [x] 侧栏可收起（只剩切换器）— v0.13 定（§5.2、§3.7、§29）
 - [x] diff 的单栏 / 双栏加语法高亮 — v0.14 定（§5.2、§30）：引擎由 `code` 发布到页面，
   `git-changes` 读它；行内那档是 git 的文本，不上色
+- [x] 快捷键能力增强（按序号跳 tab、按住修饰键显示快捷键）— v0.15 定、v0.16 按 cmux 的体验重做
+  （§3.7、§5.2、§31）：键位对齐 IDE（`mod+w` / `mod+1..9` / `mod+shift+[ ]`）；提示只显示关键键
+  （tab 的 `⌘<n>` 与切换器的 `⌘⌥<n>`），以**浮层标签**出现，不改变任何控件的几何；
+  提示状态在页面全局 `__diorama_keys__`
 - [x] RPC 断线自动重连与订阅重放 — v0.11 定（§4、§26）
 - [x] Markdown 的大纲 / 公式 / 图表 — v0.12 定（§5.1、§27）；`$` 的判定、Mermaid 的主题跟随、
   以及「大纲放在文档里而不是侧栏」也一并定了

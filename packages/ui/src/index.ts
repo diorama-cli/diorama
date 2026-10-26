@@ -44,6 +44,7 @@ export {
   usePaneSize,
 } from './splitpane.ts'
 export { Splitter, type SplitterProps } from './splitter.tsx'
+export { KeyHint, useHeldModifier, type KeyHintProps } from './keys.tsx'
 export {
   highlighter,
   highlighterStore,

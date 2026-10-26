@@ -99,19 +99,26 @@ export {
   CommandsService,
   createCommandsService,
   exclusive,
-  isApplePlatform,
-  matchesKeys,
-  parseKeys,
   type CommandContext,
   type CommandContextSources,
   type CommandSpec,
   type CommandsOptions,
   type CommandsSnapshot,
   type CommandWhen,
+  type KeybindingInfo,
   type KeybindingSpec,
+} from './commands.ts'
+export {
+  formatKeys,
+  hintOf,
+  isApplePlatform,
+  matchesKeys,
+  modifierOf,
+  parseKeys,
   type KeyEventLike,
   type ParsedKeys,
-} from './commands.ts'
+} from './keys.ts'
+export { ensureHeldModifierStore, heldModifier, heldModifierStore, holdModifier, type HeldModifier } from './modifiers.ts'
 export {
   ensurePageBridge,
   getKernel,
