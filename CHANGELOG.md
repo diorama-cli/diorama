@@ -3,6 +3,18 @@
 Every published version of `@diorama-cli/diorama`, newest first. Generated from
 the commit log by `pnpm release` — see [docs/release.md](docs/release.md).
 
+## 0.0.5 (2026-10-26)
+
+### Features
+
+- **commands:** shortcuts reach the page, and show themselves on the controls
+- **git-changes:** highlight the diff readers that show file content
+- **layout:** the sidebar folds down to its switcher
+
+### Documentation
+
+- **release:** file the 0.0.4 change lists under their version
+
 ## 0.0.4 (2026-10-24)
 
 ### Features

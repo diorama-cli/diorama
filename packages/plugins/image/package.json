@@ -1,6 +1,6 @@
 {
   "name": "diorama-plugin-image",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "private": true,
   "description": "Diorama piece: image renderer (blob URL, native <img>)",
   "type": "module",
@@ -22,7 +22,7 @@
     "src"
   ],
   "diorama": {
-    "contract": ">=0.0.4 <0.1.0",
+    "contract": ">=0.0.5 <0.1.0",
     "id": "image",
     "client": {
       "entry": "./lib/client.cjs"

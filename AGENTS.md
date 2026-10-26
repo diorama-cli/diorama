@@ -2,13 +2,13 @@
 
 > 给在本仓库里工作的 agent（以及新加入的人）。读完这一页再改代码。
 > 只写**每次都要知道的事实**，不写流程叙事；细节在链接的文档里。
-> 当前契约 **v0.0.4**（变更清单自 §20 起按版本分段：`0.0.3` 是 §20–§22，此后每版一档）。
+> 当前契约 **v0.0.5**（变更清单自 §20 起按版本分段：`0.0.3` 是 §20–§22，此后每版一档）。
 
 ## 1. 先读什么
 
 | 顺序 | 文档 | 读它为了 |
 |---|---|---|
-| 1 | [docs/contract.md](docs/contract.md) | **能不能**：内核与插件的唯一约定，带版本号（当前 **v0.0.4**）。改任何 `ctx.*` / slot 签名都算改契约 |
+| 1 | [docs/contract.md](docs/contract.md) | **能不能**：内核与插件的唯一约定，带版本号（当前 **v0.0.5**）。改任何 `ctx.*` / slot 签名都算改契约 |
 | 2 | [docs/architecture.md](docs/architecture.md) | **为什么**：已拍板的决定、放弃项、代价。不要重新讨论已拍板的事 |
 | 3 | [docs/features.md](docs/features.md) | **有什么**：能力清单与档位（✅ / v1 / 未来 / 不做） |
 | 4 | 最近一档的 `docs/mN/spec.md` | **怎么实现的** + **§6.2 的坑**（见下面 §5） |
@@ -85,7 +85,7 @@ scripts/                  生成器（图标表；`pnpm icons` 重新生成）
 
 ### 加一个内置插件：7 处要一起改
 
-1. `packages/plugins/<id>/` 新包：`package.json`（`diorama.id` / `contract: ">=0.0.4 <0.1.0"` / `client.entry` / `requires`）、`vite.config.ts`、`tsconfig.json`、`tsconfig.emit.json`（从任意现有插件复制）。
+1. `packages/plugins/<id>/` 新包：`package.json`（`diorama.id` / `contract: ">=0.0.5 <0.1.0"` / `client.entry` / `requires`）、`vite.config.ts`、`tsconfig.json`、`tsconfig.emit.json`（从任意现有插件复制）。
 2. `packages/kernel/src/server/plan.ts` 的 `BUILTIN_PLUGIN_IDS`（顺序 = boot 顺序）。**插件的 id 不能与内核服务 id 相同**（`KERNEL_SERVICE_IDS`：`fs` / `git` / `search`；`theme` 这个 id 也已被内置 piece 占用）——同名会让 `halves` 表出现重复键，服务被静默覆盖；照 `git` / `git-changes` 的样子分开命名。
 3. `packages/cli/src/plugins-server.ts` 的 `halves` 映射（server 半边）。
 4. `packages/cli/package.json` 的 `dependencies` 加 `workspace:*`。
