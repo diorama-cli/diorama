@@ -8,7 +8,7 @@
 > 图片与 PDF 渲染器见 [实施说明](m4/spec.md)（§1–§6 是第一轮，§7–§11 是第二轮）；
 > 文件搜索见 [m6/spec.md](m6/spec.md)；界面图标见 [m7/spec.md](m7/spec.md)；
 > Markdown 的大纲 / 公式 / 图表见 [m17/spec.md](m17/spec.md)。其余仍是 v1 目标。
-> 契约见 [contract.md](contract.md) **v0.0.4**（§19 是主题切换的变更清单；§27 是本档）。
+> 契约见 [contract.md](contract.md) **v0.0.4**（变更清单自 §20 起按版本分段：`0.0.3` 是 §20–§22，此后每版一档）。
 
 ## 一、CLI
 
@@ -20,11 +20,11 @@
 | C4 | `--port <n>` | ✅ M0→M2 | 显式冲突报错；**未给时落 `diorama.toml`，再默认随机** |
 | C5 | `--host <ip>` | ✅ M0→M2 | 默认 `127.0.0.1`；`diorama.toml` 可设 |
 | C9 | `diorama.toml`（`host`/`port`/`plugins`/`ignore`/`[watch]`/`[git]`/`[html]`） | ✅ M2 | 目录 → `$DIORAMA_HOME` 查找；CLI > toml > 默认；写错 fail loud；`--config`、`--all`、`--dump-config`；`[html] scripts` 控制 HTML 预览是否默认执行页面脚本（contract §28）|
-| C10 | `diorama config`（读写 `diorama.toml`） | ✅ 本档 | 交互式逐项编辑（回车保留 / `-` 清除 / 预览 + 确认）；`config show [--json]`、`config set --<key> <value>`、`config unset <key>`；**默认写 `$DIORAMA_HOME/diorama.toml`**，`--dir` / `--config` 才写项目文件（contract §4.2）；`--dry-run` / `--yes` |
-| C11 | `diorama [dir] --json` / `diorama restart <dir> --json` | ✅ 本档 | 把挂载输出成**一个** JSON 文档（`url` / `root` / `mountId` / `created` + 完整 `mount: MountStatus`），供其它程序直接取 URL；可与 `--foreground` 同用（打印后照常不退出，contract §7.6） |
+| C10 | `diorama config`（读写 `diorama.toml`） | ✅ v0.3 | 交互式逐项编辑（回车保留 / `-` 清除 / 预览 + 确认）；`config show [--json]`、`config set --<key> <value>`、`config unset <key>`；**默认写 `$DIORAMA_HOME/diorama.toml`**，`--dir` / `--config` 才写项目文件（contract §4.2）；`--dry-run` / `--yes` |
+| C11 | `diorama [dir] --json` / `diorama restart <dir> --json` | ✅ v0.3 | 把挂载输出成**一个** JSON 文档（`url` / `root` / `mountId` / `created` + 完整 `mount: MountStatus`），供其它程序直接取 URL；可与 `--foreground` 同用（打印后照常不退出，contract §7.6） |
 | C6 | 随机端口自动重试 | ✅ M3 | 随机端口上限 20 次；显式端口冲突直接 `EADDRINUSE`（退出码 1）|
 | C7 | realpath 挂载键 + 别名提示 | ✅ M3 | 挂载键 = realpath（同一真实目录幂等）；打印的目录是 realpath 后的 |
-| C8 | 单测/集成测试 | ✅ M0→本轮 | `apps/web/tests/`：114 条端到端（24 个 spec，真实 CLI/gateway + Chromium）；`pnpm test:unit`：289 条单测 |
+| C8 | 单测/集成测试 | ✅ M0→本轮 | `apps/web/tests/`：147 条端到端（31 个 spec，真实 CLI/gateway + Chromium）；`pnpm test:unit`：359 条单测 |
 
 ## 二、Gateway
 
