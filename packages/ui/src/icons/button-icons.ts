@@ -41,6 +41,7 @@ export const BUTTON_GLYPHS: Readonly<Record<string, ButtonGlyph>> = {
   "play": { body: "<path d=\"M7 4v16l13 -8l-13 -8\"/>" },
   "regex": { body: "<path d=\"M6.5 15a2.5 2.5 0 1 1 0 5a2.5 2.5 0 0 1 0 -5\"/><path d=\"M17 7.875l3 -1.687\"/><path d=\"M17 7.875v3.375\"/><path d=\"M17 7.875l-3 -1.687\"/><path d=\"M17 7.875l3 1.688\"/><path d=\"M17 4.5v3.375\"/><path d=\"M17 7.875l-3 1.688\"/>" },
   "reload": { body: "<path d=\"M19.933 13.041a8 8 0 1 1 -9.925 -8.788c3.899 -1 7.935 1.007 9.425 4.747\"/><path d=\"M20 4v5h-5\"/>" },
+  "reveal-file": { body: "<path d=\"M9 12a3 3 0 1 0 6 0a3 3 0 1 0 -6 0\"/><path d=\"M4 12a8 8 0 1 0 16 0a8 8 0 1 0 -16 0\"/><path d=\"M12 2l0 2\"/><path d=\"M12 20l0 2\"/><path d=\"M20 12l2 0\"/><path d=\"M2 12l2 0\"/>" },
   "search": { body: "<path d=\"M3 10a7 7 0 1 0 14 0a7 7 0 1 0 -14 0\"/><path d=\"M21 21l-6 -6\"/>" },
   "sidebar-fold": { body: "<path d=\"M4 6a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2l0 -12\"/><path d=\"M9 4v16\"/><path d=\"M15 10l-2 2l2 2\"/>" },
   "sidebar-unfold": { body: "<path d=\"M4 6a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2l0 -12\"/><path d=\"M9 4v16\"/><path d=\"M14 10l2 2l-2 2\"/>" },

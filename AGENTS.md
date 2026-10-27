@@ -13,10 +13,15 @@
 | 3 | [docs/features.md](docs/features.md) | **有什么**：能力清单与档位（✅ / v1 / 未来 / 不做） |
 | 4 | 最近一档的 `docs/mN/spec.md` | **怎么实现的** + **§6.2 的坑**（见下面 §5） |
 
-最近一档是 [docs/m23/spec.md](docs/m23/spec.md)（网页标题是这个挂载的**目录名**：壳是静态 HTML，
+最近一档是 [docs/m24/spec.md](docs/m24/spec.md)（文件视图有自己的**工具栏**：视图面板顶部一条，一颗
+「定位到正在浏览的文件」按钮——沿路展开目录、按需把分页的目录长到落点、把那一行滚到中间并给一段淡出
+高亮；**不是导航**（不打开、不切 tab、不改选中、不动 URL），没有 tab 时按钮禁用；同一动作是命令
+`tree.revealActive`（`mod+shift+l`）。工具栏画在**视图自己的组件**里，不用座位——与 §5.2「切换器由
+`layout` 画」同一分工；`ctx.tree` 多一个 `reveal(path)`，快照多 `reveal: { path, at }`）；
+上一档是 [docs/m23/spec.md](docs/m23/spec.md)（网页标题是这个挂载的**目录名**：壳是静态 HTML，
 配置在 `/plugin.json` 里，两者只在 `serveShell` 相遇——所以标题由服务端写进文档，
 `shellTitle` / `withShellTitle` 是纯函数；`/` 没有名字时保留壳自己的标题）；
-上一档是 [docs/m22/spec.md](docs/m22/spec.md)（默认主题写在 `diorama.toml` 的 `[ui] theme`：是
+更早是 [docs/m22/spec.md](docs/m22/spec.md)（默认主题写在 `diorama.toml` 的 `[ui] theme`：是
 **起点不是锁定**（读者选过就以读者的为准），`system` / `light` / `dark` / 主题 id；没选过时
 `diorama.theme` **不写** `localStorage`（记住的默认值会盖住之后改的配置），首帧由 `serveShell`
 注入 `window.__diorama_theme__`）；

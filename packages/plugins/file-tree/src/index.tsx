@@ -14,12 +14,18 @@
  * Large directories: a directory with many entries lists its first
  * `PAGE_SIZE` and offers 「加载更多」. This is not the `ignore` rule (those
  * entries are gone); it only keeps rendering bounded.
+ *
+ * The view has a **toolbar** of its own at the top (contract.md §35): one
+ * button, 「定位到正在浏览的文件」, which expands the way to the active tab's
+ * file and scrolls its row into view. The toolbar belongs to this view, not to
+ * the column: a view's controls live inside the view's own pane (§5.2), so the
+ * other views are untouched.
  */
 import type { Context } from 'cordis'
-import { useCallback, useEffect, useState } from 'react'
-import type { FileInfo, MountHandle } from 'diorama-kernel/client'
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
+import type { FileInfo, MountHandle, TabsSnapshot } from 'diorama-kernel/client'
 import { createTreeService, type CommandsService } from 'diorama-kernel/client'
-import { bindMethods, FileIcon, Icon, iconSvg, provideEntry, useKernel, useStore } from 'diorama-ui'
+import { bindMethods, FileIcon, Icon, iconSvg, provideEntry, useKernel, useStore, type Store } from 'diorama-ui'
 
 export const name = 'file-tree'
 export const inject = ['slots']
@@ -34,6 +40,27 @@ export const PAGE_SIZE = 500
  * switcher then falls back to the title's first character as it always has.
  */
 export const FILES_ICON = iconSvg('files')
+
+/**
+ * The toolbar button's glyph (contract.md §35): Tabler's `current-location`,
+ * the "you are here" target an editor uses for "reveal the active file".
+ */
+export const REVEAL_ICON = iconSvg('reveal-file')
+
+/** The command behind the toolbar button (contract.md §3.7, §35). */
+export const REVEAL_COMMAND = 'tree.revealActive'
+
+/** What the toolbar button says (also the command's title). */
+export const REVEAL_TITLE = '定位到正在浏览的文件'
+
+/** A page with no tab open: the toolbar has nothing to locate. */
+const NO_TABS: TabsSnapshot = { tabs: [], activeId: undefined }
+
+/** The store a page without the `tabs` piece reads instead (constant snapshot). */
+const TABS_ABSENT: Store<TabsSnapshot> = {
+  subscribe: () => () => {},
+  getSnapshot: () => NO_TABS,
+}
 
 interface DirState {
   entries?: FileInfo[]
@@ -51,7 +78,12 @@ function compareEntries(a: FileInfo, b: FileInfo): number {
  * `PAGE_SIZE` and only grows; the full (already filtered) list is kept so
  * 「加载更多」 does not re-list.
  */
-function useDirectory(mount: MountHandle, path: string, open: boolean): DirState & { visible: number; more(batch?: number): void } {
+function useDirectory(
+  mount: MountHandle,
+  path: string,
+  open: boolean,
+  ensure?: string,
+): DirState & { visible: number; more(batch?: number): void } {
   const [state, setState] = useState<DirState>({})
   const [visible, setVisible] = useState(PAGE_SIZE)
   useEffect(() => {
@@ -85,28 +117,78 @@ function useDirectory(mount: MountHandle, path: string, open: boolean): DirState
     }
   }, [mount, path, open])
   const more = useCallback((batch = PAGE_SIZE) => setVisible(current => current + batch), [])
+  // A locate request for an entry past the first page grows the page until the
+  // row is drawn (contract.md §35): a row that does not exist cannot be
+  // scrolled to, and 「加载更多」 is the reader's gesture for the same thing.
+  useEffect(() => {
+    if (ensure === undefined || state.entries === undefined) return
+    const index = state.entries.findIndex(entry => entry.path === ensure)
+    if (index >= visible) setVisible(index + 1)
+  }, [ensure, state.entries, visible])
   return { ...state, visible, more }
 }
 
-function TreeRow({ mountCtx, file, depth }: { mountCtx: MountHandle; file: FileInfo; depth: number }) {
+/** The directory an entry sits in (`a/b/c.md` → `a/b`, `README.md` → ``). */
+function parentOf(path: string): string {
+  const cut = path.lastIndexOf('/')
+  return cut === -1 ? '' : path.slice(0, cut)
+}
+
+/**
+ * The row a locate request names (contract.md §35), as a stable stamp: the
+ * effect below runs on `at`, so pressing the button twice scrolls twice even
+ * though the path did not change.
+ */
+function useLocated(
+  path: string,
+  reveal: { path: string; at: number } | undefined,
+): { located: boolean; ref: RefObject<HTMLButtonElement | null> } {
+  const located = reveal !== undefined && reveal.path === path
+  const at = located ? reveal.at : undefined
+  const ref = useRef<HTMLButtonElement | null>(null)
+  useEffect(() => {
+    if (at === undefined) return
+    // The pane scrolls (contract.md §5.2); `scrollIntoView` moves the nearest
+    // scrollable ancestor, which is that pane, and leaves the page alone.
+    ref.current?.scrollIntoView({ block: 'center', inline: 'nearest' })
+  }, [at])
+  return { located, ref }
+}
+
+function TreeRow({
+  mountCtx,
+  file,
+  depth,
+  reveal,
+}: {
+  mountCtx: MountHandle
+  file: FileInfo
+  depth: number
+  reveal: { path: string; at: number } | undefined
+}) {
   const { ctx } = useKernel()
   const tree = ctx.tree
   const snapshot = useStore(tree)
   const isDir = file.kind === 'dir'
   const expanded = isDir && snapshot.expanded.includes(file.path)
   const selected = !isDir && snapshot.selected === file.path
-  const dirState = useDirectory(mountCtx, file.path, expanded)
+  // The row to make visible, when this directory is the one holding it.
+  const ensure = reveal !== undefined && parentOf(reveal.path) === file.path ? reveal.path : undefined
+  const dirState = useDirectory(mountCtx, file.path, expanded, ensure)
   const total = dirState.entries?.length ?? 0
   const cut = Math.min(dirState.visible, total)
+  const { located, ref } = useLocated(file.path, reveal)
 
   return (
     <>
       <button
+        ref={ref}
         type="button"
-        className={`diorama-tree__row${selected ? ' diorama-tree__row--selected' : ''}`}
+        className={`diorama-tree__row${selected ? ' diorama-tree__row--selected' : ''}${located ? ' diorama-tree__row--located' : ''}`}
         style={{ paddingLeft: 8 + depth * 14 }}
         data-path={file.path}
         data-kind={file.kind}
+        data-located={located ? 'true' : undefined}
         aria-expanded={isDir ? expanded : undefined}
         aria-selected={selected}
         title={file.path}
@@ -125,7 +207,7 @@ function TreeRow({ mountCtx, file, depth }: { mountCtx: MountHandle; file: FileI
       )}
       {expanded &&
         dirState.entries?.slice(0, cut).map(child => (
-          <TreeRow key={child.path} mountCtx={mountCtx} file={child} depth={depth + 1} />
+          <TreeRow key={child.path} mountCtx={mountCtx} file={child} depth={depth + 1} reveal={reveal} />
         ))}
       {expanded && cut < total && (
         <button
@@ -144,30 +226,78 @@ function TreeRow({ mountCtx, file, depth }: { mountCtx: MountHandle; file: FileI
   )
 }
 
+/**
+ * The view's toolbar (contract.md §35): a strip of the view's own, pinned to
+ * the top of its pane. Its buttons act on **the view** — not on the file being
+ * read (that is the renderer's own header), and not on the column (that is the
+ * switcher's rail).
+ */
+function TreeToolbar({ onReveal, disabled }: { onReveal(): void; disabled: boolean }) {
+  return (
+    <div className="diorama-tree__toolbar" role="toolbar" aria-label="文件视图工具栏" data-testid="file-tree-toolbar">
+      <button
+        type="button"
+        className="diorama-tree__tool"
+        title={disabled ? '没有正在浏览的文件' : REVEAL_TITLE}
+        aria-label={REVEAL_TITLE}
+        data-testid="file-tree-reveal"
+        disabled={disabled}
+        onClick={onReveal}
+      >
+        {REVEAL_ICON === '' ? (
+          // No icon table on this page (an external host, a unit test): the
+          // switcher's own fallback rule — a character — rather than a blank.
+          <span aria-hidden="true">定</span>
+        ) : (
+          <span aria-hidden="true" dangerouslySetInnerHTML={{ __html: REVEAL_ICON }} />
+        )}
+      </button>
+    </div>
+  )
+}
+
 function FileTreeRoot({ active = true }: { active?: boolean }) {
   const { ctx, mount: mountCtx } = useKernel()
-  const rootEntries = useDirectory(mountCtx, '', true)
+  const tree = ctx.tree
+  const snapshot = useStore(tree)
+  // The root lists on demand too: a located row may be on a later page.
+  const ensureRoot = snapshot.reveal !== undefined && parentOf(snapshot.reveal.path) === '' ? snapshot.reveal.path : undefined
+  const rootEntries = useDirectory(mountCtx, '', true, ensureRoot)
   const total = rootEntries.entries?.length ?? 0
   const cut = Math.min(rootEntries.visible, total)
   // Selecting a file opens it: the tab service is the only opener. `ctx` here is
   // the page's kernel context (installed before pieces render), so it carries
   // the live services.
-  useEffect(() => ctx.tree.onSelect(file => ctx.tabs.open(file)), [ctx])
+  useEffect(() => tree.onSelect(file => ctx.tabs.open(file)), [ctx, tree])
+  // The file being browsed is the active tab's (contract.md §3.4). Read from
+  // the service rather than passed down: the toolbar needs to know whether it
+  // has anywhere to go, and a page without the `tabs` piece still draws the
+  // tree (a constant, empty store keeps the hook order unchanged).
+  const tabs = useStore(clientTabs(ctx) ?? TABS_ABSENT)
+  const activeTab = tabs.tabs.find(tab => tab.id === tabs.activeId)
+  // A diff tab names the same file; the tree row is the file either way.
+  const activePath = activeTab?.path
+  const locate = useCallback(() => {
+    if (activePath !== undefined) tree.reveal(activePath)
+  }, [tree, activePath])
   // The view stays mounted while inactive (contract.md §5.2); `aria-hidden`
   // keeps a hidden pane out of the accessibility tree and its buttons untabbable.
   return (
-    <nav className="diorama-tree" aria-label="文件树" data-testid="file-tree" aria-hidden={active ? undefined : true}>
-      {rootEntries.error !== undefined && <div className="diorama-tree__error">{rootEntries.error}</div>}
-      {rootEntries.entries?.slice(0, cut).map(file => (
-        <TreeRow key={file.path} mountCtx={mountCtx} file={file} depth={0} />
-      ))}
-      {cut < total && (
-        <button type="button" className="diorama-tree__more" data-testid="tree-more" onClick={() => rootEntries.more()}>
-          <Icon name="caret-down" size={14} />
-          加载更多（已显示 {cut} / 共 {total} 条）
-        </button>
-      )}
-    </nav>
+    <div className="diorama-tree-view" aria-hidden={active ? undefined : true}>
+      <TreeToolbar onReveal={locate} disabled={activePath === undefined} />
+      <nav className="diorama-tree" aria-label="文件树" data-testid="file-tree">
+        {rootEntries.error !== undefined && <div className="diorama-tree__error">{rootEntries.error}</div>}
+        {rootEntries.entries?.slice(0, cut).map(file => (
+          <TreeRow key={file.path} mountCtx={mountCtx} file={file} depth={0} reveal={snapshot.reveal} />
+        ))}
+        {cut < total && (
+          <button type="button" className="diorama-tree__more" data-testid="tree-more" onClick={() => rootEntries.more()}>
+            <Icon name="caret-down" size={14} />
+            加载更多（已显示 {cut} / 共 {total} 条）
+          </button>
+        )}
+      </nav>
+    </div>
   )
 }
 
@@ -200,6 +330,20 @@ export function apply(ctx: Context) {
     },
   })
   commands.bind({ keys: 'mod+alt+f', command: 'tree.focus' })
+  // Locating the file being browsed (contract.md §35) is a command as well as
+  // the toolbar button: the same action, reachable from the palette and from
+  // the keyboard. `when` says there has to be a file to locate (no tab open =
+  // nothing to find); the command is not executable then, which is the same
+  // rule the tab commands use.
+  commands.register({
+    id: REVEAL_COMMAND,
+    title: REVEAL_TITLE,
+    when: context => context.activeTab !== undefined,
+    run: context => {
+      if (context.activeTab !== undefined) ctx.tree.reveal(context.activeTab.path)
+    },
+  })
+  commands.bind({ keys: 'mod+shift+l', command: REVEAL_COMMAND })
 }
 
 /**
@@ -210,6 +354,15 @@ export function apply(ctx: Context) {
 function clientCommands(ctx: Context): CommandsService | undefined {
   try {
     return (ctx as unknown as { commands?: CommandsService }).commands
+  } catch {
+    return undefined
+  }
+}
+
+/** `ctx.tabs` when this page has the `tabs` piece, else `undefined`. */
+function clientTabs(ctx: Context): Store<TabsSnapshot> | undefined {
+  try {
+    return (ctx as unknown as { tabs?: Store<TabsSnapshot> }).tabs
   } catch {
     return undefined
   }

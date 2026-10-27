@@ -91,7 +91,7 @@ export {
   type ThemeService,
   type ThemeSnapshot,
 } from './theme.ts'
-export { createTreeService, TreeService, type TreeSnapshot } from './tree.ts'
+export { createTreeService, TreeService, type TreeReveal, type TreeSnapshot } from './tree.ts'
 export { bootClient, provideRecord } from './boot.ts'
 export {
   collectCommandContext,

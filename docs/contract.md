@@ -472,6 +472,30 @@ ctx.slots.register({
     事件本身：提交详情这类**不是 tab** 的东西要靠它知道该收起（§3.8、§5）。`getSnapshot()` 仍是
     不可变快照，`open` 同一文件时**同一个对象**（快照没变）——所以只听快照听不到这件事。
 
+- **`ctx.tree`（v0.17 补 `reveal`）**：导航状态由 `file-tree` 提供（§5.2）。
+
+  ```ts
+  interface TreeSnapshot {
+    expanded: readonly RelPath[]        // 展开的目录
+    selected: RelPath | undefined       // 选中的文件（与 tab 无关，树自己的）
+    reveal: { path: RelPath; at: number } | undefined   // 最近一次「定位」请求（v0.17）
+  }
+
+  interface TreeService {
+    select(file: FileInfo): void       // 选中并通知 onSelect（tabs 借此打开）
+    toggle(path: RelPath): void
+    isExpanded(path: RelPath): boolean
+    reveal(path: RelPath): void        // 展开沿路目录 + 递增 at；不选中、不打开（v0.17）
+    onSelect(listener: (file: FileInfo) => void): () => void
+    getSnapshot(): TreeSnapshot        // 不可变，仅变化时替换
+    subscribe(listener: () => void): () => void
+  }
+  ```
+
+  `reveal` **只改状态**：把 `path` 的每一级祖先加进 `expanded`（已有的不重复、也不收起任何目录），
+  再写一个新的 `at`。把那一行滚进视野、标一下，是视图自己的事（它才知道自己的列表怎么滚）。
+  `at` 单调递增：同一个路径连按两次是两次请求，快照因此变化（§35）。
+
 ### 3.5 `ctx.diorama.mounts`（server）✅ v0.4 定
 
 挂载登记面，所有服务插件靠它拿到自己的目录：
@@ -608,6 +632,7 @@ interface KeybindingInfo {
 | `tabs.prevEdge` | 上一个标签页（到开头停） | `ctrl+shift+tab` | tab 数 > 1 |
 | `tabs.select:<n>` | 第 n 个标签页 | `mod+<n>`（n = 1…9，v0.16；v0.15 曾用 `alt+<n>`） | tab 数 ≥ n |
 | `tree.focus` | 聚焦文件树 | `mod+alt+f` | 焦点不在树 |
+| `tree.revealActive` | 定位到正在浏览的文件 | `mod+shift+l` | 有活动 tab（v0.17，§35） |
 | `palette.toggle` | 打开命令面板 | `mod+k` | 焦点不在输入框 |
 | `view.refresh` | 重新读取当前文件 | `mod+alt+r` | 有活动 tab |
 | `view.toggleAutoRefresh` | 自动刷新：开 / 关 | 无（palette） | 有活动 tab |
@@ -623,7 +648,8 @@ interface KeybindingInfo {
 | `theme.useDark` | 主题：暗色 | 无（palette） | 总可执行（v0.9） |
 | `theme.use:<id>` | 主题：**`<title>`**（`<id>` 的已注册主题） | 无（palette） | 该主题已注册（v0.9） |
 
-命令的**来源插件**决定注册点：`tabs.*` 由 tabs 插件注册、`tree.*` 由 file-tree 注册、
+命令的**来源插件**决定注册点：`tabs.*` 由 tabs 插件注册、`tree.*` 由 file-tree 注册（含
+`tree.revealActive`，它是文件视图工具栏那颗按钮的同一条命令）、
 `palette.toggle` 由 palette 注册、`help.*` 由 help 注册、`view.*` 由 renderer-registry 注册（它持有
 文件内容缓存）、`sidebar.*` 由 layout 注册（它持有切换器的当前视图，§5.2）、`theme.*` 由 theme
 piece 注册（它只注册命令；**状态**在内核的 `ctx.theme`，§3.10）。第三方主题的 `theme.use:<id>`
@@ -1199,6 +1225,13 @@ interface SidebarViewSpec {
   不要在插件里各写一套指针处理。分隔条**自己占一个网格列**，不压在内容上；拖动期间只写 CSS
   变量，松手才进 React state（否则整栏内容每帧重渲染）。现有的两处是左栏（`layout`）与提交
   座位的文件清单（`git-changes`）。
+- **视图可以有自己的工具栏（v0.17）**：一条栏里的视图**各有各的工具栏**，画在该视图面板的顶部
+  （`diorama-tree__toolbar` 是第一个例子，§35）。它属于**这个视图**，不是整条侧栏：切换器那一竖条
+  仍然只有视图图标与收起按钮，别的视图不受影响；也不用座位——视图的控件就在视图自己的组件里
+  （与「一个文件的东西不要扩展到侧边栏」同一条理由，§27）。
+  工具栏上的按钮**只作用于视图**（「把这一栏滚到某处」「换个分组方式」），不作用于被读的文件——
+  文件自己的开关归渲染器头部（§5.1、O8）。一个动作既是按钮又是命令时，只注册一条命令、按钮调它，
+  这样 palette、快捷键与按钮是同一件事（§3.7）。
 
 ### 5.1 `file.renderer` 匹配规则
 
@@ -2215,6 +2248,53 @@ URL / hash 语义、主题 token 表（新样式只用既有 token，无新 toke
 - **不做配置项**：`[ui]` 里加一个 `title` 会把「这个目录叫什么」变成又一件要维护的事；
   需要换名字的人重命名目录（或等外部插件落地后再说）。
 - **标题不随路由变化**：它是挂载的属性，打开 `/~/README.md` 不该变成 `README.md`。
+
+## 35. `0.0.2` 之后：文件视图的工具栏与「定位到正在浏览的文件」（未发版，属下一个 `0.0.x`）
+
+> 2026-10-27。用户要求：**在文件导航窗上加个工具栏，工具栏加个按钮，可以定位到正在浏览的文件**。
+> 契约号不动（§6）：没有新增内核服务、没有加座位、没有改 slot 清单、没有改 `/plugin.json`。
+> 变的是 **§5.2 里视图的形态**（视图可以有自己的工具栏）、**§3.4 的 `ctx.tree` 多一个方法**、
+> **§3.7 的命令表**（多一条 `tree.revealActive`），以及 `diorama-ui` 的样式与图标表。
+
+| 条款 | 本档之前 | 本档 |
+|---|---|---|
+| §5.2 视图的形态 | 视图面板里就是它的内容（文件树只有行） | 视图可以有一条**自己的工具栏**，钉在面板顶部（文件视图是第一个） |
+| 工具栏归谁 | — | **这个视图**，不是整条侧栏：切换器那一竖条只有视图图标与收起按钮，别的视图不受影响 |
+| 工具栏用什么座位 | — | **不用座位**：视图的控件就画在视图自己的组件里（与 §27「一个文件的东西不进侧栏」同一条理由） |
+| 那颗按钮做什么 | — | 「定位到正在浏览的文件」：把**活动 tab 的文件**在文件视图里找出来——沿路展开目录、滚到那一行、给那一行一个会淡出的高亮带 |
+| 它是不是导航 | — | **不是**：不打开文件、不切换 tab、不改选中、不动 URL。读者已经在读这个文件了，按钮只是让**树**追上来 |
+| §3.4 `ctx.tree` | `expanded` / `selected` / `select` / `toggle` / `isExpanded` | 另加 `reveal(path)`；快照多一个 `reveal: { path, at } \| undefined` |
+| §3.7 命令表 | `tree.focus` | 另加 `tree.revealActive`（`mod+shift+l`，`when` = 有活动 tab）；工具栏那颗按钮跑的就是它 |
+
+**没有变的东西**：`sidebar.views` 的座位形态（仍 keyed、key = 视图 id）、`SidebarViewProps`（仍是
+`{ active }`）、视图的注册方式、slot 清单、`ctx.tabs`、RPC 协议、`diorama.toml`。工具栏是**视图自己的
+组件**，不是内核座位，也不是整栏的属性。
+
+细则：
+
+- **为什么按钮在视图里，而不是新开 `sidebar.toolbar` 座位**：座位是「别人往这里注册」的东西，而这颗
+  按钮只有文件视图自己知道它做什么（要展开目录、要滚它自己的列表）。开座位还会让「谁画这一条」变成
+  第二个 owner，和 §5.2「切换器由 `layout` 画」的既有分工打架。视图的控件归视图，是同一句话的另一半。
+- **为什么 `reveal` 是 `ctx.tree` 的方法**："哪些目录是展开的"是这个服务的状态（§3.4），而把某一行
+  露出来必须先展开它上面的每一级——那是**状态**的改动，不是视图自己的滚动。服务负责「路径 → 展开」，
+  视图负责「那一行滚到中间、标一下」；两边都不越界。
+- **快照里为什么是 `{ path, at }` 而不是一个路径**：连按两次按钮要连定位两次，而「同一个路径」在快照
+  里不构成变化（`useSyncExternalStore` 不会因此重渲染）。`at` 是单调戳，新请求永远是新的数字。
+  这与 reveal store 的 `RevealTarget.at`（§3.9）是同一条规矩。
+- **「正在浏览的文件」就是活动 tab 的 `path`**：`diff` tab 也带 `path`，所以两种视图下按钮都找得到那一行；
+  没有 tab 时按钮**禁用**（标题写「没有正在浏览的文件」），命令的 `when` 为假（palette 不列它）。
+  禁用而不是隐藏：一个会消失的按钮会让工具栏跳动。
+- **分页的目录要能长出来**：目录超过 `PAGE_SIZE`（500）时先列一页。定位的落点若在第二页之后，视图
+  把那一页**按需长到**落点所在的位置（与「加载更多」同一个动作），否则那一行根本不存在、也就滚不过去。
+- **只展开，不收起**：读者自己打开过的目录不会被定位顺手关掉；目标路径上的目录已展开时不重复加。
+- **键位 `mod+shift+l`**：不与现有绑定冲突（`mod+alt+*` 那一族、`mod+k`、`mod+p`、`mod+shift+f`、
+  `mod+shift+[ / ]`、`mod+w`、`mod+1..9`、`mod+b`、`shift+?` 都不同）。`l` 取「locate」，与编辑器里
+  「reveal in explorer」的习惯一致。
+- **图标**：`reveal-file`（Tabler 的 `current-location`）进 `scripts/generate-icons.mjs` 的
+  `BUTTON_ICONS`，跑 `pnpm icons` 重新生成表，再重建**页面壳**（表由壳装，不是半边装，docs/m17/spec.md
+  §6 坑 9）。页面没有图标表时按钮退回一个字（「定」），与切换器同一条规则。
+- **落点的高亮是动画，不是状态**：`data-located="true"` 与一段 `1.6s` 的淡出背景，写完就结束；
+  读者继续滚动、点别的行都不受影响，也不需要「清掉高亮」这一步。
 
 ## 待定清单（v0.4 后仍 🔲）
 

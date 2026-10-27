@@ -12,7 +12,7 @@ Diorama 是一个**只读的文件查看器**：在任意目录执行一条命�
 
 ## 功能一览
 
-- **文件树**：彩色文件类型图标；默认隐藏 `.git` 与 `node_modules`（可用 `ignore` 规则覆盖）；大目录分页加载。
+- **文件树**：彩色文件类型图标；默认隐藏 `.git` 与 `node_modules`（可用 `ignore` 规则覆盖）；大目录分页加载。视图顶部有**工具栏**：一颗「定位到正在浏览的文件」按钮（`mod+shift+l`，也在命令面板里）——沿路展开目录、滚到那一行并短暂高亮，不打开、不切标签。
 - **多标签**：每个文件一个标签页，独立滚动、互不干扰；支持 `mod+shift+[ / ]`、`Ctrl+Shift+Tab` 与 `mod+1…9`（跳到第 n 个）切换，中键关闭。
 - **渲染器**：Markdown（marked + DOMPurify 消毒）、代码高亮（highlight.js）、图片（含 SVG）、PDF（浏览器原生查看器）、HTML（消毒预览与源码双视图，页面脚本逐文件确认后才执行）、纯文本兜底。渲染器失败时自动回退到下一个，绝不白屏。
 - **git 只读视图**：左栏「变更」实时显示工作区 diff（由文件 watch 驱动重算）；「历史」浏览提交列表，点开看提交详情、文件清单与「改动 / 提交时的内容」对比。
@@ -192,9 +192,9 @@ scripts/                  生成器（图标表；pnpm icons 重新生成）
 ```bash
 pnpm install
 pnpm build                 # 全量构建（含各包的类型声明产出）
-pnpm test:unit             # node --test，359 条单测
+pnpm test:unit             # node --test，389 条单测
 pnpm -r --no-sort run typecheck   # 注意：不要用 pnpm typecheck（任务图成环，会失败）
-pnpm --filter diorama-web exec playwright test   # 120 条端到端，真实 CLI + Chromium
+pnpm --filter diorama-web exec playwright test   # 154 条端到端，真实 CLI + Chromium
 ```
 
 端到端测试跑的是构建产物（`packages/*/lib`、`apps/web/dist`），改了源码先 `pnpm build` 再跑；每个用例使用独立的 `DIORAMA_HOME` 与 gateway，不碰真实的 `~/.diorama`。
@@ -223,6 +223,6 @@ diorama-beta .
 ## 状态与许可
 
 - 契约版本 `0.0.5`（pre-1.0 线：破坏性变更以 `0.0.x` 递增表达；插件声明 `>=0.0.5 <0.1.0`）。
-- 已实现：文件树、多标签、五类渲染器、git 变更与历史（diff 三档读法：行内 / 整文件单栏 / 新旧双栏）、文件搜索、命令面板与快捷键体系、watch、URL 深链、图标、明暗主题（跟随系统 / 锁定 / 第三方主题注册）、gateway 多目录挂载、`diorama.toml` 配置、挂载的 `--json` 输出、**一个目录里的多个 git 仓库**（并列与嵌套，变更 / 历史按仓库分组）、**可拖动的窗格**与长名字横滚、**侧栏可收起**、按住 ⌘ / Ctrl / ⌥ 时的快捷键浮层提示。359 条单测 + 147 条端到端全部通过。
+- 已实现：文件树、多标签、五类渲染器、git 变更与历史（diff 三档读法：行内 / 整文件单栏 / 新旧双栏）、文件搜索、命令面板与快捷键体系、watch、URL 深链、图标、明暗主题（跟随系统 / 锁定 / 第三方主题注册）、gateway 多目录挂载、`diorama.toml` 配置、挂载的 `--json` 输出、**一个目录里的多个 git 仓库**（并列与嵌套，变更 / 历史按仓库分组）、**可拖动的窗格**与长名字横滚、**侧栏可收起**、按住 ⌘ / Ctrl / ⌥ 时的快捷键浮层提示、**文件视图工具栏**（定位到正在浏览的文件）。389 条单测 + 154 条端到端全部通过。
 - 尚未做：外部插件加载（`~/.diorama/plugins` 与 npm 来源）、界面语言（i18n）、编辑能力（永远不会做——这是只读查看器）。
 - [MIT](LICENSE)

@@ -73,6 +73,7 @@ const BUTTON_ICONS = {
   'play': 'player-play',
   'regex': 'regex',
   'reload': 'reload',
+  'reveal-file': 'current-location',
   'search': 'search',
   'sidebar-fold': 'layout-sidebar-left-collapse',
   'sidebar-unfold': 'layout-sidebar-left-expand',
