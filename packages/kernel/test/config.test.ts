@@ -5,6 +5,7 @@ import {
   configWritePath,
   defaultConfig,
   formatFileConfig,
+  knownKeys,
   mergeConfig,
   parseConfigFile,
   patchFileConfig,
@@ -23,6 +24,8 @@ test('config: defaults match contract §4.1', () => {
   assert.deepEqual(defaults.watch, { debounceMs: 300, enabled: true, maxDirectories: 64 })
   // HTML previews do not run page scripts until asked (contract.md §5.1).
   assert.deepEqual(defaults.html, { scripts: false })
+  // A page with no choice of its own follows the system (contract.md §4.1).
+  assert.deepEqual(defaults.ui, { theme: 'system' })
   // Every built-in client plugin, in boot order (contract.md §1: the selection
   // is the boot order). `fs`/`git`/`search` are kernel services, not client
   // pieces (contract.md §3.1, §3.2, §3.9): they never appear in the page's
@@ -63,6 +66,8 @@ test('config: precedence is CLI > file > default', () => {
     git: { maxDepth: 3, maxRepos: 32 },
     // Nor an `[html]` table: the preview stays script-free.
     html: { scripts: false },
+    // Nor a `[ui]` table: a fresh page follows the system scheme.
+    ui: { theme: 'system' },
   })
   // CLI wins field by field; `--all` empties the ignore list.
   const merged = mergeConfig(file, { port: 0, host: '127.0.0.1', all: true })
@@ -96,6 +101,29 @@ test('config: html.scripts is a boolean and merges like every other field', () =
   assert.equal(formatFileConfig({ html: {} }), '')
   assert.equal(formatFileConfig({ html: { scripts: true } }), '[html]\nscripts = true\n')
   assert.deepEqual(patchFileConfig({ html: { scripts: true } }, { 'html.scripts': undefined }), {})
+})
+
+test('config: ui.theme is a non-empty, URL-safe preference and merges like every other field', () => {
+  assert.equal(mergeConfig(parseConfigFile(['[ui]', 'theme = "dark"'].join('\n'), 'u.toml')).ui.theme, 'dark')
+  // A registered theme's id is a legitimate value: the CLI cannot know the
+  // registry, so the file's own grammar is the only check.
+  assert.equal(mergeConfig(parseConfigFile(['[ui]', 'theme = "demo-solarized"'].join('\n'), 'u.toml')).ui.theme, 'demo-solarized')
+  for (const bad of ['""', '"has colon"', '"a b"', '1', 'true']) {
+    assert.throws(
+      () => parseConfigFile(['[ui]', `theme = ${bad}`].join('\n'), 'u.toml'),
+      /u\.toml: "ui\.theme" must/,
+      bad,
+    )
+  }
+  assert.throws(() => parseConfigFile(['[ui]', 'colour = "dark"'].join('\n'), 'u.toml'), /unknown key "ui\.colour"/)
+  assert.throws(() => parseConfigFile('ui = "dark"', 'u.toml'), /"ui" must be a table/)
+  // An empty table is dropped on the way out; a chosen one is written in order.
+  assert.equal(formatFileConfig({ ui: {} }), '')
+  assert.equal(formatFileConfig({ ui: { theme: 'dark' } }), '[ui]\ntheme = "dark"\n')
+  assert.deepEqual(patchFileConfig({ ui: { theme: 'dark' } }, { 'ui.theme': undefined }), {})
+  // The dotted key is addressable by `set` / `unset`, like `html.scripts`.
+  assert.deepEqual(patchFileConfig({}, { 'ui.theme': 'light' }), { ui: { theme: 'light' } })
+  assert.ok(knownKeys().includes('ui.theme'))
 })
 
 test('config: a syntax error and unknown keys fail loud, naming the file', () => {

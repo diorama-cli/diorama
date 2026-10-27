@@ -30,6 +30,7 @@ import {
   readConfigValue,
   readFileConfig,
   resolveConfig,
+  THEME_PREFERENCE_PATTERN,
   writeFileConfig,
   type EffectiveConfig,
   type FileConfig,
@@ -40,6 +41,7 @@ import {
   hostCandidates,
   IGNORE_CANDIDATES,
   isExposed,
+  themeCandidates,
   type CandidateSource,
   type InterfaceMap,
 } from './config-candidates.ts'
@@ -107,6 +109,18 @@ export function parseConfigValue(key: string, raw: string): unknown {
     case 'html.scripts': {
       const value = BOOLEANS[raw.trim().toLowerCase()]
       if (value === undefined) throw new UsageError(`--${key} must be true or false (got "${raw}")`)
+      return value
+    }
+    case 'ui.theme': {
+      const value = raw.trim()
+      if (value === '') throw new UsageError('--ui.theme must not be empty')
+      // The same charset the hash value and the command id are made from
+      // (contract.md §3.10): the file must be readable as what the page does.
+      if (!THEME_PREFERENCE_PATTERN.test(value)) {
+        throw new UsageError(
+          `--ui.theme must match ${THEME_PREFERENCE_PATTERN.source} ("system", "light", "dark", or a theme id)`,
+        )
+      }
       return value
     }
     default:
@@ -191,6 +205,23 @@ function menuFor(field: WizardField, current: unknown, defaults: EffectiveConfig
         footer: `choose 1-2, Enter keeps [${value}]`,
       }
     }
+    case 'theme': {
+      const value = String(current ?? field.fallback(defaults))
+      // A theme id from the file is not on the list (the CLI cannot see the
+      // page's registry), so it is shown as its own row: what will be written
+      // has to be visible.
+      const known = themeCandidates(value)
+      const candidates = known.some(candidate => candidate.value === value)
+        ? known
+        : [...known, { value, detail: 'in this file (a theme a plugin registers)' }]
+      return {
+        title: `${field.key} — ${field.hint}`,
+        candidates,
+        multi: false,
+        selected: [value],
+        footer: `choose a number, type a theme id, "-" clears, Enter keeps [${value}]`,
+      }
+    }
     default:
       throw new Error(`field ${field.key} has no menu`)
   }
@@ -258,6 +289,13 @@ const FIELDS: readonly WizardField[] = [
     fallback: defaults => defaults.html.scripts,
     parse: raw => parseConfigValue('html.scripts', raw),
     menu: 'boolean',
+  },
+  {
+    key: 'ui.theme',
+    hint: 'the theme a page starts with (system / light / dark / a theme id)',
+    fallback: defaults => defaults.ui.theme,
+    parse: raw => parseConfigValue('ui.theme', raw),
+    menu: 'theme',
   },
 ]
 
@@ -564,9 +602,11 @@ async function show(io: CliIo, args: ConfigArgs): Promise<number> {
   }
   io.out(`config file: ${resolved.origin.path ?? 'none (defaults)'}`)
   for (const [key, value] of Object.entries(resolved.config)) {
-    if (key === 'watch') {
+    // Tables read as dotted keys (`watch.enabled = false`, `ui.theme = dark`):
+    // `config show` is where a reader looks up what to `set` / `unset`.
+    if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
       for (const [name, inner] of Object.entries(value as Record<string, unknown>)) {
-        io.out(`  watch.${name} = ${displayValue(inner)}`)
+        io.out(`  ${key}.${name} = ${displayValue(inner)}`)
       }
       continue
     }
@@ -675,6 +715,7 @@ Keys for set/unset:
   watch.debounceMs        --watch.debounceMs 300
   watch.maxDirectories    --watch.maxDirectories 64
   html.scripts            --html.scripts true   (an HTML preview runs its scripts)
+  ui.theme                --ui.theme dark       (system / light / dark / a theme id)
 
 Where it writes:
   no --dir/--config       $DIORAMA_HOME/diorama.toml (the global default)

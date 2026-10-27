@@ -11,6 +11,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml'
+import { DEFAULT_THEME_PREFERENCE, THEME_PREFERENCE_PATTERN } from '../shared/config.ts'
 import { DEFAULT_IGNORE } from '../shared/ignore.ts'
 import { BUILTIN_PLUGIN_IDS } from './plan.ts'
 import { DEFAULT_GIT_MAX_DEPTH, DEFAULT_GIT_MAX_REPOS } from './repos.ts'
@@ -48,6 +49,14 @@ export interface EffectiveConfig {
     /** Whether the preview runs a page's scripts without asking, per file. */
     scripts: boolean
   }
+  /** Page preferences (contract.md §4.1, §3.10). */
+  ui: {
+    /**
+     * The theme a page starts with when the reader has chosen nothing:
+     * `system`, `light`, `dark`, or a registered theme's id.
+     */
+    theme: string
+  }
 }
 
 /** What a `diorama.toml` may say (every field optional). */
@@ -59,6 +68,7 @@ export interface FileConfig {
   watch?: { debounceMs?: number; enabled?: boolean; maxDirectories?: number }
   git?: { maxDepth?: number; maxRepos?: number; ignore?: string[] }
   html?: { scripts?: boolean }
+  ui?: { theme?: string }
 }
 
 /** Where the configuration came from. */
@@ -106,6 +116,9 @@ export function defaultConfig(): EffectiveConfig {
     // Scripts stay off until the reader says so, per file (contract.md §5.1):
     // an HTML file is not trusted because it was opened.
     html: { scripts: false },
+    // A fresh page follows the system scheme; the file can pin a start
+    // (contract.md §4.1, §3.10).
+    ui: { theme: DEFAULT_THEME_PREFERENCE },
   }
 }
 
@@ -115,10 +128,11 @@ export function dioramaHome(env: NodeJS.ProcessEnv = process.env): string {
   return home !== undefined && home !== '' ? resolve(home) : join(homedir(), '.diorama')
 }
 
-const ROOT_KEYS = new Set(['host', 'port', 'plugins', 'ignore', 'watch', 'git', 'html'])
+const ROOT_KEYS = new Set(['host', 'port', 'plugins', 'ignore', 'watch', 'git', 'html', 'ui'])
 const WATCH_KEYS = new Set(['debounceMs', 'enabled', 'maxDirectories'])
 const GIT_KEYS = new Set(['maxDepth', 'maxRepos', 'ignore'])
 const HTML_KEYS = new Set(['scripts'])
+const UI_KEYS = new Set(['theme'])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -211,6 +225,28 @@ export function validateFileConfig(raw: unknown, where: string): FileConfig {
     }
     out.html = html
   }
+  if (raw.ui !== undefined) {
+    if (!isRecord(raw.ui)) throw new ConfigError(`${where}: "ui" must be a table`)
+    for (const key of Object.keys(raw.ui)) {
+      if (!UI_KEYS.has(key)) throw new ConfigError(`${where}: unknown key "ui.${key}" (known: ${[...UI_KEYS].join(', ')})`)
+    }
+    const ui: NonNullable<FileConfig['ui']> = {}
+    if (raw.ui.theme !== undefined) {
+      const value = raw.ui.theme
+      if (typeof value !== 'string' || value.trim() === '') {
+        throw new ConfigError(`${where}: "ui.theme" must be a non-empty string`)
+      }
+      // Same charset as the hash value and the command id it becomes
+      // (contract.md §3.10): anything else could never be picked from the URL.
+      if (!THEME_PREFERENCE_PATTERN.test(value)) {
+        throw new ConfigError(
+          `${where}: "ui.theme" must match ${THEME_PREFERENCE_PATTERN.source} ("system", "light", "dark", or a theme id)`,
+        )
+      }
+      ui.theme = value
+    }
+    out.ui = ui
+  }
   return out
 }
 
@@ -275,6 +311,9 @@ export function mergeConfig(file: FileConfig, cli: ResolveOptions['cli'] = {}): 
     html: {
       scripts: file.html?.scripts ?? base.html.scripts,
     },
+    ui: {
+      theme: file.ui?.theme ?? base.ui.theme,
+    },
   }
 }
 
@@ -290,15 +329,17 @@ export function resolveConfig(options: ResolveOptions): { config: EffectiveConfi
  * The keys a written file may carry, in the order they are emitted: the order
  * of the example in contract.md §4.1, so a written file reads like the docs.
  */
-export const CONFIG_KEYS = ['host', 'port', 'plugins', 'ignore', 'watch', 'git', 'html'] as const
+export const CONFIG_KEYS = ['host', 'port', 'plugins', 'ignore', 'watch', 'git', 'html', 'ui'] as const
 export const WATCH_CONFIG_KEYS = ['debounceMs', 'enabled', 'maxDirectories'] as const
 export const GIT_CONFIG_KEYS = ['maxDepth', 'maxRepos', 'ignore'] as const
 export const HTML_CONFIG_KEYS = ['scripts'] as const
+export const UI_CONFIG_KEYS = ['theme'] as const
 
 export type ConfigKey = (typeof CONFIG_KEYS)[number]
 export type WatchConfigKey = (typeof WATCH_CONFIG_KEYS)[number]
 export type GitConfigKey = (typeof GIT_CONFIG_KEYS)[number]
 export type HtmlConfigKey = (typeof HTML_CONFIG_KEYS)[number]
+export type UiConfigKey = (typeof UI_CONFIG_KEYS)[number]
 
 /**
  * One field to write. `watch.*` is addressed as a dotted key (`watch.enabled`),
@@ -310,7 +351,7 @@ export type ConfigPatch = Record<string, unknown>
 export function readConfigValue(config: FileConfig, key: string): unknown {
   const [head, tail] = key.split('.')
   if (tail !== undefined) {
-    if (head !== 'watch' && head !== 'git' && head !== 'html') return undefined
+    if (head !== 'watch' && head !== 'git' && head !== 'html' && head !== 'ui') return undefined
     return (config[head] as Record<string, unknown> | undefined)?.[tail]
   }
   return (config as Record<string, unknown>)[head as string]
@@ -329,6 +370,7 @@ export function patchFileConfig(base: FileConfig, patch: ConfigPatch, where = 'c
   if (next.watch !== undefined) next.watch = { ...(next.watch as Record<string, unknown>) }
   if (next.git !== undefined) next.git = { ...(next.git as Record<string, unknown>) }
   if (next.html !== undefined) next.html = { ...(next.html as Record<string, unknown>) }
+  if (next.ui !== undefined) next.ui = { ...(next.ui as Record<string, unknown>) }
   for (const [key, value] of Object.entries(patch)) {
     const [head = '', tail] = key.split('.')
     if (tail !== undefined) {
@@ -338,7 +380,9 @@ export function patchFileConfig(base: FileConfig, patch: ConfigPatch, where = 'c
           ? GIT_CONFIG_KEYS
           : head === 'html'
             ? HTML_CONFIG_KEYS
-            : undefined
+            : head === 'ui'
+              ? UI_CONFIG_KEYS
+              : undefined
       if (table === undefined || !(table as readonly string[]).includes(tail)) {
         throw new ConfigError(`${where}: unknown key "${key}" (known: ${knownKeys().join(', ')})`)
       }
@@ -361,10 +405,11 @@ export function patchFileConfig(base: FileConfig, patch: ConfigPatch, where = 'c
 /** Every addressable key, for messages: `host, port, plugins, ignore, watch.debounceMs, …`. */
 export function knownKeys(): string[] {
   return [
-    ...CONFIG_KEYS.filter(key => key !== 'watch' && key !== 'git' && key !== 'html'),
+    ...CONFIG_KEYS.filter(key => key !== 'watch' && key !== 'git' && key !== 'html' && key !== 'ui'),
     ...WATCH_CONFIG_KEYS.map(key => `watch.${key}`),
     ...GIT_CONFIG_KEYS.map(key => `git.${key}`),
     ...HTML_CONFIG_KEYS.map(key => `html.${key}`),
+    ...UI_CONFIG_KEYS.map(key => `ui.${key}`),
   ]
 }
 
@@ -402,6 +447,12 @@ export function formatFileConfig(config: FileConfig): string {
     if (value !== undefined) html[key] = value
   }
   if (Object.keys(html).length > 0) table.html = html
+  const ui: Record<string, unknown> = {}
+  for (const key of UI_CONFIG_KEYS) {
+    const value = config.ui?.[key]
+    if (value !== undefined) ui[key] = value
+  }
+  if (Object.keys(ui).length > 0) table.ui = ui
   if (Object.keys(table).length === 0) return ''
   // smol-toml already ends with a newline; a file should not end with a blank line.
   return `${stringifyToml(table).replace(/\n+$/, '')}\n`

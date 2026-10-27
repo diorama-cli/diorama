@@ -18,7 +18,7 @@ Diorama 是一个**只读的文件查看器**：在任意目录执行一条命�
 - **git 只读视图**：左栏「变更」实时显示工作区 diff（由文件 watch 驱动重算）；「历史」浏览提交列表，点开看提交详情、文件清单与「改动 / 提交时的内容」对比。
 - **搜索**：按内容（字面量 / 正则、大小写、全字匹配）或按文件名（子序列，VS Code `Ctrl+P` 口径）；点结果直接打开文件并跳到那一行。`mod+p` 随时快速打开文件。不做索引，每次现场扫描，遵守 `ignore` 规则。
 - **命令与快捷键**：命令面板（`mod+k`）与快捷键共用一套命令注册表；按 `?` 查看全部快捷键速查。**按住 ⌘ / Ctrl（或 ⌥）时，标签页与侧栏图标会浮出各自的快捷键**——浮层不挤动布局，松手即消失。
-- **主题**：默认跟随系统明暗（系统切换即时生效），`mod+alt+t` 或命令面板里锁定亮色 / 暗色；选择记在浏览器里、写进 URL（`#theme=dark`），刷新与分享都不闪。第三方插件可以用 `ctx.theme.register({ id, title, scheme, tokens })` 加主题——一组 CSS 自定义属性，不用写 UI 就出现在命令面板里。
+- **主题**：默认跟随系统明暗（系统切换即时生效），`mod+alt+t` 或命令面板里锁定亮色 / 暗色；选择记在浏览器里、写进 URL（`#theme=dark`），刷新与分享都不闪。**每个目录可以在 `diorama.toml` 的 `[ui] theme` 里给自己的默认主题**（`system` / `light` / `dark` / 某个主题 id）——那是**起点**，你自己选过就以你的为准。第三方插件可以用 `ctx.theme.register({ id, title, scheme, tokens })` 加主题——一组 CSS 自定义属性，不用写 UI 就出现在命令面板里。
 - **实时刷新**：文件变化自动更新树与内容（300ms 合并，可在页面里关闭自动刷新）。
 - **URL 深链**：`/~/<路径>` 直接打开某个文件，刷新后恢复活动标签；git 视图的 `#diff`、`#history=<sha>` 同样可分享。
 
@@ -113,6 +113,9 @@ maxRepos = 32               # 一个挂载最多报多少个仓库（1–4096）
 
 [html]
 scripts = false             # HTML 预览是否默认执行页面脚本（默认 false：逐文件确认）
+
+[ui]
+theme = "system"            # 页面没人选过主题时的起点：system / light / dark / 某个主题 id
 ```
 
 ### 改配置：`diorama config`
@@ -123,6 +126,7 @@ scripts = false             # HTML 预览是否默认执行页面脚本（默认
 diorama config                      # 交互式：逐项问，能选的给编号菜单，回车保留，"-" 清除
 diorama config show [<dir>] [--json]   # diorama <dir> 会用的配置与来源
 diorama config set --port 8080 --ignore ".git,*.log" --watch.enabled false
+diorama config set --dir . --ui.theme dark   # 这个目录默认暗色（你手动选过的主题仍然优先）
 diorama config unset port            # 删掉一个字段，回到默认
 ```
 
@@ -131,8 +135,9 @@ diorama config unset port            # 删掉一个字段，回到默认
 - **只写你选过的字段**，其余行原样保留；写完不会重启正在跑的 mount，生效用 `diorama restart <dir>`。
 - 值不合法、或目标文件本身写坏了（语法错、未知键）→ 报错退出 2，**一个字节都不写**。
 - **交互式会列候选**：`host` 直接从本机网卡解析（`127.0.0.1` / `0.0.0.0` / 各网卡 IPv4），
-  `plugins` / `ignore` / `watch.enabled` 是勾选菜单（方向键 + 空格，或直接打编号）；`port` 这类
-  数字项只收数字。候选只是省打字，**打任何值都照常收**。
+  `plugins` / `ignore` / `watch.enabled` 是勾选菜单（方向键 + 空格，或直接打编号），
+  `ui.theme` 是 `system` / `light` / `dark` 三选一；`port` 这类数字项只收数字。
+  候选只是省打字，**打任何值都照常收**——主题 id 就靠打字（主题注册表在页面里，CLI 看不见它）。
 
 ## 进程模型与安全
 

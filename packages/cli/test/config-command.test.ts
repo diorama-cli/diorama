@@ -101,6 +101,16 @@ test('config value grammar: booleans accept the usual spellings, nothing else', 
   assert.throws(() => parseConfigValue('html.scripts', 'maybe'), /--html\.scripts must be true or false/)
 })
 
+test('config value grammar: ui.theme takes the three built-ins or a theme id', () => {
+  for (const value of ['system', 'light', 'dark', 'demo-solarized']) {
+    assert.equal(parseConfigValue('ui.theme', value), value)
+  }
+  assert.equal(parseConfigValue('ui.theme', '  dark '), 'dark')
+  assert.throws(() => parseConfigValue('ui.theme', ''), /must not be empty/)
+  // The hash charset (contract.md §3.10): anything else could not be shared.
+  assert.throws(() => parseConfigValue('ui.theme', 'has:colon'), /--ui\.theme must match/)
+})
+
 test('config value grammar: unknown keys are rejected with the known list', () => {
   assert.throws(() => parseConfigValue('colour', 'red'), /unknown key "colour".*watch\.maxDirectories/)
   assert.throws(() => parseConfigValue('host', '  '), /must not be empty/)
@@ -117,7 +127,7 @@ test('wizard: Enter keeps a field, a typed value replaces it, "-" clears it', as
   const seen: string[] = []
   const result = await runWizard(
     { port: 4000, ignore: ['dist'] },
-    scripted(['', '8080', '', '-', '2', '', '', '']),
+    scripted(['', '8080', '', '-', '2', '', '', '', '']),
     { defaults: defaultConfig(), out: message => seen.push(message) },
   )
   assert.deepEqual(result.config, {
@@ -140,7 +150,7 @@ test('wizard: a value the file would reject re-asks instead of aborting', async 
   const seen: string[] = []
   // host(menu) '', port 'eighty' then '9090', plugins(menu) '', ignore(menu) '',
   // watch.enabled(menu) '', debounce '', maxDirectories '', html.scripts(menu) ''.
-  const answers = ['', 'eighty', '9090', '', '', '', '', '', '']
+  const answers = ['', 'eighty', '9090', '', '', '', '', '', '', '']
   let index = 0
   const questions: string[] = []
   const result = await runWizard(
@@ -166,7 +176,7 @@ test('wizard: a value the file would reject re-asks instead of aborting', async 
 })
 
 test('wizard: nothing typed writes nothing', async () => {
-  const result = await runWizard({ port: 4000 }, scripted(['', '', '', '', '', '', '', '']), {
+  const result = await runWizard({ port: 4000 }, scripted(['', '', '', '', '', '', '', '', '']), {
     defaults: defaultConfig(),
     out: () => {},
   })
@@ -208,6 +218,7 @@ test('wizard: numeric fields ask for a number; only listed fields open a menu', 
     '  watch.debounceMs [300] (default, 0–60000): ',
     '  watch.maxDirectories [64] (default, 1–4096): ',
     "html.scripts — true = an HTML preview runs the page's scripts without asking",
+    'ui.theme — the theme a page starts with (system / light / dark / a theme id)',
   ])
   assert.equal(result.changed, false)
 })
@@ -262,7 +273,7 @@ test('wizard: drawing goes through the raw sink, so a redraw replaces a frame', 
     input.send('\x1b[B')
     await until(lines, text => text.split('host — where the page listens').length > 2)
     // Then keep every field, and decline the write once the preview asks.
-    for (const key of ['\r', '\r', '\r', '\r', '\r', '\r', '\r', '\r', 'n\r']) {
+    for (const key of ['\r', '\r', '\r', '\r', '\r', '\r', '\r', '\r', '\r', 'n\r']) {
       input.send(key)
       await new Promise(done => setImmediate(done))
     }

@@ -165,6 +165,9 @@ export async function bootClient(options: BootOptions): Promise<BootResult> {
   const theme = createThemeService({
     host: browserThemeHost(),
     hash: router.service.state(THEME_HASH_KEY),
+    // Where a page with no choice of its own starts (contract.md §4.1): the
+    // mount's `[ui] theme`. A reader's choice still wins over it.
+    fallback: handle.config.ui.theme,
     warn: message => log(`[diorama] ${message}`),
   })
   ctx.provide('theme', theme)

@@ -236,6 +236,7 @@ export const DEFAULT_CONFIG = {
   watch: { debounceMs: 300, enabled: true, maxDirectories: 64 },
   git: { maxDepth: 3, maxRepos: 32 },
   html: { scripts: false },
+  ui: { theme: 'system' },
 }
 
 /** Send one control request and resolve with its result (or reject with its code). */

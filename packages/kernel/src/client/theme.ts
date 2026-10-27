@@ -37,7 +37,13 @@ export type ThemeScheme = 'light' | 'dark'
 /** The built-in choices; any other value names a registered theme. */
 export type ThemePreference = 'system' | 'light' | 'dark'
 
-/** Where the choice is remembered between reloads (shared with `index.html`). */
+/**
+ * Where the reader's **choice** is remembered between reloads (shared with
+ * `index.html`). Absent means "nobody has chosen": the page then starts from
+ * the configuration's `[ui] theme` (contract.md §4.1) and otherwise follows
+ * the system. A default is never written here — a remembered default would
+ * shadow every later change to the file.
+ */
 export const THEME_STORAGE_KEY = 'diorama.theme'
 
 /**
@@ -135,8 +141,13 @@ export interface ThemePaint {
 export interface ThemeHost {
   /** The remembered choice, if any (a blocked storage answers `undefined`). */
   stored(): string | undefined
-  /** Remember the choice and the scheme it resolved to. */
-  store(preference: string, scheme: ThemeScheme): void
+  /**
+   * Remember the scheme it resolved to, and the choice when there is one.
+   * `preference` is `undefined` while nobody has chosen (the page is on the
+   * configuration's default): the scheme is still stored, because the shell
+   * paints from it before the bundle runs, but no choice is recorded.
+   */
+  store(preference: string | undefined, scheme: ThemeScheme): void
   /** The OS's scheme right now. */
   system(): ThemeScheme
   /** Subscribe to OS changes; returns the unsubscriber. */
@@ -177,7 +188,8 @@ export function browserThemeHost(): ThemeHost | undefined {
     },
     store(preference, scheme) {
       try {
-        globalThis.localStorage?.setItem(THEME_STORAGE_KEY, preference)
+        if (preference === undefined) globalThis.localStorage?.removeItem(THEME_STORAGE_KEY)
+        else globalThis.localStorage?.setItem(THEME_STORAGE_KEY, preference)
         globalThis.localStorage?.setItem(THEME_SCHEME_STORAGE_KEY, scheme)
       } catch {
         // Same as above: remember nothing rather than break the page.
@@ -232,6 +244,13 @@ export interface ThemeOptions {
   host?: ThemeHost
   /** The `theme` hash slot (contract.md §3.8); absent outside a page. */
   hash?: RouterStateSlot
+  /**
+   * Where the page **starts** when nobody has chosen and the URL says nothing:
+   * the configuration's `[ui] theme` (contract.md §4.1). A start, not a lock —
+   * the reader's choice (palette, shortcut, a shared link) always wins, and
+   * changing the file moves a page that never chose.
+   */
+  fallback?: string
   /** Sink for a preference that names no registered theme. */
   warn?(message: string): void
 }
@@ -243,6 +262,12 @@ const ID_PATTERN = /^[A-Za-z0-9_.-]+$/
 export class Themes implements ThemeService {
   private preference: string
   private snapshot: ThemeSnapshot
+  /**
+   * Whether the preference is the reader's (a choice, a link) rather than the
+   * configuration's default. Only a choice is remembered as a preference; the
+   * scheme is remembered either way so the shell can paint before the bundle.
+   */
+  private chosen: boolean
   private readonly registered = new Map<string, ThemeDefinition>()
   private readonly listeners = new Set<() => void>()
   private readonly themeListeners = new Set<() => void>()
@@ -253,9 +278,13 @@ export class Themes implements ThemeService {
 
   constructor(private readonly options: ThemeOptions = {}) {
     this.host = options.host ?? inertThemeHost()
-    // The URL wins over the remembered choice: a shared link shows what it says.
+    // The URL wins over the remembered choice, which wins over the file's
+    // default: a shared link shows what it says, a reader who chose keeps it,
+    // and everybody else starts where `[ui] theme` says.
     const fromHash = options.hash?.get()
-    this.preference = normalizePreference(fromHash ?? this.host.stored())
+    const stored = this.host.stored()
+    this.chosen = fromHash !== undefined || stored !== undefined
+    this.preference = normalizePreference(fromHash ?? stored ?? options.fallback)
     this.snapshot = { preference: this.preference, scheme: 'light', theme: undefined }
     this.paint()
     this.stopSystem = this.host.watchSystem(() => {
@@ -283,6 +312,8 @@ export class Themes implements ThemeService {
   set(preference: string): void {
     const next = normalizePreference(preference)
     this.preference = next
+    // From here on the choice is the reader's, and outranks the file's default.
+    this.chosen = true
     // Paint first: it resolves the scheme and remembers both halves, so a
     // reload's `index.html` has the answer before the bundle runs.
     this.paint()
@@ -361,7 +392,7 @@ export class Themes implements ThemeService {
       )
     }
     this.host.paint({ scheme: resolved.scheme, theme: resolved.theme, tokens: resolved.tokens })
-    this.host.store(this.preference, resolved.scheme)
+    this.host.store(this.chosen ? this.preference : undefined, resolved.scheme)
     const next: ThemeSnapshot = {
       preference: this.preference,
       scheme: resolved.scheme,

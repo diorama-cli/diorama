@@ -442,7 +442,10 @@ function isEffectiveConfig(value: unknown): value is EffectiveConfig {
     typeof watch.enabled === 'boolean' &&
     // `html` decides what a preview runs (contract.md §5.1). A mount that does
     // not send it is not a mount this gateway knows how to serve.
-    isHtmlConfig(record.html)
+    isHtmlConfig(record.html) &&
+    // `ui` decides where a page with no choice of its own starts (contract.md
+    // §4.1, §3.10); same rule: the whole configuration travels, not a slice.
+    isUiConfig(record.ui)
   )
 }
 
@@ -453,6 +456,12 @@ function isHtmlConfig(value: unknown): boolean {
     !Array.isArray(value) &&
     typeof (value as Record<string, unknown>).scripts === 'boolean'
   )
+}
+
+function isUiConfig(value: unknown): boolean {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
+  const theme = (value as Record<string, unknown>).theme
+  return typeof theme === 'string' && theme !== ''
 }
 
 function coded(code: 'EBADREQUEST' | 'EMETHOD' | 'ENOMOUNT', message: string): Error & { code: string } {

@@ -1,3 +1,5 @@
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import { fixture, startDiorama, waitForPage } from './support.ts'
 
@@ -165,6 +167,39 @@ test('5. a piece can register a theme; it becomes a command and recolours the pa
     )
     expect(border).toBe('#e3e3e6')
     expect(new URL(page.url()).hash).toBe('#theme=demo-solarized')
+  } finally {
+    await server.stop()
+    directory.dispose()
+  }
+})
+
+test('6. [ui] theme in diorama.toml decides where a page with no choice starts', async ({ page }) => {
+  const directory = fixture()
+  // The served directory's own config (contract.md §4.1): a start, not a lock.
+  writeFileSync(join(directory.root, 'diorama.toml'), '[ui]\ntheme = "dark"\n')
+  const server = await startDiorama(directory.root)
+  try {
+    await page.emulateMedia({ colorScheme: 'light' })
+    await page.goto(server.url)
+    // Before the bundle: the server injects the configured start, so the first
+    // frame is already the right palette (no white flash on a dark default).
+    expect(await scheme(page)).toBe('dark')
+    await waitForPage(page)
+    expect(await background(page)).toBe('rgb(22, 24, 29)')
+    // The default is not a choice: nothing was written to the URL.
+    expect(new URL(page.url()).hash).toBe('')
+
+    // A choice the reader makes outranks the file, and survives the reload
+    // even though the file still says dark.
+    await page.keyboard.press(`${MOD}+k`)
+    await page.getByTestId('palette-input').fill('主题：亮色')
+    await page.locator('[data-command="theme.useLight"]').click()
+    await expect.poll(() => scheme(page)).toBe('light')
+    expect(new URL(page.url()).hash).toBe('#theme=light')
+    await page.reload()
+    await waitForPage(page)
+    expect(await scheme(page)).toBe('light')
+    expect(await background(page)).toBe('rgb(255, 255, 255)')
   } finally {
     await server.stop()
     directory.dispose()

@@ -829,16 +829,23 @@ interface ThemeService {
 - **默认 `system`**：跟随 `prefers-color-scheme`，**操作系统切换时页面实时重绘**（`matchMedia`
   的 `change` 事件），不需要刷新。`light` / `dark` 是**锁定**：锁定的 scheme 不随系统变。
 - **三处状态，一个来源**：
-  - `localStorage` 键 **`diorama.theme`** 记住偏好；**`diorama.theme.scheme`** 记住它解析出的
-    scheme（主题锁定的 scheme 也在这里），页面壳（`index.html`）在**首帧之前**读后者写
-    `data-scheme`——没有它暗色页面每次刷新都白闪。两个键与 `resolveTheme` 的判定规则
-    在 `packages/kernel/src/client/theme.ts`，壳里的脚本必须与它保持一致。
+  - `localStorage` 键 **`diorama.theme`** 记住**读者的选择**（没选过时**不存在**，不是
+    `"system"`——记住的默认值会盖住之后改的配置）；**`diorama.theme.scheme`** 记住它解析出的
+    scheme（主题锁定的 scheme 也在这里，`[ui] theme` 解析出的也算），页面壳（`index.html`）
+    在**首帧之前**读后者写 `data-scheme`——没有它暗色页面每次刷新都白闪。两个键与
+    `resolveTheme` 的判定规则在 `packages/kernel/src/client/theme.ts`，壳里的脚本必须与它
+    保持一致。
   - URL hash 键 **`theme`**（§3.8 的通用键值面）让选择可分享：`/#theme=dark`、
     `/#theme=<主题id>`。`system` 是**没有这个键**（不写 `#theme=system`）。hash 变化
     （前进 / 后退、手工改 URL）同样驱动页面。
   - `<html>` 的 **`data-scheme="light|dark"`** 与 **`data-theme="<id>"`** 是 CSS 看到的面；
     主题的 tokens 以内联 `style` 写在 `<html>` 上（切换主题时清掉上一主题的）。
-- **优先级**：boot 时 hash > storage > `system`；运行中最后一次 `set()` 赢。
+- **优先级**：boot 时 hash > storage > **`[ui] theme`**（§4.1）> `system`；运行中最后一次
+  `set()` 赢。前三者是同一份偏好的三个来源，`[ui] theme` 是配置给的**起点**：读者没选过、
+  URL 也没说时用它，读者一选（palette、`mod+alt+t`、分享的链接）就归读者，改文件也不再动他。
+  页面壳的首帧：服务端把 `light` / `dark` 的 `[ui] theme` 以 `window.__diorama_theme__` 注入
+  `index.html`（它同时持有文件与配置，壳没有第二个途径）；**主题 id 不注入**——壳不知道一个
+  主题属于哪个 scheme，那种页面首帧跟随系统、服务启动后由 `ctx.theme` 重绘一次。
 - **主题是注册表项，不是文件**：任何插件 `ctx.theme.register({ id, title, scheme, tokens })`
   即可；id 重复抛错（与 `ctx.slots` / `ctx.commands` 的全局 id 同一条规则）。**偏好可以走在
   注册前面**：`set('night-owl')` 时该主题还没注册，页面先跟随系统并 `warn` 一次，主题注册后
@@ -961,6 +968,9 @@ maxRepos = 32               # 一个挂载最多报多少个仓库；1–4096
 
 [html]
 scripts = false             # HTML 预览是否默认执行页面脚本（§5.1）
+
+[ui]
+theme = "system"            # 页面没人选过主题时从哪里开始（§3.10）；system / light / dark / 主题 id
 ```
 
 | 字段 | 类型 | 默认 | 说明 |
@@ -976,6 +986,7 @@ scripts = false             # HTML 预览是否默认执行页面脚本（§5.1�
 | `git.maxRepos` | integer 1–4096 | `32` | 一个挂载最多报多少个仓库；到上限时 `repos()` 的 `truncated` 为 true |
 | `git.ignore` | string[] | 同 `ignore` | 走查时剪掉的目录；缺省沿用 `ignore`（即 `.git` + `node_modules`） |
 | `html.scripts` | boolean | `false` | HTML 预览是否**默认执行**页面脚本（§5.1）；`false` = 逐文件确认后才执行 |
+| `ui.theme` | string | `"system"` | 页面**没人选过主题时**的起点（§3.10）：`system` / `light` / `dark` / 某个已注册主题的 id。字符集同 hash 值（`[A-Za-z0-9_.-]+`），否则 fail loud。**是起点不是锁定**：读者选过（命令、快捷键、分享的 `#theme=…`）就以读者的为准 |
 
 **优先级：CLI > `diorama.toml` > 默认值。**
 
@@ -1007,7 +1018,7 @@ scripts = false             # HTML 预览是否默认执行页面脚本（§5.1�
 
 | 子命令 | 做什么 | 退出码 |
 |---|---|---|
-| `diorama config` | **交互式**：逐项问 `host` / `port` / `plugins` / `ignore` / `watch.enabled` / `watch.debounceMs` / `watch.maxDirectories`，然后确认写入 | 0 / 2 |
+| `diorama config` | **交互式**：逐项问 `host` / `port` / `plugins` / `ignore` / `watch.enabled` / `watch.debounceMs` / `watch.maxDirectories` / `html.scripts` / `ui.theme`，然后确认写入 | 0 / 2 |
 | `diorama config show [<dir>] [--json]` | 打印 `diorama <dir>` **会用的**配置与来源（与 `--dump-config` 同一合并） | 0 / 2 |
 | `diorama config set --<key> <value> …` | 写字段，**文件里其余的行不动**（读-改-写） | 0 / 2 |
 | `diorama config unset <key> …` | 删字段（回到默认） | 0 / 2 |
@@ -1023,14 +1034,18 @@ scripts = false             # HTML 预览是否默认执行页面脚本（§5.1�
 - **被浏览的目录默认不写**（architecture §8、AGENTS §6）：浏览是只读的，所以「项目级配置」必须由
   用户**点名**（`--dir` / `--config`），而不是从「当前目录」推断。
 - **键就是 §4.1 的字段**：`host` / `port` / `plugins` / `ignore` / `watch.enabled` /
-  `watch.debounceMs` / `watch.maxDirectories`。`set` 的拼写是 `--<key> <value>`；`watch.*` 用点号
-  写全（`--watch.enabled false`）。未知键是用法错误（列出已知键），不是静默忽略。
+  `watch.debounceMs` / `watch.maxDirectories` / `html.scripts` / `ui.theme`。`set` 的拼写是
+  `--<key> <value>`；子表的键用点号写全（`--watch.enabled false`、`--ui.theme dark`）。
+  未知键是用法错误（列出已知键），不是静默忽略。
 - **值的语法**（CLI 与交互式共用一份解析）：`plugins` / `ignore` 是逗号分隔（**空串 = 空数组**，
   所以 `--ignore ""` 就是「不隐藏任何东西」，与 `--all` 同义）；布尔收 `true/false/yes/no/on/off/1/0`；
-  整数按 §4.1 的范围校验（`port` 0–65535、`debounceMs` 0–60000、`maxDirectories` 1–4096）。
+  整数按 §4.1 的范围校验（`port` 0–65535、`debounceMs` 0–60000、`maxDirectories` 1–4096）；
+  `ui.theme` 收 `[A-Za-z0-9_.-]+`（与 §3.10 的 hash 值同一字符集），交互式里给
+  `system` / `light` / `dark` 三项候选，**打一个主题 id 也照常收**（主题注册表在页面里，
+  CLI 看不见它）。
 - **只写选过的字段**：文件里不出现默认值。写出来的键按 §4.1 示例的顺序（`host, port, plugins,
-  ignore, [watch]`），空表不写；`ignore = []` / `plugins = []` 是**显式的空数组**，保留（丢掉它
-  会把「显示全部」变回「隐藏 .git」）。所有键都删光 → 文件是空的（0 字节），不是一份默认值快照。
+  ignore, [watch], [git], [html], [ui]`），空表不写；`ignore = []` / `plugins = []` 是**显式的
+  空数组**，保留（丢掉它会把「显示全部」变回「隐藏 .git」）。所有键都删光 → 文件是空的（0 字节），不是一份默认值快照。
 - **交互式**：回车保留、输入值替换、`-` 清除（回到默认）；不合法就重问那一项。最后预览 +
   `write this file? [Y/n]`；**拒绝或 stdin 提前结束都不写**（提前结束是退出码 2，不会留下半个
   文件）。`--dry-run` 只预览；`--yes` 跳过确认。
@@ -2137,6 +2152,43 @@ URL / hash 语义、主题 token 表（新样式只用既有 token，无新 toke
 **没有变的东西**：控制面的 `unmount`（§7.3）与其幂等语义、`restart`、`gateway stop|restart`、
 `MountStatus` 的字段、`ls` 的输出形状、`diorama.toml`。`stop` 不新增任何服务端行为——
 它只是把「按 `mountId` 卸一个」包成一个按**目录**说话的 CLI 动词。
+
+## 33. `0.0.2` 之后：默认主题写在 `diorama.toml` 里（未发版，属下一个 `0.0.x`）
+
+> 2026-10-27。用户要求：**支持在配置文件中设置默认主题**。契约号不动（§6）：没有新增服务、
+> 没有改 `ctx.*` 的签名、没有加座位；变的是 **§4.1 的一张新表**（`[ui] theme`）、**§4.2 的一个
+> 可写键**，以及 **§3.10 的优先级多一档**（配置的默认在 `system` 之上、读者的选择之下）。
+
+| 条款 | 本档之前 | 本档 |
+|---|---|---|
+| §4.1 `diorama.toml` | `host` / `port` / `plugins` / `ignore` / `[watch]` / `[git]` / `[html]` | 另加 `[ui] theme`（string，默认 `"system"`） |
+| §4.1 值的校验 | — | 字符集 `[A-Za-z0-9_.-]+`（§3.10 的 hash 值同一套）；空串、带空格 / 冒号 → fail loud |
+| §3.10 优先级 | hash > storage > `system` | hash > storage > **`[ui] theme`** > `system` |
+| §3.10 `localStorage` | `diorama.theme` 记偏好 | 只在**读者选过**时写；没选过时**删掉**这个键（记住的默认值会盖住之后改的配置）。`diorama.theme.scheme` 照旧每次 paint 都写 |
+| §3.10 首帧 | 壳读 `diorama.theme.scheme`，读不到跟随 OS | 再读服务端注入的 `window.__diorama_theme__`（`light` / `dark` 时才注入；主题 id 不注入——壳不知道它的 scheme） |
+| §4.2 `diorama config` | 8 个键 | 另加 `ui.theme`：`set --ui.theme dark`、`unset ui.theme`；交互式里是 `system` / `light` / `dark` 三选一菜单（打主题 id 照常收） |
+| `MountHandle.config` | `{ html: { scripts } }` | 另加 `ui: { theme }`；服务端没给时与 `defaultConfig()` 一致 |
+
+**没有变的东西**：`ctx.theme` 的签名（没有 `default` 字段——默认来自配置，不来自服务）、
+`ThemeDefinition` / `ThemeSnapshot`、命令表、slot 清单、`#theme=…` 的语义（`system` 仍是
+**没有这个键**）、`localStorage` 的两个键名。
+
+细则：
+
+- **是起点，不是锁定**。配置回答「没人选过时从哪里开始」，不回答「读者刚点了什么」。读者一选
+  （palette 里的 `theme.*`、`mod+alt+t`、分享的 `#theme=…` 链接）就以读者的为准，改文件不再动他。
+  这与 `[html] scripts` 的「只管起始阶段」（§28）同一条规矩。
+- **默认值不写进 `localStorage`**。写进去的话，读者下一次把文件改成 `dark` 会看起来毫无效果
+  （记忆里的 `system` 赢）。所以 `diorama.theme` 只在读者选过时存在；`paint()` 在「没选过」时
+  传 `undefined`，浏览器半边 `removeItem`。
+- **首帧只有服务端能回答**。壳里的内联脚本在任何 `fetch` 之前跑，配置却在 `/plugin.json` 里；
+  所以 `serveShell` 把 `[ui] theme` 的 `light` / `dark` 直接注入成 `window.__diorama_theme__`。
+  一个**主题 id** 不注入：它的 scheme 由注册它的插件决定，壳无从得知，那种页面首帧跟随系统、
+  服务启动后重绘一次（主题是注册表数据，§3.10 的「偏好可以走在注册前面」本来就允许这一帧）。
+- **`ui.theme` 的字符集就是 hash 值的字符集**：它同时是 `#theme=…` 的值和命令 id 的一部分，
+  写一个 URL 里说不出来的值没有意义，所以在读文件时就拒绝，而不是到 paint 时才静默忽略。
+- **CLI 看不见主题注册表**：注册表在页面里（piece 注册的）。所以交互式只列三项内置候选，
+  主题 id 靠**打字**——候选是提示不是限制（§4.2 的老规矩）。
 
 ## 待定清单（v0.4 后仍 🔲）
 

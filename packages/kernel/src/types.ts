@@ -26,7 +26,7 @@ export type {
 } from './shared/types.ts'
 export type { ErrorCode, FsErrorCode, GitErrorCode, RpcErrorCode } from './shared/errors.ts'
 export type { BootPlugin, MountHandle, MountInfo, MountManifest } from './client/mount.ts'
-export type { MountConfig } from './shared/config.ts'
+export { DEFAULT_THEME_PREFERENCE, THEME_PREFERENCE_PATTERN, type MountConfig } from './shared/config.ts'
 export type { FsClient } from './client/fs.ts'
 export type { GitClient, GitLogOptions } from './client/git.ts'
 export type { RpcClient } from './client/rpc.ts'

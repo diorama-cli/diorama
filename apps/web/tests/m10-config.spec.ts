@@ -146,9 +146,9 @@ test('4. the wizard offers candidates and only the answered fields land in the f
   try {
     // Answers in order: host (menu → row 2, "every IPv4 interface"), port
     // (typed), plugins (menu, keep), ignore (menu, free text), watch.enabled
-    // (menu → row 2), the two numbers (typed), html.scripts (menu, keep), then
-    // the confirmation.
-    const answers = ['2', '', '', 'docs, *.log', '2', '', '', '', 'y', ''].join('\n')
+    // (menu → row 2), the two numbers (typed), html.scripts (menu, keep),
+    // ui.theme (menu, keep), then the confirmation.
+    const answers = ['2', '', '', 'docs, *.log', '2', '', '', '', '', 'y', ''].join('\n')
     const wizard = await diorama(home, ['config', '--dir', directory.root], { input: answers })
     expect(wizard.code).toBe(0)
     // The menu shows the loopback default and the "every interface" row.
@@ -176,8 +176,9 @@ test('4b. the menus list this machine\'s addresses and toggle pieces by number',
   const directory = fixture()
   try {
     // host: keep. port: keep. plugins: toggle rows 1 and 2 off. ignore: "none".
-    // watch.enabled: keep. numbers: keep. html.scripts: keep. confirm.
-    const answers = ['', '', '1,2', 'none', '', '', '', '', 'y', ''].join('\n')
+    // watch.enabled: keep. numbers: keep. html.scripts: keep. ui.theme: keep.
+    // confirm.
+    const answers = ['', '', '1,2', 'none', '', '', '', '', '', 'y', ''].join('\n')
     const wizard = await diorama(home, ['config', '--dir', directory.root], { input: answers })
     expect(wizard.code).toBe(0)
     expect(wizard.stdout).toContain('plugins — client pieces, in boot order')
@@ -200,8 +201,9 @@ test('4c. a number that is not on the menu is a typo, and the wizard re-asks', a
   const home = stateHome()
   const directory = fixture()
   try {
-    // host: 99 (not on the list) then 2; the rest keep (html.scripts included).
-    const answers = ['99', '2', '', '', '', '', '', '', '', 'y', ''].join('\n')
+    // host: 99 (not on the list) then 2; the rest keep (html.scripts and
+    // ui.theme included).
+    const answers = ['99', '2', '', '', '', '', '', '', '', '', 'y', ''].join('\n')
     const wizard = await diorama(home, ['config', '--dir', directory.root], { input: answers })
     expect(wizard.code).toBe(0)
     expect(wizard.stdout).toContain('is not on this list')
@@ -217,7 +219,7 @@ test('5. the wizard writes nothing when the confirmation is declined or input en
   const directory = fixture()
   try {
     const declined = await diorama(home, ['config', '--dir', directory.root], {
-      input: ['', '8080', '', '', '', '', '', '', 'n', ''].join('\n'),
+      input: ['', '8080', '', '', '', '', '', '', '', 'n', ''].join('\n'),
     })
     expect(declined.code).toBe(0)
     expect(declined.stdout).toContain('not written')
@@ -247,6 +249,39 @@ test('6. a written file that the reader would reject is refused before the disk 
     expect(broken.stderr).toContain('unknown key "prot"')
     // The user's broken file is left exactly as it was.
     expect(readFileSync(join(directory.root, 'diorama.toml'), 'utf8')).toBe('prot = 1\n')
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+    directory.dispose()
+  }
+})
+
+test('6b. config set --ui.theme writes the start theme, and a mount serves it', async () => {
+  const home = stateHome()
+  const directory = fixture()
+  try {
+    const set = await diorama(home, ['config', 'set', '--dir', directory.root, '--ui.theme', 'dark'])
+    expect(set.code).toBe(0)
+    expect(readFileSync(join(directory.root, 'diorama.toml'), 'utf8')).toBe('[ui]\ntheme = "dark"\n')
+
+    // The merge serving uses carries it, and so does the page's manifest.
+    const show = await diorama(home, ['config', 'show', directory.root])
+    expect(show.stdout).toContain('ui.theme = dark')
+
+    const server = await startDiorama(directory.root)
+    try {
+      const manifest = (await (await fetch(`${server.url}plugin.json`)).json()) as {
+        config?: { ui?: { theme?: string } }
+      }
+      expect(manifest.config?.ui?.theme).toBe('dark')
+    } finally {
+      await server.stop()
+    }
+
+    // A value that is not a preference is refused before the disk is touched.
+    const bad = await diorama(home, ['config', 'set', '--dir', directory.root, '--ui.theme', 'has:colon'])
+    expect(bad.code).toBe(2)
+    expect(bad.stderr).toContain('--ui.theme must match')
+    expect(readFileSync(join(directory.root, 'diorama.toml'), 'utf8')).toBe('[ui]\ntheme = "dark"\n')
   } finally {
     rmSync(home, { recursive: true, force: true })
     directory.dispose()

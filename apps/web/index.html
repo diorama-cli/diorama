@@ -21,7 +21,13 @@
       Keep the keys and the rules in step with `packages/kernel/src/client/theme.ts`
       (`THEME_STORAGE_KEY` / `THEME_SCHEME_STORAGE_KEY` / `resolveTheme`). A
       stored scheme is the answer the service itself last resolved (so a theme's
-      scheme is right too); with no stored answer, follow the OS.
+      scheme is right too, and so is the one a `[ui] theme` resolved to).
+
+      With no remembered answer the page starts where the configuration says
+      (`[ui] theme`, contract.md §4.1): the server injects that value as
+      `window.__diorama_theme__` when it serves this file (it has the mount's
+      config and this file does not), and only when it is absent do we follow
+      the OS.
     -->
     <script>
       ;(function () {
@@ -31,6 +37,7 @@
         } catch (error) {
           scheme = null
         }
+        if (scheme !== 'dark' && scheme !== 'light') scheme = window.__diorama_theme__
         if (scheme !== 'dark' && scheme !== 'light') {
           try {
             scheme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'

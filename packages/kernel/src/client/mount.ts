@@ -5,7 +5,7 @@
  * copy of this module; the handle itself travels through the page bridge, so
  * nothing here is shared module state (docs/m0/spec.md §10.3).
  */
-import type { MountConfig } from '../shared/config.ts'
+import { DEFAULT_THEME_PREFERENCE, type MountConfig } from '../shared/config.ts'
 import { createFsClient, type FsClient } from './fs.ts'
 import { createGitClient, type GitClient } from './git.ts'
 import { createRpcClient, rpcUrl, type RpcClient } from './rpc.ts'
@@ -70,7 +70,10 @@ export interface MountHandle extends MountInfo {
 }
 
 /** The page's defaults, matching `defaultConfig()` on the server (contract.md §4.1). */
-export const DEFAULT_MOUNT_CONFIG: MountConfig = { html: { scripts: false } }
+export const DEFAULT_MOUNT_CONFIG: MountConfig = {
+  html: { scripts: false },
+  ui: { theme: DEFAULT_THEME_PREFERENCE },
+}
 
 /** Build the page handle from the boot manifest. */
 export function createMountHandle(manifest: MountManifest): MountHandle {
@@ -85,7 +88,10 @@ export function createMountHandle(manifest: MountManifest): MountHandle {
     search: createSearchClient(rpc),
     // Copied, not shared: a piece must not be able to edit the page's defaults
     // by writing to the handle.
-    config: { html: { scripts: manifest.config?.html?.scripts ?? DEFAULT_MOUNT_CONFIG.html.scripts } },
+    config: {
+      html: { scripts: manifest.config?.html?.scripts ?? DEFAULT_MOUNT_CONFIG.html.scripts },
+      ui: { theme: manifest.config?.ui?.theme ?? DEFAULT_MOUNT_CONFIG.ui.theme },
+    },
     rpc,
   }
 }

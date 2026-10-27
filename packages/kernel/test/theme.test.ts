@@ -229,6 +229,38 @@ test('theme: the hash is the source of truth on boot, and set() writes it back',
   service.dispose()
 })
 
+test('theme: with nothing chosen the page starts at the configured default, and does not remember it', () => {
+  // `[ui] theme = "dark"` (contract.md §4.1): a start, not a choice.
+  const host = recorder({ system: 'light' })
+  const service = createThemeService({ host, fallback: 'dark' })
+  assert.equal(service.getSnapshot().preference, 'dark')
+  assert.equal(service.getSnapshot().scheme, 'dark')
+  // The scheme is remembered (the shell paints from it before the bundle),
+  // but no preference is: a remembered default would outlive the file.
+  assert.deepEqual(host.writes.at(-1), { preference: undefined, scheme: 'dark' })
+  assert.equal(host.remembered.preference, undefined)
+
+  // A reader's choice wins over the file, from then on.
+  service.set('light')
+  assert.equal(service.getSnapshot().scheme, 'light')
+  assert.deepEqual(host.writes.at(-1), { preference: 'light', scheme: 'light' })
+  service.dispose()
+})
+
+test('theme: a remembered choice outranks the configured default; the URL outranks both', () => {
+  const remembered = createThemeService({ host: recorder({ system: 'light', remembered: 'light' }), fallback: 'dark' })
+  assert.equal(remembered.getSnapshot().preference, 'light')
+  remembered.dispose()
+
+  const fromHash = createThemeService({
+    host: recorder({ system: 'light', remembered: 'light' }),
+    hash: { get: () => 'dark', set: () => {}, onChange: () => () => {} },
+    fallback: 'system',
+  })
+  assert.equal(fromHash.getSnapshot().preference, 'dark')
+  fromHash.dispose()
+})
+
 test('theme: a preference naming no theme warns once, not on every repaint', () => {
   const warnings: string[] = []
   const host = recorder({ system: 'dark' })

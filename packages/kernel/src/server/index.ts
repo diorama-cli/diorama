@@ -105,6 +105,9 @@ export {
 export {
   CONFIG_FILE,
   CONFIG_KEYS,
+  GIT_CONFIG_KEYS,
+  HTML_CONFIG_KEYS,
+  UI_CONFIG_KEYS,
   WATCH_CONFIG_KEYS,
   ConfigError,
   configWritePath,
@@ -126,9 +129,12 @@ export {
   type ConfigPatch,
   type EffectiveConfig,
   type FileConfig,
+  type HtmlConfigKey,
   type ResolveOptions,
+  type UiConfigKey,
   type WatchConfigKey,
 } from './config.ts'
+export { DEFAULT_THEME_PREFERENCE, THEME_PREFERENCE_PATTERN, type MountConfig } from '../shared/config.ts'
 export { createIgnore, DEFAULT_IGNORE, type IgnoreRules } from '../shared/ignore.ts'
 export { createDispatcher, handleFrame, RpcChannel, RPC_PATH, type RpcDispatcher } from './rpc.ts'
 export {

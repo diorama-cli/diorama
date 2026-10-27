@@ -136,8 +136,24 @@ export function booleanCandidates(current: boolean): Candidate[] {
   ]
 }
 
+/**
+ * `ui.theme` as a menu (contract.md §4.1, §3.10).
+ *
+ * Only the three built-in preferences are listed: a **theme id** belongs to a
+ * piece that registers it, and the CLI cannot see that registry (it is the
+ * page's). Typing an id is still how you pick one — the list is a shortcut,
+ * never a restriction.
+ */
+export function themeCandidates(current: string): Candidate[] {
+  return [
+    { value: 'system', detail: 'follow the OS scheme', recommended: current === 'system' },
+    { value: 'light', detail: 'always light', recommended: current === 'light' },
+    { value: 'dark', detail: 'always dark', recommended: current === 'dark' },
+  ]
+}
+
 /** The list a field offers, or `undefined` when it takes a plain typed value. */
-export type CandidateSource = 'host' | 'plugins' | 'ignore' | 'boolean'
+export type CandidateSource = 'host' | 'plugins' | 'ignore' | 'boolean' | 'theme'
 
 /**
  * Resolve the current selection of a multi-select field, so the menu opens with

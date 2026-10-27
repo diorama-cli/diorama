@@ -172,35 +172,50 @@ async function handleRequest(
   }
 
   if (pathname === '/' || pathname === '/index.html') {
-    if (await serveShell(options.assetsRoot, res)) return
+    if (await serveShell(options, manifest, res)) return
   }
   if (await serveStatic(options.assetsRoot, pathname, res)) return
   // The page's own routes (contract.md §3.8): `/~/<path>` is never a file and
   // never an API call — it is the shell that reads the path. `/api/` stays an
   // API namespace (unknown routes there are 404s, not the page).
   if (pathname === ROUTE_PREFIX.slice(0, -1) || pathname.startsWith(ROUTE_PREFIX)) {
-    if (await serveShell(options.assetsRoot, res)) return
+    if (await serveShell(options, manifest, res)) return
     sendError(res, 500, 'EIO', 'the page shell is missing (no index.html in the assets root)')
     return
   }
   // Unknown non-API paths fall back to the shell (SPA semantics).
-  if (!pathname.startsWith('/api/') && (await serveShell(options.assetsRoot, res))) return
+  if (!pathname.startsWith('/api/') && (await serveShell(options, manifest, res))) return
   sendError(res, 404, 'ENOENT', `no route for ${pathname}`)
 }
 
 /**
- * Serve `index.html` with the page-bridge bootstrap injected first: the bridge
- * must exist before the shell's entry and before any half script runs.
+ * Serve `index.html` with two things injected first:
+ *
+ * - the page-bridge bootstrap, which must exist before the shell's entry and
+ *   before any half script runs;
+ * - the mount's configured start theme (`[ui] theme`, contract.md §4.1), as
+ *   `window.__diorama_theme__`. The shell's pre-paint block runs before any
+ *   fetch and before the bundle, so the only way it can know a pinned start is
+ *   for the server to put it there — this is the one place that has both the
+ *   file and the configuration.
+ *
+ * A theme **id** is not injected: the shell cannot resolve which scheme it is
+ * (the theme lives in a piece), so the page follows the OS for the first frame
+ * and the service repaints once it boots. `light` / `dark` / `system` need no
+ * registry, so they are answered before the first paint.
  */
-async function serveShell(assetsRoot: string, res: ServerResponse): Promise<boolean> {
+async function serveShell(options: MountOptions, manifest: BootManifest, res: ServerResponse): Promise<boolean> {
   let html: string
   try {
-    html = await readFile(join(assetsRoot, 'index.html'), 'utf8')
+    html = await readFile(join(options.assetsRoot, 'index.html'), 'utf8')
   } catch {
     return false
   }
+  const start = manifest.config?.ui?.theme
+  const theme = start === 'light' || start === 'dark' ? `<script>window.__diorama_theme__=${JSON.stringify(start)}</script>` : ''
   const tag = '<script src="/__diorama__/page.js"></script>'
-  const body = html.includes(tag) ? html : html.replace(/<head>/, match => `${match}\n    ${tag}`)
+  const head = [theme, tag].filter(part => part !== '').join('\n    ')
+  const body = html.includes(tag) ? html : html.replace(/<head>/, match => `${match}\n    ${head}`)
   res.writeHead(200, {
     'content-type': 'text/html; charset=utf-8',
     'content-length': Buffer.byteLength(body),
