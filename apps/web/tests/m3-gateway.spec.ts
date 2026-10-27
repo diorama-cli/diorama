@@ -1,5 +1,5 @@
 import { realpathSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import { fixture, startGateway, waitForPage, type GatewayFixture } from './support.ts'
 
@@ -56,6 +56,38 @@ test('2. one gateway, two directories, two ports — each page serves its own tr
       } finally {
         await page.close()
       }
+    }
+  } finally {
+    first.dispose()
+    second.dispose()
+  }
+})
+
+test('2a. a page names its own directory, so the tab strip says which mount it is', async ({ browser }) => {
+  const first = fixture()
+  const second = fixture()
+  try {
+    const a = await gateway!.mount(first.root)
+    const b = await gateway!.mount(second.root)
+    const nameA = basename(first.realRoot)
+    const nameB = basename(second.realRoot)
+    // The shell is static HTML, so the title comes from the server: it must be
+    // right in the document that arrives, not painted later by the bundle.
+    const htmlA = await (await fetch(a.url)).text()
+    const htmlB = await (await fetch(b.url)).text()
+    expect(htmlA).toContain(`<title>${nameA}</title>`)
+    expect(htmlB).toContain(`<title>${nameB}</title>`)
+    expect(htmlA).not.toContain(`<title>${nameB}</title>`)
+    // And the page the browser shows agrees, without waiting for the kernel.
+    const page = await browser.newPage()
+    try {
+      await page.goto(a.url)
+      expect(await page.title()).toBe(nameA)
+      // A deep link is the same page (SPA fallback), so the title holds there too.
+      await page.goto(`${a.url}~/README.md`)
+      expect(await page.title()).toBe(nameA)
+    } finally {
+      await page.close()
     }
   } finally {
     first.dispose()

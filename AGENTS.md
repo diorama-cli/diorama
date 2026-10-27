@@ -13,11 +13,14 @@
 | 3 | [docs/features.md](docs/features.md) | **有什么**：能力清单与档位（✅ / v1 / 未来 / 不做） |
 | 4 | 最近一档的 `docs/mN/spec.md` | **怎么实现的** + **§6.2 的坑**（见下面 §5） |
 
-最近一档是 [docs/m22/spec.md](docs/m22/spec.md)（默认主题写在 `diorama.toml` 的 `[ui] theme`：是
+最近一档是 [docs/m23/spec.md](docs/m23/spec.md)（网页标题是这个挂载的**目录名**：壳是静态 HTML，
+配置在 `/plugin.json` 里，两者只在 `serveShell` 相遇——所以标题由服务端写进文档，
+`shellTitle` / `withShellTitle` 是纯函数；`/` 没有名字时保留壳自己的标题）；
+上一档是 [docs/m22/spec.md](docs/m22/spec.md)（默认主题写在 `diorama.toml` 的 `[ui] theme`：是
 **起点不是锁定**（读者选过就以读者的为准），`system` / `light` / `dark` / 主题 id；没选过时
 `diorama.theme` **不写** `localStorage`（记住的默认值会盖住之后改的配置），首帧由 `serveShell`
 注入 `window.__diorama_theme__`）；
-上一档是 [docs/m21/spec.md](docs/m21/spec.md)（CLI 新增 `diorama stop [dir] [--all]`：只卸**一个**
+更早是 [docs/m21/spec.md](docs/m21/spec.md)（CLI 新增 `diorama stop [dir] [--all]`：只卸**一个**
 挂载（无参数 = 当前目录**所在的**那个，嵌套取最深的包含者），gateway 与其它挂载照旧——停进程仍是
 `gateway stop`；不匹配 / 未运行 gateway 都是退出码 0）；
 更早是 [docs/m20/spec.md](docs/m20/spec.md)（快捷键能力增强，v0.16 按 cmux 的体验重做：tab 条

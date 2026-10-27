@@ -92,6 +92,7 @@ export {
   type PluginSource,
 } from './plan.ts'
 export { createMountServer, listen, type MountOptions, type MountServer } from './http.ts'
+export { shellTitle, withShellTitle } from './shell-title.ts'
 export {
   Gateway,
   MAX_PORT_ATTEMPTS,

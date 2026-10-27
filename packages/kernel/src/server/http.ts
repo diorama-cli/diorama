@@ -18,6 +18,7 @@ import { ROUTE_PREFIX } from '../shared/types.ts'
 import { HttpError } from './errors.ts'
 import type { BootManifest } from './plan.ts'
 import { RpcChannel, type RpcDispatcher } from './rpc.ts'
+import { withShellTitle } from './shell-title.ts'
 
 export interface MountOptions {
   /** Absolute root directory. */
@@ -191,6 +192,9 @@ async function handleRequest(
 /**
  * Serve `index.html` with two things injected first:
  *
+ * - the page's title, which is the served directory's name: the shell is static
+ *   HTML and the root is only known here, so this is where the two meet
+ *   (contract.md §34);
  * - the page-bridge bootstrap, which must exist before the shell's entry and
  *   before any half script runs;
  * - the mount's configured start theme (`[ui] theme`, contract.md §4.1), as
@@ -215,7 +219,8 @@ async function serveShell(options: MountOptions, manifest: BootManifest, res: Se
   const theme = start === 'light' || start === 'dark' ? `<script>window.__diorama_theme__=${JSON.stringify(start)}</script>` : ''
   const tag = '<script src="/__diorama__/page.js"></script>'
   const head = [theme, tag].filter(part => part !== '').join('\n    ')
-  const body = html.includes(tag) ? html : html.replace(/<head>/, match => `${match}\n    ${head}`)
+  const shell = withShellTitle(html, options.root)
+  const body = shell.includes(tag) ? shell : shell.replace(/<head>/, match => `${match}\n    ${head}`)
   res.writeHead(200, {
     'content-type': 'text/html; charset=utf-8',
     'content-length': Buffer.byteLength(body),
