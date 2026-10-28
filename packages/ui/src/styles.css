@@ -35,6 +35,8 @@
   --dio-backdrop: rgba(0, 0, 0, 0.28);
   --dio-shadow: rgba(0, 0, 0, 0.22);
   --dio-keycap: rgba(127, 127, 127, 0.08);
+  /* The history view's sticky picker row floats over the list (§5.2). */
+  --dio-picker-shadow: rgba(0, 0, 0, 0.35);
 
   /* Syntax highlighting (the `code` piece) and diffs (the `git-changes` piece). */
   --dio-syn-comment: #6a737d;
@@ -93,6 +95,7 @@
   --dio-backdrop: rgba(0, 0, 0, 0.55);
   --dio-shadow: rgba(0, 0, 0, 0.55);
   --dio-keycap: rgba(255, 255, 255, 0.08);
+  --dio-picker-shadow: rgba(0, 0, 0, 0.55);
 
   --dio-syn-comment: #8b949e;
   --dio-syn-keyword: #ff7b72;
@@ -1354,8 +1357,9 @@ body.diorama-resizing {
   font-size: 11px;
 }
 
-/* One repository's group in the changes/history views (v0.10): a foldable
-   header naming the repository, then that repository's own rows. */
+/* One repository's group in the changes view (v0.10): a foldable header
+   naming the repository, then that repository's own rows. The history view
+   shows one repository at a time behind a picker instead (v0.19). */
 .diorama-changes__repo + .diorama-changes__repo {
   border-top: 1px solid var(--dio-border);
   margin-top: 4px;
@@ -1385,6 +1389,70 @@ body.diorama-resizing {
 
 .diorama-changes__repo-name {
   flex: none;
+}
+
+/* The repository picker (v0.19): the history view shows one repository at a
+   time, so the column's own row picks which one.
+
+   The row is **sticky** — the list runs under it while the column scrolls, and
+   the shadow below it is what reads as "this row floats over the list". It is a
+   token (light / dark paired, like every colour here) so a theme can recolour
+   it. */
+.diorama-changes__picker {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  width: max-content;
+  min-width: 100%;
+  margin: 0 0 2px;
+  padding: 5px 10px;
+  background: var(--dio-panel);
+  border-bottom: 1px solid var(--dio-border);
+  box-shadow: 0 5px 8px -6px var(--dio-picker-shadow);
+}
+
+/* The visible box of the picker. A native `select` cannot hold an SVG, so the
+   border belongs to this label and the select sits **inside** it with no border
+   of its own: the glyph is then inside the box the reader sees. Clicking the
+   glyph opens the menu — a label forwards its clicks to its control. */
+.diorama-changes__selectbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  width: max-content;
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 6px;
+  border: 1px solid var(--dio-border);
+  border-radius: 4px;
+  background: var(--dio-bg);
+  cursor: pointer;
+}
+
+.diorama-changes__selectbox:focus-within {
+  border-color: var(--dio-accent);
+}
+
+.diorama-changes__picker-icon {
+  flex: none;
+}
+
+/* Borderless and transparent: the box around it is the label's. */
+.diorama-changes__select {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  outline: none;
 }
 
 .diorama-changes__empty {

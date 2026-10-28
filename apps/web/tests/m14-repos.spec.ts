@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import { fixture, startDiorama, waitForPage } from './support.ts'
@@ -108,7 +108,7 @@ test('git: a nested repository is its own group, not part of the outer one', asy
   }
 })
 
-test('git: the history view groups commits by repository', async ({ page }) => {
+test('git: the history view switches between repositories with a picker', async ({ page }) => {
   const root = fixture()
   repoAt(join(root.root, 'apps', 'api'))
   repoAt(join(root.root, 'apps', 'web'))
@@ -117,13 +117,144 @@ test('git: the history view groups commits by repository', async ({ page }) => {
     await page.goto(server.url)
     await waitForPage(page)
     await page.getByTestId('sidebar-switcher').locator('[data-view="history"]').click()
-    await expect(page.getByTestId('git-history-commit')).toHaveCount(2)
-    await expect(page.getByTestId('git-changes-repo')).toHaveCount(2)
+    // One repository on show at a time (v0.19): the picker chooses which, and
+    // the column holds that repository's commits alone.
+    const shown = page.getByTestId('git-history-repo')
+    await expect(shown).toHaveCount(1)
+    await expect(shown).toHaveAttribute('data-repo', 'apps/api')
+    await expect(page.getByTestId('git-history-commit')).toHaveCount(1)
+    const picker = page.getByTestId('git-history-picker')
+    await expect(picker).toBeVisible()
+    // The picker is one control: its glyph sits **inside** the same row, on the
+    // same line, and the row floats over the list (sticky + a shadow). These are
+    // computed styles, so a stale page shell — which ships the CSS — fails here
+    // rather than looking subtly wrong in a screenshot (see AGENTS §3).
+    const row = page.locator('.diorama-changes__picker')
+    const layout = await row.evaluate(element => {
+      const style = getComputedStyle(element)
+      const icon = element.querySelector('.diorama-file-icon')
+      const box = element.querySelector('select')
+      const borderBox = element.querySelector('.diorama-changes__selectbox')
+      const boxStyle = borderBox === null ? undefined : getComputedStyle(borderBox)
+      const selectStyle = box === null ? undefined : getComputedStyle(box)
+      const iconBox = icon?.getBoundingClientRect()
+      const boxBox = box?.getBoundingClientRect()
+      const borderBoxBox = borderBox?.getBoundingClientRect()
+      return {
+        position: style.position,
+        shadow: style.boxShadow,
+        background: style.backgroundColor,
+        // The box the reader sees is the label's; the select inside it draws no
+        // border of its own (so the glyph is *in* that box, not beside it).
+        boxBorder: boxStyle?.borderTopWidth,
+        boxBackground: boxStyle?.backgroundColor,
+        selectBorder: selectStyle?.borderTopWidth,
+        selectBackground: selectStyle?.backgroundColor,
+        // Same line: the glyph's vertical centre is the select's, both inside the
+        // bordered box, glyph to its left (never wrapped, never outside the box).
+        sameLine: iconBox !== undefined && boxBox !== undefined && Math.abs((iconBox.top + iconBox.bottom) / 2 - (boxBox.top + boxBox.bottom) / 2) < 2,
+        iconInsideBox:
+          iconBox !== undefined && borderBoxBox !== undefined &&
+          iconBox.top >= borderBoxBox.top - 1 && iconBox.bottom <= borderBoxBox.bottom + 1 &&
+          iconBox.left >= borderBoxBox.left - 1 && iconBox.right <= borderBoxBox.right + 1,
+        iconLeftOfSelect: iconBox !== undefined && boxBox !== undefined && iconBox.right <= boxBox.left + 1,
+      }
+    })
+    expect(layout.position).toBe('sticky')
+    expect(layout.shadow).not.toBe('none')
+    expect(layout.background).not.toBe('rgba(0, 0, 0, 0)')
+    // One box, drawn by the label; the select is transparent and borderless
+    // inside it. (A border on the select itself would mean the glyph sits
+    // beside the box instead of in it — the thing this test guards.)
+    expect(layout.boxBorder).not.toBe('0px')
+    expect(layout.boxBackground).not.toBe('rgba(0, 0, 0, 0)')
+    expect(layout.selectBorder).toBe('0px')
+    expect(layout.selectBackground).toBe('rgba(0, 0, 0, 0)')
+    expect(layout.sameLine).toBe(true)
+    expect(layout.iconInsideBox).toBe(true)
+    expect(layout.iconLeftOfSelect).toBe(true)
+    await picker.selectOption('apps/web')
+    await expect(shown).toHaveAttribute('data-repo', 'apps/web')
+    await expect(page.getByTestId('git-history-commit')).toHaveCount(1)
   } finally {
     await server.stop()
     root.dispose()
   }
 })
+/**
+ * A repository that has been `git init`ed but never committed to (an "unborn"
+ * branch) used to break both git views with
+ * `EIO: git failed: fatal: your current branch 'master' does not have any
+ * commits yet`: `git log` and `git diff HEAD` fail on that state, and the
+ * service passed the failure on. It is a state, not an error — there are no
+ * commits, and every file is new.
+ */
+test('git: a repository with no commits lists no history and all-new changes', async ({ page }) => {
+  // An empty directory: the only files are the ones this test writes, so the
+  // counts below are about the state, not about the fixture.
+  const root = fixture({}, {})
+  rmSync(join(root.root, 'README.md'), { recursive: true, force: true })
+  for (const path of ['docs', 'src', 'LICENSE', 'blob.bin']) rmSync(join(root.root, path), { recursive: true, force: true })
+  git(root.root, 'init', '-q') // no branch name: the default one, never committed
+  writeFileSync(join(root.root, 'a.txt'), 'one\n')
+  writeFileSync(join(root.root, 'b.txt'), 'two\n')
+  const server = await startDiorama(root.root)
+  try {
+    await page.goto(server.url)
+    await waitForPage(page)
+    // Changes: the files are there, and nothing is reported as a failure.
+    await page.getByTestId('sidebar-switcher').locator('[data-view="changes"]').click()
+    await expect(page.getByTestId('git-changes')).not.toContainText('EIO')
+    await expect(page.locator('.diorama-changes__row')).toHaveCount(2)
+    // History: an empty answer with a reason, not an error box.
+    await page.getByTestId('sidebar-switcher').locator('[data-view="history"]').click()
+    await expect(page.getByTestId('git-history')).not.toContainText('EIO')
+    await expect(page.getByTestId('git-history')).toContainText('还没有提交')
+    await expect(page.getByTestId('git-history-commit')).toHaveCount(0)
+    // The diff of a file in that state is its whole content (an addition), not
+    // "bad revision 'HEAD'".
+    await page.getByTestId('sidebar-switcher').locator('[data-view="changes"]').click()
+    await page.locator('.diorama-changes__row').filter({ hasText: 'b.txt' }).click()
+    await expect(page.getByTestId('git-diff-text')).toContainText('two')
+    await expect(page.getByTestId('git-diff')).not.toContainText('bad revision')
+  } finally {
+    await server.stop()
+    root.dispose()
+  }
+})
+
+/**
+ * The same state one level down (the case the user hit): the mount is not a
+ * repository, one of the repositories *inside* it has never been committed to.
+ * The history view used to turn into a single error box for the whole mount
+ * because one repository's `log` failed; now that repository is simply empty.
+ */
+test('git: a repository inside the mount with no commits is empty, not an error', async ({ page }) => {
+  const root = fixture()
+  repoAt(join(root.root, 'apps', 'web')) // committed, so there is a history next door
+  mkdirSync(join(root.root, 'apps', 'api'), { recursive: true })
+  writeFileSync(join(root.root, 'apps', 'api', 'a.txt'), 'one\n')
+  git(join(root.root, 'apps', 'api'), 'init', '-q') // never committed
+  const server = await startDiorama(root.root)
+  try {
+    await page.goto(server.url)
+    await waitForPage(page)
+    await page.getByTestId('sidebar-switcher').locator('[data-view="history"]').click()
+    const shown = page.getByTestId('git-history-repo')
+    // apps/api comes first (shallowest, then by path): it has nothing to list.
+    await expect(shown).toHaveAttribute('data-repo', 'apps/api')
+    await expect(page.getByTestId('git-history')).not.toContainText('EIO')
+    await expect(page.getByTestId('git-history-empty')).toBeVisible()
+    // The other repository still has its commit, and the picker gets there.
+    await page.getByTestId('git-history-picker').selectOption('apps/web')
+    await expect(page.getByTestId('git-history-commit')).toHaveCount(1)
+    await expect(page.getByTestId('git-history-empty')).toHaveCount(0)
+  } finally {
+    await server.stop()
+    root.dispose()
+  }
+})
+
 test('git: a commit picked in a subdirectory repository opens in that repository', async ({ page }) => {
   const root = fixture()
   // Two repositories, so "the mount's own repository" is not either of them:
@@ -135,10 +266,12 @@ test('git: a commit picked in a subdirectory repository opens in that repository
     await page.goto(server.url)
     await waitForPage(page)
     await page.getByTestId('sidebar-switcher').locator('[data-view="history"]').click()
-    // Pick the commit of the *second* group: it lives in apps/web, not in the
-    // mount's own repository (there is none), which is what used to fail with
-    // "ENOENT: no such commit" — the seat asked the wrong repository.
-    const webRow = page.getByTestId('git-history-repo').filter({ hasText: 'apps/web' }).getByTestId('git-history-commit').first()
+    // Pick the commit of the *second* repository: it lives in apps/web, not in
+    // the mount's own repository (there is none), which is what used to fail
+    // with "ENOENT: no such commit" — the seat asked the wrong repository.
+    await page.getByTestId('git-history-picker').selectOption('apps/web')
+    await expect(page.getByTestId('git-history-repo')).toHaveAttribute('data-repo', 'apps/web')
+    const webRow = page.getByTestId('git-history-commit').first()
     await webRow.click()
     await expect(page.getByTestId('git-commit')).toBeVisible()
     await expect(page.getByTestId('git-commit-error')).toHaveCount(0)

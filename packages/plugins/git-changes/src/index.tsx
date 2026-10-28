@@ -1406,16 +1406,11 @@ function HistoryView({ active }: { active: boolean }) {
   const history = useHistory(git)
   const router = ctx.router
   const selected = useHistorySelection(ctx)
-  // Repository groups fold like the changes view's (v0.10).
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
-  const toggle = (key: string): void => {
-    setCollapsed(current => {
-      const next = new Set(current)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-  }
+  // Which repository is on show (v0.19): the picker at the top switches between
+  // them, one repository's commits at a time. `null` = "nothing picked yet, show
+  // the first one", so the reader's choice survives a reload of the list; a
+  // picked repository that has gone falls back to the first one below.
+  const [picked, setPicked] = useState<string | null>(null)
   void active
   if (history.error !== undefined) {
     return (
@@ -1445,14 +1440,16 @@ function HistoryView({ active }: { active: boolean }) {
     // picked".
     router?.state(HISTORY_HASH_KEY).set(historyHashValue(repo, sha))
   }
-  const showHeaders = history.groups.length > 1
+  // One repository on show, never several at once (v0.19): the picker is the
+  // only way from one to another, so the column shows one list, not a stack of
+  // foldable groups. With a single repository there is nothing to pick, and the
+  // picker would only repeat what the column already is.
+  const current = (history.groups.find(group => group.repo === picked) ?? history.groups[0])!
+  const showPicker = history.groups.length > 1
   return (
     <div className="diorama-changes" data-testid="git-history">
       <div className="diorama-changes__group">
-        <span>
-          {total} 个提交
-          {showHeaders ? ` · ${history.groups.length} 个仓库` : ''}
-        </span>
+        <span>{total} 个提交</span>
         <button
           type="button"
           className="diorama-changes__reload"
@@ -1464,59 +1461,74 @@ function HistoryView({ active }: { active: boolean }) {
           <Icon name="reload" size={14} />
         </button>
       </div>
-      {history.groups.map(group => {
-        const key = `repo:${group.repo}`
-        const closed = collapsed.has(key)
-        const label = group.repo === '' ? '(挂载目录)' : group.repo
-        return (
-          <div className="diorama-changes__repo" key={group.repo} data-repo={group.repo} data-testid="git-history-repo">
-            {showHeaders ? (
-              <button
-                type="button"
-                className="diorama-changes__repo-head"
-                aria-expanded={!closed}
-                title={group.repo === '' ? '仓库根就是挂载目录' : group.repo}
-                onClick={() => toggle(key)}
-              >
-                <span className="diorama-tree__caret" aria-hidden="true">
-                  <Icon name={closed ? 'caret-right' : 'caret-down'} size={14} />
-                </span>
-                <FileIcon name={label} kind="dir" expanded={!closed} />
-                <span className="diorama-changes__repo-name">{label}</span>
-                <span className="diorama-changes__count">{group.commits.length}</span>
-              </button>
-            ) : null}
-            {closed ? null : (
-              <div className="diorama-history" role="listbox" aria-label="提交历史">
-                {group.commits.map(commit => {
-                  const current = commit.sha === selected?.commit && group.repo === selected.repo
-                  return (
-                    <button
-                      key={`${group.repo}:${commit.sha}`}
-                      type="button"
-                      role="option"
-                      aria-selected={current}
-                      className={`diorama-history__row${current ? ' diorama-changes__row--selected' : ''}`}
-                      data-sha={commit.sha}
-                      data-repo={group.repo}
-                      data-testid="git-history-commit"
-                      title={`${commit.sha}\n${commit.author} · ${formatWhen(commit.at)}`}
-                      onClick={() => pick(group.repo, commit.sha)}
-                    >
-                      <span className="diorama-history__subject">{commit.subject || '(无提交说明)'}</span>
-                      <span className="diorama-history__meta">
-                        <code>{commit.shortSha}</code>
-                        <span className="diorama-history__author">{commit.author}</span>
-                        <time dateTime={new Date(commit.at).toISOString()}>{formatWhen(commit.at)}</time>
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
-            )}
+      {showPicker ? (
+        // The picker is one control. A native `select` cannot hold an SVG, so
+        // the **border is drawn by the wrapping `label`** and the select is a
+        // transparent, borderless box inside it: the glyph then sits *inside*
+        // the box the reader sees, left of the text, and clicking the glyph
+        // opens the menu (a label forwards its clicks to the control).
+        // The row itself is sticky — the list runs under it while the column
+        // scrolls, which is what the shadow says.
+        <div className="diorama-changes__picker">
+          <label className="diorama-changes__selectbox">
+            <FileIcon name={current.repo} kind="dir" expanded={false} className="diorama-changes__picker-icon" />
+            <select
+              className="diorama-changes__select"
+              data-testid="git-history-picker"
+              aria-label="仓库"
+              title={current.repo === '' ? '仓库根就是挂载目录' : current.repo}
+              value={current.repo}
+              onChange={event => setPicked(event.target.value)}
+            >
+              {history.groups.map(group => (
+                <option key={group.repo} value={group.repo}>
+                  {repoLabel(group.repo)}（{group.commits.length}）
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      ) : null}
+      <div
+        className="diorama-changes__repo"
+        data-repo={current.repo}
+        data-testid="git-history-repo"
+      >
+        {current.commits.length === 0 ? (
+          // One repository of several may have no commits yet (an "unborn"
+          // branch): the picker still lists it, and this says why it is empty.
+          <div className="diorama-changes__empty" data-testid="git-history-empty" role="status">
+            这个仓库还没有提交
           </div>
-        )
-      })}
+        ) : (
+          <div className="diorama-history" role="listbox" aria-label="提交历史">
+            {current.commits.map(commit => {
+              const chosen = commit.sha === selected?.commit && current.repo === selected.repo
+              return (
+                <button
+                  key={`${current.repo}:${commit.sha}`}
+                  type="button"
+                  role="option"
+                  aria-selected={chosen}
+                  className={`diorama-history__row${chosen ? ' diorama-changes__row--selected' : ''}`}
+                  data-sha={commit.sha}
+                  data-repo={current.repo}
+                  data-testid="git-history-commit"
+                  title={`${commit.sha}\n${commit.author} · ${formatWhen(commit.at)}`}
+                  onClick={() => pick(current.repo, commit.sha)}
+                >
+                  <span className="diorama-history__subject">{commit.subject || '(无提交说明)'}</span>
+                  <span className="diorama-history__meta">
+                    <code>{commit.shortSha}</code>
+                    <span className="diorama-history__author">{commit.author}</span>
+                    <time dateTime={new Date(commit.at).toISOString()}>{formatWhen(commit.at)}</time>
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </div>
       {history.more && (
         <button type="button" className="diorama-changes__reload" data-testid="git-history-more" onClick={history.loadMore}>
           <Icon name="caret-down" size={14} />
@@ -1525,6 +1537,11 @@ function HistoryView({ active }: { active: boolean }) {
       )}
     </div>
   )
+}
+
+/** A repository as the picker spells it (`''` is the mount's own repository). */
+function repoLabel(repo: string): string {
+  return repo === '' ? '(挂载目录)' : repo
 }
 
 /**

@@ -303,6 +303,56 @@ test('git: blob returns the content at a commit, binary or text', async t => {
   await assert.rejects(svc.blob('HEAD', 'nope.txt'), /ENOENT/)
 })
 
+/**
+ * A repository that has been `git init`ed but never committed (an "unborn"
+ * branch) is a real state, not a failure: `git log` exits non-zero with
+ * "your current branch 'master' does not have any commits yet", and `git diff
+ * HEAD` says "bad revision 'HEAD'". The view must answer with an empty history
+ * and an all-new working tree instead of an EIO (the bug this test guards).
+ */
+test('git: a repository with no commits has an empty history and an all-new tree', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'diorama-git-unborn-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  git(root, 'init', '-q')
+  writeFileSync(join(root, 'staged.txt'), 'staged\n')
+  git(root, 'add', 'staged.txt')
+  writeFileSync(join(root, 'staged.txt'), 'staged\nmore\n')
+  writeFileSync(join(root, 'untracked.txt'), 'new\n')
+  const svc = service(root)
+
+  // History: nothing to list, and that is an answer, not an error.
+  assert.deepEqual(await svc.log({ limit: 50 }), [])
+
+  // Changes: staged and untracked both show up.
+  const status = await svc.status()
+  assert.deepEqual(status.map(entry => entry.file).sort(), ['staged.txt', 'untracked.txt'])
+
+  // Diff: nothing to compare the working tree with, so every entry is an
+  // addition **without** diff text (the renderer reads the file, exactly as it
+  // does for an untracked one). No entry carries an error.
+  const diff = await svc.diff()
+  assert.deepEqual(diff.entries.map(entry => ('error' in entry ? 'error' : entry.file)).sort(), ['staged.txt', 'untracked.txt'])
+  for (const entry of diff.entries) {
+    assert.equal('error' in entry, false, `${entry.file} carried an error`)
+    if ('error' in entry) continue
+    assert.equal(entry.kind, 'added')
+    assert.equal(entry.text, undefined)
+  }
+
+  // The index does exist, so "what is staged" is still a real diff: the index
+  // against the empty tree (`--cached` with no revision).
+  const staged = await svc.diff({ base: 'index' })
+  assert.deepEqual(staged.entries.map(entry => entry.file), ['staged.txt'])
+  assert.match((staged.entries[0] as { text?: string }).text ?? '', /^new file mode /m)
+
+  // A commit cannot be resolved because there is none.
+  await assert.rejects(svc.showCommit('HEAD'), /ENOENT/)
+
+  // The first commit ends the state: the same service answers normally.
+  git(root, 'commit', '-q', '-m', 'first')
+  assert.equal((await svc.log({ limit: 5 })).length, 1)
+})
+
 test('git: diff base accepts the index and a commit', async t => {
   const fixture = history()
   t.after(() => fixture.dispose())

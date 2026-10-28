@@ -13,7 +13,12 @@
 | 3 | [docs/features.md](docs/features.md) | **有什么**：能力清单与档位（✅ / v1 / 未来 / 不做） |
 | 4 | 最近一档的 `docs/mN/spec.md` | **怎么实现的** + **§6.2 的坑**（见下面 §5） |
 
-最近一档是 [docs/m25/spec.md](docs/m25/spec.md)（文件行右键 → **下载 / 复制链接 / 独立浏览器窗口打开**，
+最近一档是 [docs/m26/spec.md](docs/m26/spec.md)（历史视图的**多个仓库改成下拉切换**：顶部一行原生
+`<select>`，一次只画一个仓库的提交，不再同屏并列可折叠的分组；只有一个仓库时不画这条行；
+变更视图**不变**——那里的分组是「同时浏览」而不是「换着看」。选择是视图自己的 state，不进 URL、
+不进 `localStorage`；`#history` 仍记提交，换仓库不清它。**还没 commit 过的仓库是状态不是错误**：
+`log()` 回空、`diff` 把每项当新增（无 `text`），不再报 `EIO`。契约 §37 / §38）；
+上一档是 [docs/m25/spec.md](docs/m25/spec.md)（文件行右键 → **下载 / 复制链接 / 独立浏览器窗口打开**，
 三个动作都指向同一个**原件 URL** `/~raw~/<path>`：默认 `inline`、按文件类型返回真实 `content-type`，
 只有 `?download=1` 才 `attachment`；复制出来的链接与在新窗口里打开的都是那个文件本身，不是 diorama
 页面。同一件事另有三条命令 `file.download` / `file.copyLink` / `file.openInWindow`（无键位，作用于
@@ -158,6 +163,7 @@ scripts/                  生成器（图标表；`pnpm icons` 重新生成）
 | 浏览器报 `does not declare the expected name "x" (got y)`，整个插件被跳过 | 模块的 `name` 导出必须等于 manifest 的 `diorama.id` | 改 id 时三处一起改：`package.json` 的 `diorama.id`、`src` 里的 `export const name`、`BUILTIN_PLUGIN_IDS` |
 | RPC 对某个内核服务一直 `ESERVICE`，日志没有报错 | 服务的 server 半边没被 CLI 选中（`selectPlugins` 的固定清单漏了它） | 新内核服务的四处接线见 §4「新内核服务的『每 mount 一份』接线」 |
 | 改了 `index.html`（或颜色）后 e2e 行为像没生效，`data-scheme` 是 `null` | e2e 的壳来自 `packages/cli/web/`（组装产物），`pnpm build` 不刷新它 | 改了壳 / 样式后跑 `node scripts/assemble-package.mjs` 再测（m9/spec §5.1） |
+| **改了 `ui/src/styles.css` 后页面「样式没变」，而插件代码的改动都在** | 同一条：`assetsRoot()` **优先** `packages/cli/web/`，`pnpm build` 只刷 `apps/web/dist`。插件 JS 走 `/plugins/<id>/?h=`（新），页面 CSS 走组装壳（旧）——testid 齐全、e2e 全绿，只有样式是旧的 | 改样式 = 改 CSS + `node scripts/assemble-package.mjs` + 刷新页面；**别用截图当验证**，给关键样式写计算样式的 e2e（m26/spec §6.5.1） |
 | 新 token 只加了 light，暗色下掉回奇怪的颜色 | `:root` 与 `:root[data-scheme='dark']` 两处必须成对 | 颜色一律进 token 表（contract §5.3）；两处一起加 |
 | 多仓库挂载「变更」里什么都没有 / 服务报 `no usable git repository` | `GitRepoView` 假设了「挂载在仓库里」，并列多仓库时恰好反过来（仓库在挂载里） | 两个方向二选一：仓库**包含**挂载 → `repoPath` 是 `''`；仓库**在**挂载里 → `repoPath` 是它的挂载相对路径（m14/spec §6 坑 2–3）|
 | 内层仓库的文件在外层仓库的变更里也出现一次 | git 对未跟踪目录报的路径**带尾斜杠**（`?? vendor/lib/`），与嵌套表里的 `vendor/lib` 不相等 | 比较嵌套前去掉尾斜杠；`nested` 一律用**挂载**路径（m14/spec §6 坑 4–5）|

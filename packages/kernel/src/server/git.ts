@@ -347,7 +347,14 @@ export class GitRepoView {
     // `'HEAD'` (default) and `'index'` are names of ours; anything else must be
     // a revision git can resolve (checked below, before listing changes).
     const base = scope.base ?? 'HEAD'
-    const resolved = base === 'HEAD' || base === 'index' ? base : await this.resolveRevision(base)
+    // `'unborn'` is ours too: a repository with no commits has nothing to
+    // compare the working tree **with**, and `git diff HEAD` answers "bad
+    // revision 'HEAD'". Every change is then a new file, which is what the
+    // reader would see anyway (the file's own content, not a diff).
+    const resolved =
+      base === 'index' ? 'index'
+      : base === 'HEAD' ? ((await this.hasHead()) ? 'HEAD' : 'unborn')
+      : await this.resolveRevision(base)
     const mountPath = scope.path === undefined ? undefined : normalizeMountPath(this.root, scope.path)
     const scopePath = scope.scope === undefined ? '' : normalizeMountPath(this.root, scope.scope)
     if (mountPath !== undefined && scope.scope !== undefined && !within(mountPath, scopePath)) {
@@ -362,6 +369,9 @@ export class GitRepoView {
     // The index has no room for untracked files: "what did I stage" does not
     // include what was never added (contract.md §3.2, v0.6).
     if (resolved === 'index') changes = changes.filter(entry => entry.kind !== 'untracked')
+    // Nothing to compare with: every change is a new file, and an "addition"
+    // with no text is how the renderer reads one (it shows the file's content).
+    if (resolved === 'unborn') changes = changes.map(entry => ({ ...entry, kind: 'added' as const }))
     if (mountPath !== undefined) {
       const info = await this.pathKind(mountPath).catch(() => 'missing' as const)
       if (info === 'missing') throw gitError('ENOENT', `${mountPath} does not exist`)
@@ -397,6 +407,10 @@ export class GitRepoView {
     if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LOG_LIMIT) {
       throw gitError('EINVAL', `log limit must be an integer in 1..${MAX_LOG_LIMIT}, got ${String(options.limit)}`)
     }
+    // A repository that has never been committed to has no history, and git
+    // says so by **failing** ("your current branch 'master' does not have any
+    // commits yet"). That is a state, not an error: the answer is no commits.
+    if (!(await this.hasHead())) return []
     const path = options.path === undefined ? undefined : normalizeMountPath(this.root, options.path)
     const args = [
       'log',
@@ -521,6 +535,21 @@ export class GitRepoView {
     return { text, size }
   }
 
+  /**
+   * Whether the branch has a commit yet. A repository that was `git init`ed and
+   * never committed to has an **unborn** HEAD: `rev-parse HEAD` fails, and so do
+   * `log` and `diff HEAD`. Asking first is what turns those failures into the
+   * answers the state deserves (no commits; everything is new).
+   */
+  private async hasHead(): Promise<boolean> {
+    try {
+      await runGit(this.repoRoot, ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}'])
+      return true
+    } catch {
+      return false
+    }
+  }
+
   /** Resolve a revision to a full sha; `EINVAL` for malformed, `ENOENT` for unknown. */
   private async resolveRevision(revision: string): Promise<string> {
     if (typeof revision !== 'string' || revision === '' || revision.length > 256) {
@@ -614,7 +643,10 @@ export class GitRepoView {
   }
 
   /** One file's diff against `base`, or an `error` entry when git refuses it. */
-  private async diffOne(change: GitStatusEntry, comparison: 'HEAD' | 'index' | string = 'HEAD'): Promise<DiffResult['entries'][number]> {
+  private async diffOne(
+    change: GitStatusEntry,
+    comparison: 'HEAD' | 'index' | 'unborn' | string = 'HEAD',
+  ): Promise<DiffResult['entries'][number]> {
     const base: DiffEntry = {
       file: change.file,
       kind: change.kind,
@@ -628,11 +660,19 @@ export class GitRepoView {
       // that is a read (`ctx.fs`), not a diff.
       return { ...base, kind: 'added' }
     }
+    if (comparison === 'unborn') {
+      // No commit to compare with, so there is no diff to ask git for: the
+      // whole file is new. Text stays absent — the renderer reads the file
+      // (contract.md §3.2, the same shape as an untracked entry).
+      return { ...base, kind: 'added' }
+    }
     const repoPath = this.toRepoPath(change.file)
-    // `git diff --cached HEAD` compares the index with HEAD; a plain revision
-    // compares the working tree with it.
+    // `git diff --cached` compares the index with HEAD — and with the **empty
+    // tree** when there is no HEAD, which is exactly "everything is new" and
+    // keeps working on an unborn branch (naming HEAD there is a hard failure).
+    // A plain revision compares the working tree with it.
     const args = comparison === 'index'
-      ? ['diff', '--cached', '--no-color', '--no-ext-diff', '-M', 'HEAD', '--', repoPath]
+      ? ['diff', '--cached', '--no-color', '--no-ext-diff', '-M', '--', repoPath]
       : ['diff', '--no-color', '--no-ext-diff', '-M', comparison, '--', repoPath]
     let output: Buffer | string
     try {
