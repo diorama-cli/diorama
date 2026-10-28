@@ -1,6 +1,6 @@
 {
   "name": "diorama-plugin-file-tree",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "private": true,
   "description": "Diorama piece: left navigation tree",
   "type": "module",
@@ -22,7 +22,7 @@
     "src"
   ],
   "diorama": {
-    "contract": ">=0.0.5 <0.1.0",
+    "contract": ">=0.0.6 <0.1.0",
     "id": "file-tree",
     "client": {
       "entry": "./lib/client.cjs"

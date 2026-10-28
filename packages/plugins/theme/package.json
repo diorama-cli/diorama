@@ -1,6 +1,6 @@
 {
   "name": "diorama-plugin-theme",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "private": true,
   "description": "Diorama piece: theme commands (follow the system, light, dark) over ctx.theme",
   "type": "module",
@@ -22,7 +22,7 @@
     "src"
   ],
   "diorama": {
-    "contract": ">=0.0.5 <0.1.0",
+    "contract": ">=0.0.6 <0.1.0",
     "id": "theme",
     "client": {
       "entry": "./lib/client.cjs"

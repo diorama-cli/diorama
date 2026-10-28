@@ -3,6 +3,20 @@
 Every published version of `@diorama-cli/diorama`, newest first. Generated from
 the commit log by `pnpm release` — see [docs/release.md](docs/release.md).
 
+## 0.0.6 (2026-10-28)
+
+### Features
+
+- **file-tree:** a file's raw bytes get an address, and three ways to take it
+- **file-tree:** the file view gets a toolbar that locates the file being read
+- **shell:** the page title is the served directory's name
+- **theme:** the mount's default theme comes from diorama.toml
+- **cli:** stop serving one directory from the command line
+
+### Documentation
+
+- **release:** file the 0.0.6 change lists under their version
+
 ## 0.0.5 (2026-10-26)
 
 ### Features

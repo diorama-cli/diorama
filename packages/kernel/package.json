@@ -1,6 +1,6 @@
 {
   "name": "diorama-kernel",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "private": true,
   "description": "Diorama plugin kernel: Cordis boot, ctx.fs transport and page types",
   "type": "module",
@@ -27,7 +27,7 @@
     "src"
   ],
   "diorama": {
-    "contract": ">=0.0.5 <0.1.0",
+    "contract": ">=0.0.6 <0.1.0",
     "id": "kernel"
   },
   "scripts": {

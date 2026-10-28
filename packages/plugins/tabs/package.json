@@ -1,6 +1,6 @@
 {
   "name": "diorama-plugin-tabs",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "private": true,
   "description": "Diorama piece: single-tab content area (open / switch, never edit)",
   "type": "module",
@@ -22,7 +22,7 @@
     "src"
   ],
   "diorama": {
-    "contract": ">=0.0.5 <0.1.0",
+    "contract": ">=0.0.6 <0.1.0",
     "id": "tabs",
     "client": {
       "entry": "./lib/client.cjs"

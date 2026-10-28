@@ -1,6 +1,6 @@
 {
   "name": "diorama-plugin-html",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "private": true,
   "description": "Diorama piece: HTML renderer (sanitised preview in a sandboxed frame + source)",
   "type": "module",
@@ -22,7 +22,7 @@
     "src"
   ],
   "diorama": {
-    "contract": ">=0.0.5 <0.1.0",
+    "contract": ">=0.0.6 <0.1.0",
     "id": "html",
     "client": {
       "entry": "./lib/client.cjs"
