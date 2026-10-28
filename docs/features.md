@@ -17,7 +17,7 @@
 | C1 | `diorama [dir]` | ✅ M0→M3 | 短命 CLI：确保 gateway → 挂载 → 打印 URL 并退出；`--foreground` 仍可前台跑（调试/测试）|
 | C2 | `diorama ls` | ✅ M3 | 表格 `MOUNT PORT STATUS DIR URL CONFIG`（含 URL）；`--json`；不做 `--watch` |
 | C3 | `diorama gateway start / stop / status / restart` | ✅ M3 | 后台进程 + pid 文件 + `gateway.log`；另有 `gateway run` 与 `diorama restart <dir>` |
-| C12 | `diorama stop [dir] [--all]` | ✅ 未发版 | 只卸**一个**挂载（无参数 = 当前目录所在的挂载；嵌套取最深的包含者），gateway 与其它挂载照旧；`--all` 卸全部；不匹配 / 未运行 gateway 都是退出码 0；`--json` 给 `{ stopped, target, all }`（contract §7.6） |
+| C12 | `diorama stop [dir] [--all]` | ✅ v0.6 | 只卸**一个**挂载（无参数 = 当前目录所在的挂载；嵌套取最深的包含者），gateway 与其它挂载照旧；`--all` 卸全部；不匹配 / 未运行 gateway 都是退出码 0；`--json` 给 `{ stopped, target, all }`（contract §7.6） |
 | C4 | `--port <n>` | ✅ M0→M2 | 显式冲突报错；**未给时落 `diorama.toml`，再默认随机** |
 | C5 | `--host <ip>` | ✅ M0→M2 | 默认 `127.0.0.1`；`diorama.toml` 可设 |
 | C9 | `diorama.toml`（`host`/`port`/`plugins`/`ignore`/`[watch]`/`[git]`/`[html]`/`[ui]`） | ✅ M2 | 目录 → `$DIORAMA_HOME` 查找；CLI > toml > 默认；写错 fail loud；`--config`、`--all`、`--dump-config`；`[html] scripts` 控制 HTML 预览是否默认执行页面脚本（contract §28）；`[ui] theme` 是页面没人选过主题时的起点（contract §33）|
@@ -25,7 +25,7 @@
 | C11 | `diorama [dir] --json` / `diorama restart <dir> --json` | ✅ v0.3 | 把挂载输出成**一个** JSON 文档（`url` / `root` / `mountId` / `created` + 完整 `mount: MountStatus`），供其它程序直接取 URL；可与 `--foreground` 同用（打印后照常不退出，contract §7.6） |
 | C6 | 随机端口自动重试 | ✅ M3 | 随机端口上限 20 次；显式端口冲突直接 `EADDRINUSE`（退出码 1）|
 | C7 | realpath 挂载键 + 别名提示 | ✅ M3 | 挂载键 = realpath（同一真实目录幂等）；打印的目录是 realpath 后的 |
-| C8 | 单测/集成测试 | ✅ M0→本轮 | `apps/web/tests/`：152 条端到端（31 个 spec，真实 CLI/gateway + Chromium）；`pnpm test:unit`：385 条单测 |
+| C8 | 单测/集成测试 | ✅ M0→本轮 | `apps/web/tests/`：163 条端到端（33 个 spec，真实 CLI/gateway + Chromium）；`pnpm test:unit`：412 条单测 |
 
 ## 二、Gateway
 
@@ -116,7 +116,7 @@
 | U11 | URL 路由（可直接分享某个文件） | ✅ 本轮 | `/~/<RelPath>`（path 形态，`/~/` 为保留前缀）；`ctx.router` 内核内置；刷新恢复单 tab（contract §3.8）|
 | U24 | 定位到正在浏览的文件（文件视图工具栏） | ✅ v0.17 | 文件视图顶部有工具栏，一颗按钮把**活动 tab 的文件**在树里找出来：展开沿路每一级目录（已开的不重复、也不收起别的）、按需把分页的目录长到落点、把那一行滚到面板中间并给一段会淡出的高亮带；**不是导航**——不打开、不切 tab、不改选中、不动 URL；没有 tab 时按钮禁用、命令不可执行（contract §35、§5.2、§3.4、§3.7；docs/m24/spec.md）|
 | U25 | 文件的原件链接与三个动作 | ✅ v0.18 | 文件行右键 →（**下载** / **复制链接** / **独立浏览器窗口打开**），三个动作都指向同一个 URL **`/~raw~/<path>`**（原件字节，不经过 diorama 页面）：默认 `inline` 且按文件类型返回真实 `content-type`（**源码 / 配置 / 点文件都算文本**，浏览器显示而不是下载；文本类带 `charset=utf-8`，中文不乱码），只有 `?download=1` 才是 `attachment`；复制出来的链接就是这个文件地址，「独立窗口」实际是浏览器的新标签页（`_blank`，不强制 popup），显示或下载的也是这个文件。同一件事另有三条命令（`file.download` / `file.copyLink` / `file.openInWindow`，无键位，作用于活动 tab 的文件）。右键不改导航状态；目录行保留浏览器原生菜单（contract §4、§3.1、§3.7、§5.2、§36；docs/m25/spec.md） |
-| U23 | 网页标题是目录名 | ✅ 未发版 | 页面壳的 `<title>` 写的是**这个挂载的目录名**（`basename(root)`，与 `diorama ls` 的 `DIR` 列同一个名字），同时开着几个挂载时标签条分得出谁是谁；由 `serveShell` 写进文档（壳是静态 HTML、root 只有服务端有），文档到的时候就对，页面不参与；`/` 没有名字时保留壳自己的标题，不随路由变（contract §34） |
+| U23 | 网页标题是目录名 | ✅ v0.6 | 页面壳的 `<title>` 写的是**这个挂载的目录名**（`basename(root)`，与 `diorama ls` 的 `DIR` 列同一个名字），同时开着几个挂载时标签条分得出谁是谁；由 `serveShell` 写进文档（壳是静态 HTML、root 只有服务端有），文档到的时候就对，页面不参与；`/` 没有名字时保留壳自己的标题，不随路由变（contract §34） |
 | U12 | 深色/浅色主题 | ✅ v0.9 | 默认跟随系统（`prefers-color-scheme` 实时跟随）；`light` / `dark` 锁定；第三方主题经 `ctx.theme.register` 以 token 覆盖加入（contract §3.10、§5.3）；**每个目录可以在 `diorama.toml` 的 `[ui] theme` 里给一个起点**（读者一选就以读者的为准，contract §33）；`ctx.storage` 服务端同步仍留给 K14 |
 
 ## 六、明确不做（v1 及以后）
