@@ -20,6 +20,15 @@ export type {
 export { fsError, gitError, type FsErrorCode, type GitErrorCode } from '../shared/errors.ts'
 export { MAX_BINARY_BYTES, MAX_TEXT_BYTES } from '../shared/limits.ts'
 export { mimeOf, extensionOf } from '../shared/mime.ts'
+export {
+  contentDisposition,
+  decodeRawPath,
+  DOWNLOAD_QUERY,
+  encodeRawPath,
+  rawContentType,
+  rawUrl,
+} from '../shared/raw.ts'
+export { RAW_PREFIX } from '../shared/types.ts'
 
 export {
   createMountHandle,

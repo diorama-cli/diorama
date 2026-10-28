@@ -24,8 +24,10 @@
 import type { Context } from 'cordis'
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import type { FileInfo, MountHandle, TabsSnapshot } from 'diorama-kernel/client'
-import { createTreeService, type CommandsService } from 'diorama-kernel/client'
-import { bindMethods, FileIcon, Icon, iconSvg, provideEntry, useKernel, useStore, type Store } from 'diorama-ui'
+import { createTreeService, rawUrl, type CommandsService } from 'diorama-kernel/client'
+import { bindMethods, ContextMenu, FileIcon, Icon, iconSvg, provideEntry, useKernel, useStore, type MenuItem, type Store } from 'diorama-ui'
+import { FILE_ACTIONS, fileCommand, runFileAction, type FileActionOutcome } from './actions.ts'
+import { browserFileActionHost } from './host.ts'
 
 export const name = 'file-tree'
 export const inject = ['slots']
@@ -160,11 +162,14 @@ function TreeRow({
   file,
   depth,
   reveal,
+  onMenu,
 }: {
   mountCtx: MountHandle
   file: FileInfo
   depth: number
   reveal: { path: string; at: number } | undefined
+  /** Open the file's context menu at a viewport point (contract.md §36). */
+  onMenu(file: FileInfo, x: number, y: number): void
 }) {
   const { ctx } = useKernel()
   const tree = ctx.tree
@@ -178,6 +183,21 @@ function TreeRow({
   const total = dirState.entries?.length ?? 0
   const cut = Math.min(dirState.visible, total)
   const { located, ref } = useLocated(file.path, reveal)
+
+  /**
+   * A file row's menu (contract.md §36). Directories keep the browser's own
+   * menu: there is nothing to download, link or open about one — the three
+   * actions are about bytes, and a directory has none.
+   *
+   * Right-clicking **changes nothing**: not the selection, not the active tab,
+   * not the URL (the same rule as locating the browsed file, §35). The reader
+   * is asking a question about the row, not navigating to it.
+   */
+  const openMenu = (event: { clientX: number; clientY: number; preventDefault(): void }): void => {
+    if (isDir) return
+    event.preventDefault()
+    onMenu(file, event.clientX, event.clientY)
+  }
 
   return (
     <>
@@ -193,6 +213,16 @@ function TreeRow({
         aria-selected={selected}
         title={file.path}
         onClick={() => (isDir ? tree.toggle(file.path) : tree.select(file))}
+        onContextMenu={openMenu}
+        // The keyboard's way to the same menu: `ContextMenu` is the key most
+        // keyboards call Menu, and Shift+F10 is the one that always exists.
+        onKeyDown={event => {
+          if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+            event.preventDefault()
+            const box = event.currentTarget.getBoundingClientRect()
+            onMenu(file, box.left + 24, box.top + box.height)
+          }
+        }}
       >
         <span className="diorama-tree__caret" aria-hidden="true">
           {isDir ? <Icon name={expanded ? 'caret-down' : 'caret-right'} size={14} /> : null}
@@ -207,7 +237,7 @@ function TreeRow({
       )}
       {expanded &&
         dirState.entries?.slice(0, cut).map(child => (
-          <TreeRow key={child.path} mountCtx={mountCtx} file={child} depth={depth + 1} reveal={reveal} />
+          <TreeRow key={child.path} mountCtx={mountCtx} file={child} depth={depth + 1} reveal={reveal} onMenu={onMenu} />
         ))}
       {expanded && cut < total && (
         <button
@@ -280,15 +310,57 @@ function FileTreeRoot({ active = true }: { active?: boolean }) {
   const locate = useCallback(() => {
     if (activePath !== undefined) tree.reveal(activePath)
   }, [tree, activePath])
+  // The row menu (contract.md §36) is one menu for the whole view: a right-click
+  // replaces the target rather than stacking panels. Hooks stay above the early
+  // returns — a conditional hook takes the subtree down (docs/m15/spec.md §6).
+  const [menu, setMenu] = useState<{ file: FileInfo; x: number; y: number } | undefined>(undefined)
+  const [notice, setNotice] = useState<string | undefined>(undefined)
+  const openMenu = useCallback((file: FileInfo, x: number, y: number) => {
+    setNotice(undefined)
+    setMenu({ file, x, y })
+  }, [])
+  const closeMenu = useCallback(() => setMenu(undefined), [])
+  const host = browserFileActionHost()
+  const menuItems: MenuItem[] =
+    menu === undefined
+      ? []
+      : FILE_ACTIONS.map(action => ({
+          id: action.id,
+          label: action.label,
+          hint: action.hint,
+          run: () => {
+            // The URL is built here, from the mount the view already holds: the
+            // action table itself imports nothing (see `actions.ts`).
+            void runFileAction(action.id, rawUrl(mountCtx.baseUrl, menu.file.path), host).then(outcome => {
+              // A refusal is shown, never swallowed: the URL is what the reader
+              // wanted and it is right there to copy by hand.
+              setNotice(outcome.ok ? undefined : outcome.message)
+            })
+          },
+        }))
   // The view stays mounted while inactive (contract.md §5.2); `aria-hidden`
   // keeps a hidden pane out of the accessibility tree and its buttons untabbable.
   return (
     <div className="diorama-tree-view" aria-hidden={active ? undefined : true}>
       <TreeToolbar onReveal={locate} disabled={activePath === undefined} />
+      {notice !== undefined && (
+        <div className="diorama-tree__notice" role="status" data-testid="file-action-notice">
+          {notice}
+        </div>
+      )}
+      {menu !== undefined && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          title={menu.file.path}
+          items={menuItems}
+          onClose={closeMenu}
+        />
+      )}
       <nav className="diorama-tree" aria-label="文件树" data-testid="file-tree">
         {rootEntries.error !== undefined && <div className="diorama-tree__error">{rootEntries.error}</div>}
         {rootEntries.entries?.slice(0, cut).map(file => (
-          <TreeRow key={file.path} mountCtx={mountCtx} file={file} depth={0} reveal={snapshot.reveal} />
+          <TreeRow key={file.path} mountCtx={mountCtx} file={file} depth={0} reveal={snapshot.reveal} onMenu={openMenu} />
         ))}
         {cut < total && (
           <button type="button" className="diorama-tree__more" data-testid="tree-more" onClick={() => rootEntries.more()}>
@@ -344,6 +416,36 @@ export function apply(ctx: Context) {
     },
   })
   commands.bind({ keys: 'mod+shift+l', command: REVEAL_COMMAND })
+
+  // The three file actions are commands too (contract.md §3.7, §36): the same
+  // work the context menu does, reachable from the palette and from a key. They
+  // act on the **active tab's file**, which is the only file a page-level
+  // command can name — the menu is the way to reach a row that is not open.
+  //
+  // No keys are bound: `mod+d` (bookmark), `mod+c` (copy) and `mod+o` (open)
+  // are the browser's own and mean something else here; the palette is where
+  // these three are looked up.
+  const host = browserFileActionHost()
+  for (const action of FILE_ACTIONS) {
+    commands.register({
+      id: fileCommand(action.id),
+      title: '文件：' + action.label,
+      when: context => context.activeTab !== undefined,
+      run: async context => {
+        const tab = context.activeTab
+        if (tab === undefined) return
+        const outcome: FileActionOutcome & { url: string } = await runFileAction(
+          action.id,
+          rawUrl(ctx.mount.baseUrl, tab.path),
+          host,
+        )
+        // A page-level action has no menu row to write into: a refusal is a
+        // console line (its message carries the URL, so it can still be used),
+        // never a silent no-op.
+        if (!outcome.ok) console.warn('[diorama] ' + action.label + ': ' + (outcome.message ?? 'failed'))
+      },
+    })
+  }
 }
 
 /**

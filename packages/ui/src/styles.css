@@ -626,6 +626,81 @@ body.diorama-resizing {
   transform: translateY(-50%);
 }
 
+/* A view's context menu (contract.md §5.2, §36).
+
+   `position: fixed` at the pointer, above every overlay (the palette and the
+   shortcut sheet are 100, the keycap chips 6) but below nothing: a menu the
+   reader opened is the topmost thing on the page. The panel is the surface, the
+   rows are ordinary list lines, and the disabled row keeps its place so the
+   menu does not change height as a file is added to a tab. */
+.diorama-menu {
+  position: fixed;
+  z-index: 120;
+  min-width: 200px;
+  max-width: min(420px, 90vw);
+  padding: 4px 0;
+  border: 1px solid var(--dio-border);
+  border-radius: 6px;
+  background: var(--dio-bg);
+  box-shadow: 0 8px 24px var(--dio-shadow);
+  font: 13px var(--dio-font);
+}
+
+.diorama-menu__title {
+  padding: 4px 12px 6px;
+  border-bottom: 1px solid var(--dio-border);
+  color: var(--dio-muted);
+  font-size: 11px;
+  /* A path is read by scrolling, never truncated (the pane rule, §5.2). */
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.diorama-menu__item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 12px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.diorama-menu__item--active:not(:disabled) {
+  background: var(--dio-selected);
+}
+
+.diorama-menu__item:disabled {
+  color: var(--dio-muted);
+  cursor: default;
+}
+
+.diorama-menu__hint {
+  color: var(--dio-muted);
+  font-size: 11px;
+}
+
+/* A refused action says why, above the rows it was asked from: a blocked
+   popup or a clipboard the browser will not write are both recoverable, and
+   the URL the action used is in the message. */
+.diorama-tree__notice {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--dio-border);
+  background: var(--dio-danger-bg);
+  color: var(--dio-danger);
+  font: 12px var(--dio-font);
+  white-space: pre-wrap;
+}
+
 .diorama-layout__sidebar {
   overflow: hidden;
 }

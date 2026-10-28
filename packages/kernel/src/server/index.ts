@@ -20,6 +20,8 @@ export type { DescribedService, MethodDescriptor, RpcRequest, RpcResponse } from
 export { CONTRACT_RANGE, CONTRACT_VERSION, KERNEL_NAME } from '../contract.ts'
 export { codedError, fsError, gitError, isErrorCode, rpcError } from '../shared/errors.ts'
 export { extensionOf, mimeOf } from '../shared/mime.ts'
+export { contentDisposition, decodeRawPath, DOWNLOAD_QUERY, encodeRawPath, rawContentType, rawUrl } from '../shared/raw.ts'
+export { RAW_PREFIX } from '../shared/types.ts'
 export { explainMismatch, parseRange, satisfies } from '../shared/semver.ts'
 
 export { FsService, fsHalf, MAX_BINARY_BYTES, MAX_TEXT_BYTES, resolveInside, type FsServiceOptions } from './fs.ts'

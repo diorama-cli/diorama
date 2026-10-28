@@ -13,7 +13,13 @@
 | 3 | [docs/features.md](docs/features.md) | **有什么**：能力清单与档位（✅ / v1 / 未来 / 不做） |
 | 4 | 最近一档的 `docs/mN/spec.md` | **怎么实现的** + **§6.2 的坑**（见下面 §5） |
 
-最近一档是 [docs/m24/spec.md](docs/m24/spec.md)（文件视图有自己的**工具栏**：视图面板顶部一条，一颗
+最近一档是 [docs/m25/spec.md](docs/m25/spec.md)（文件行右键 → **下载 / 复制链接 / 独立浏览器窗口打开**，
+三个动作都指向同一个**原件 URL** `/~raw~/<path>`：默认 `inline`、按文件类型返回真实 `content-type`，
+只有 `?download=1` 才 `attachment`；复制出来的链接与在新窗口里打开的都是那个文件本身，不是 diorama
+页面。同一件事另有三条命令 `file.download` / `file.copyLink` / `file.openInWindow`（无键位，作用于
+活动 tab 的文件）。**新文件若 `import` 了 `diorama-kernel` 却没先 `import 'cordis'`，整个包的
+`Context.provide` 类型增强会静默消失**——本档踩到的坑，见 m25/spec §6 坑 1）；
+上一档是 [docs/m24/spec.md](docs/m24/spec.md)（文件视图有自己的**工具栏**：视图面板顶部一条，一颗
 「定位到正在浏览的文件」按钮——沿路展开目录、按需把分页的目录长到落点、把那一行滚到中间并给一段淡出
 高亮；**不是导航**（不打开、不切 tab、不改选中、不动 URL），没有 tab 时按钮禁用；同一动作是命令
 `tree.revealActive`（`mod+shift+l`）。工具栏画在**视图自己的组件**里，不用座位——与 §5.2「切换器由
@@ -181,6 +187,7 @@ scripts/                  生成器（图标表；`pnpm icons` 重新生成）
 | 提示芯片一出现，tab / 按钮就挪动 | 芯片画进了控件的行内流，撑宽 / 撑高了它 | 芯片是**浮层**（`position: absolute`），不参与布局；e2e 用「按住前后几何不变」锁住（m20/spec §6 坑 2b）|
 | 编辑替换文本里写 `${…}`，构建报 `Expected ',' or '}' but found '?'` | 替换字符串里的 `${…}` 被当成插值，写出 `${{…}` | 改 `className={`…${…}`}` 这类模板后**回读一眼**（m20/spec §6 坑 4）|
 | 侧栏视图按钮是个空白方块 | `iconSvg` 在没装图标表的页面返回 `''`；切换器原先只判 `undefined` | 新按钮图标先进 `scripts/generate-icons.mjs` 的 `BUTTON_ICONS`、跑 `pnpm icons`，再重建**页面壳**（表由壳安装）；`icon` 为空也要退回标题首字（m17/spec §6 坑 9）|
+| **给某个插件加了新文件后，那个包里早就写着的 `ctx.provide(…)` 突然报 `TS2339: Property 'provide' does not exist on type 'Context'`** | 新文件 `import` 了 `diorama-kernel` 但**没先 `import 'cordis'`**：`cordis` 的 `declare module './context'`（`reflect.d.ts`）只有在它先被加载时才把 `provide` 合进 `Context`，于是整个包的增强静默消失。报的是旧代码，病因在新文件（文件顺序变了症状就变：叫 `actions.ts` 报、叫 `zz.ts` 不报） | 新模块**要么不 import 内核**（URL / 值由调用方拼好传进来），要么在 import 列表最前面加一行 `import type { Context } from 'cordis'`（m25/spec §6 坑 1）|
 
 ## 6. 边界（不要越过的线）
 

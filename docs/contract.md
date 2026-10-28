@@ -210,6 +210,8 @@ interface FsService {
   这是隐藏规则的**唯一强制点**：文件树、`ctx.search`（§3.9）、watch 都读 `list`，因此天然一致。
   `stat` 不受影响（直接按路径取信息）：已被打开的文件即使被隐藏，也照样能读。
 - client 半边：`mountCtx.fs` 与上面**同名同签名**，底层走 RPC（§4），调用形状与本地服务一致。
+- **下载不走 `ctx.fs`**（v0.18）：文件的**原件字节**由 `GET /~raw~/<RelPath>` 直接流给浏览器
+  （§4），所以**不受上面两条上限约束**；`ctx.fs` 的上限只针对「把内容读进页面」这件事。
 
 ### 3.2 `ctx.git`（server）✅ v0.5 定 / v0.6 补历史视图 / v0.10 多仓库
 
@@ -633,6 +635,9 @@ interface KeybindingInfo {
 | `tabs.select:<n>` | 第 n 个标签页 | `mod+<n>`（n = 1…9，v0.16；v0.15 曾用 `alt+<n>`） | tab 数 ≥ n |
 | `tree.focus` | 聚焦文件树 | `mod+alt+f` | 焦点不在树 |
 | `tree.revealActive` | 定位到正在浏览的文件 | `mod+shift+l` | 有活动 tab（v0.17，§35） |
+| `file.download` | 文件：下载 | 无（palette） | 有活动 tab（v0.18，§36） |
+| `file.copyLink` | 文件：复制链接 | 无（palette） | 有活动 tab（v0.18，§36） |
+| `file.openInWindow` | 文件：独立浏览器窗口打开 | 无（palette） | 有活动 tab（v0.18，§36） |
 | `palette.toggle` | 打开命令面板 | `mod+k` | 焦点不在输入框 |
 | `view.refresh` | 重新读取当前文件 | `mod+alt+r` | 有活动 tab |
 | `view.toggleAutoRefresh` | 自动刷新：开 / 关 | 无（palette） | 有活动 tab |
@@ -691,7 +696,7 @@ interface RouterService {
 | 管什么 | **页面正在显示哪个文件**：活动 tab 的文件路径，**不论它的 view**。跟文件相关的视图（diff、某个提交的版本）是“关于这个文件的”，文件属于路径，**视图与参数才进 hash** |
 | **hash** | **插件可写的通用键值面**。跟文件相关的视图写**标记**（`#diff`，无值）；跟文件无关的状态（主题、搜索词）写在根页面（`/#theme=dark`）。内核不知道 `diff` 是什么意思；
 `theme` 是 §3.10 保留给自己的 hash 键 |
-| 保留前缀 | **`/~/`**。其余任何路径（`/plugin.json`、`/assets/`、`/plugins/`、`/__diorama__/`）都不被路由解释；以后新增的服务端路由也不会与它相撞 |
+| 保留前缀 | **`/~/`**（页面）与 **`/~raw~/`**（原件字节，§4）。其余任何路径（`/plugin.json`、`/assets/`、`/plugins/`、`/__diorama__/`）都不被路由解释；以后新增的服务端路由也不会与它相撞。两条前缀不会互相吞掉：`/~raw~/` 的第三个字符是 `r`，`/~/` 的第三个字符是 `~` |
 | 编码 | 每段 `encodeURIComponent`（`/` 保留为分隔符） |
 | 历史 | 每次「活动文件」变化 `pushState`；浏览器前进/后退 `popstate` → 激活/打开那条路径 |
 | 刷新 | **恢复单 tab**：启动时按 URL 打开该文件，tab 集合不进 URL（多 tab 记忆仍待定） |
@@ -966,6 +971,44 @@ interface ThemeService {
 `client.cjs` 相同——只能取半边所在目录之下的文件（`..` 越界是 403），`<id>` 必须在本次 boot 图里。
 发布形态下 `scripts/assemble-package.mjs` 把插件的 `lib/vendor/` 一起带进 CLI 包。
 
+**挂载的原件字节（v0.18，§36）：`GET /~raw~/<RelPath>`**
+
+`/~/` 是「页面怎么显示这个文件」，`/~raw~/` 是「这个文件本身」。**一个 URL 服务三个动作**——
+下载、复制链接、在新窗口里打开——所以路径里命名的是**资源**，动作只在查询串里：
+
+| 请求 | 回答 |
+|---|---|
+| `GET /~raw~/<RelPath>` | 200，`content-type: rawContentType(path)`，**`inline`**（不发 `content-disposition`） |
+| `GET /~raw~/<RelPath>?download=1` | 200，同样的类型，另加 `content-disposition: attachment; filename="…"; filename*=UTF-8''…` |
+| `HEAD`（两种） | 只回头，不吐体 |
+
+规则：
+
+- **媒体类型按文件类型**，就是内核那张表（`mimeOf`，§5.1）：`.png` 浏览器显示，`.zip` 浏览器保存，
+  `.html` 浏览器渲染。**默认 inline**：只有 `?download=1` 才要求保存。
+- **文本类型带 `charset=utf-8`**（`rawContentType` = `mimeOf` + 文本类的 charset）：`text/*` 与
+  JSON / XML 家族。没有它浏览器**自己猜**编码（多数是 windows-1252），UTF-8 的中文在新窗口里就是
+  乱码——而 diorama 自己按 UTF-8 读同一个文件（`fs.readText`），两边必须说同一件事。
+  媒体类型（图片、音视频、字体、PDF、wasm）**不带参数**。
+- **源码是文本**：各语言源码、配置、点文件（`.gitignore`）都归 `text/*`，所以浏览器**显示**它们，
+  不是下载。**没有扩展名的文件按名字认**（`Makefile`、`Dockerfile`、`LICENSE`、`README`、`Gemfile`…）；
+  只有扩展名与名字都认不出来的才是 `application/octet-stream`（一个诚实的「我不知道」）。
+- **路径校验与 `ctx.fs` 是同一份**：`resolveInside`（§3.1）——绝对路径 / NUL → `EINVAL`(400)，
+  `..` 越界 → `EOUTSIDE`(403)，不存在 → `ENOENT`(404)，是目录 → `EISDIR`(400)，
+  解码失败 → `EBADPATH`(400)。
+- **`ignore` 不影响它**：隐藏规则只作用于 `list`（§3.1），`stat` / `readText` 一直按显式路径可达，
+  这条路由同样如此。
+- **没有大小上限**，与 `fs.readBytes` 的 `MAX_BINARY_BYTES`（32 MiB）有意不同：字节流式给浏览器，
+  进度与落盘都是它的事。
+- 恒定头：`content-length`、`x-content-type-options: nosniff`、`cache-control: no-cache` 与
+  `etag`（`mtime` + `size`，文件会变，重新验证比 `no-store` 省）。
+- **它是原件，不是安全边界**：`/~raw~/x.html` 会在**本站 origin** 上执行页面脚本，因此能读到本站
+  `localStorage`、也能调 `/__diorama__/rpc` 读整个挂载目录。这是读者对自己的文件、在本机上按下的
+  动作（与 `file://` 打开本地 HTML 同级），**接受**；要收紧只需给这条路由加
+  `content-security-policy: sandbox`，不动 `content-type`，也不影响图片与 PDF。
+- 三个动作的客户端部分见 §36；纯函数（`encodeRawPath` / `rawUrl` / `contentDisposition` /
+  `rawContentType` / `RAW_PREFIX`）在 `diorama-kernel` 的两个入口都导出。
+
 ### 4.1 `diorama.toml` ✅ v0.3 定，M2 实现 / v0.4 补 gateway 化后的归属
 
 唯一的配置文件（TOML；**不引入第二种格式**）。**查找顺序**：
@@ -1232,6 +1275,13 @@ interface SidebarViewSpec {
   工具栏上的按钮**只作用于视图**（「把这一栏滚到某处」「换个分组方式」），不作用于被读的文件——
   文件自己的开关归渲染器头部（§5.1、O8）。一个动作既是按钮又是命令时，只注册一条命令、按钮调它，
   这样 palette、快捷键与按钮是同一件事（§3.7）。
+- **视图可以有自己的右键菜单（v0.18，§36）**：与工具栏同一条分工——画在视图自己的组件里，
+  **不开座位**，别的视图不受影响。文件视图的行菜单是第一个例子，菜单项作用于**那一行的文件**
+  （下载 / 复制链接 / 在独立窗口打开，三个都指向 §4 的 `/~raw~/`）。三条边界：
+  - **只有文件行有菜单**；目录行与视图空白处保留浏览器原生菜单（目录没有「原件字节」）。
+  - **右键不改导航状态**：不选中、不开 tab、不动 URL（与 §35「定位不是导航」同一条规矩）。
+  - 菜单原语（定位、越界翻转、`Esc` / 点外部 / 滚动关闭、`↑↓` / `Home` / `End` / `Enter`）
+    在 `diorama-ui` 的 `ContextMenu` 里，一个视图长第二份就会漂。
 
 ### 5.1 `file.renderer` 匹配规则
 
@@ -1286,8 +1336,10 @@ interface FileRendererProps {
   **二进制**格式的渲染器，用 `ext` / `mime` 档，不要指望 `probe`。
 - **没有渲染器认领的二进制文件**：落到兜底 `plaintext`，它显示「二进制文件 · <size> · <mime>」，
   **不**读字节、不白屏（v0.6）。
-- `mime` 由内核按扩展名推断（小表：text/*、application/json、image/*、application/pdf 等；未知为
-  `application/octet-stream`）。
+- `mime` 由内核按扩展名推断（`mimeOf`：文档 / 标记 / 样式 / 数据 / 各语言源码 / 配置 / shell 都是
+  `text/*`，媒体（图片、音视频、字体、PDF、wasm）各归其类；**点文件**（`.gitignore`、`.env`）没有扩展名
+  但按 `text/plain` 回答；未知才是 `application/octet-stream`）。**表里不带参数**——matcher 比较的是
+  `text/plain` 这种裸类型（§5.1），`charset` 由 §4 的原件路由单独加。
 - **内置字节渲染器（v0.6）**：`image`（`mime: ['image/*']`）与 `pdf`（`ext: ['pdf']`），两者都先
   `stat` 再 `readBytes`，从 bytes 建 Blob URL 交给浏览器原生的 `<img>` / `<iframe>`；内核**
   不**内联 SVG 的 DOM（`<img>` 渲染 SVG，脚本不执行）。
@@ -2295,6 +2347,70 @@ URL / hash 语义、主题 token 表（新样式只用既有 token，无新 toke
   §6 坑 9）。页面没有图标表时按钮退回一个字（「定」），与切换器同一条规则。
 - **落点的高亮是动画，不是状态**：`data-located="true"` 与一段 `1.6s` 的淡出背景，写完就结束；
   读者继续滚动、点别的行都不受影响，也不需要「清掉高亮」这一步。
+
+## 36. `0.0.2` 之后：文件的原件链接与三个动作（未发版，属下一个 `0.0.x`）
+
+> 2026-10-28。用户要求：**文件导航窗口右键 →（下载、复制链接、独立浏览器窗口打开）**，
+> 并且明确「复制链接是复制一个**下载链接**」「独立浏览器窗口打开是直接在窗口里打开/下载**文件**，
+> 而不是打开 diorama 应用里的文件」。契约号不动（§6）：没有新增内核服务、没有加座位、
+> 没有改 `ctx.*` 的签名；变的是**多一条服务端路由**（§4）、**命令表多三条**（§3.7）、
+> **§5.2 多一种视图控件**（右键菜单），以及 `diorama-ui` 的一个原语。
+
+| 条款 | 本档之前 | 本档 |
+|---|---|---|
+| 原件字节怎么取 | 只能走 `ctx.fs.readBytes`（过 RPC，上限 32 MiB） | 另开 `GET /~raw~/<RelPath>`，流式、不设上限（§4） |
+| 三个动作指向什么 | — | **同一个 URL**：`/~raw~/<path>`；只有下载加 `?download=1` |
+| `content-disposition` | — | 默认 **inline**（不发头）；`?download=1` 才是 `attachment` |
+| 媒体类型 | — | 按文件类型（`mimeOf`），**一律真实类型**，不因可执行而降级 |
+| 文本编码 | — | 文本类带 `charset=utf-8`（`rawContentType`）：不带就是让浏览器猜，中文必乱码 |
+| 源码算不算文本 | — | **算**：各语言源码 / 配置 / 点文件都是 `text/*`，浏览器显示而不是下载；表外扩展名才是 octet-stream |
+| 独立窗口还是新标签页 | — | `window.open(url, '_blank')`，**不带宽高**——现代浏览器给的是标签页；`popup=yes` 会强出一个没有地址栏的 OS 窗口，而「拿到这个文件的地址」正是这个动作的意思 |
+| §3.7 命令表 | `tree.revealActive` 为止 | 另加 `file.download` / `file.copyLink` / `file.openInWindow`（无键位，走 palette） |
+| §5.2 视图的形态 | 工具栏（v0.17） | 另加**右键菜单**；同一条分工（画在视图里、不开座位） |
+| 前缀 | `/~/`（页面） | 另加 `/~raw~/`（原件）；两条互不吞掉 |
+
+**没有变的东西**：`ctx.fs` / `ctx.git` 的签名与上限、RPC 协议、slot 清单、`diorama.toml`、
+`/plugin.json`、`/~/…` 的语义（它仍然是页面）。
+
+细则：
+
+- **为什么不是 `?download` 一种 URL、或者 `/download?path=`**：用户要的是「复制一个**下载链接**」，
+  也就是**可以直接发给别人、也可以直接在窗口里打开**的地址。`/~raw~/<path>` 两者都是——同一个
+  URL，浏览器按类型决定显示还是保存；`?download=1` 只是把「保存」这件事说死。
+  `/__diorama__/download?path=…` 那种形状则把路径塞进查询串：编码要再走一层、复制出去的链接
+  长得像内部端点、而且 `/__diorama__/` 目前在 `http.ts` 里是**精确路径 switch**，加一个带任意
+  后缀的端点会把它变成前缀路由。
+- **为什么前缀是 `~raw~` 而不是 `origin` / `file` / `content`**：`origin` 在这个仓库里已经
+  是 CORS 语义（`Access-Control-Allow-Origin`、`baseUrl`、`location.origin`）；`blob` 撞
+  `ctx.git.blob()`；`content` 撞 `tabs.content` 座位；`asset` 撞 `/assets/`（页面壳的构建产物）。
+  `raw` 与生态同口径（`raw.githubusercontent.com`、GitLab `/-/raw/`、Vite `?raw`），而且和
+  `ctx.fs.readBytes` 注释里的 "raw bytes" 是同一个词。**命名的是资源，不是动作**——这正是它
+  能同时服务三个动作的原因。
+- **不能是裸 `/raw/<path>`**：挂载里真有一个叫 `raw` 的目录时，那个目录的文件就被路由吃了。
+  `~` 是「文件名里不可能出现的字符」，与 `/~/` 选 `~` 是同一条理由（§3.8「保留前缀」）。
+- **为什么下载不设上限**：`readBytes` 的 32 MiB 是「读进页面」的成本（`Uint8Array` 过 RPC 是
+  `{ $bytes: base64 }`，32 MiB 变 44 MiB 的 JSON 单帧）。下载不经过页面：字节从磁盘直接流向浏览器，
+  浏览器有进度条和自己的磁盘。日志、视频、大 CSV 因此都能下。
+- **html / svg / xml 不降级**：用户明确「按文件类型返回对应的 content-type」。代价是
+  `/~raw~/x.html` 会在**本站 origin** 上执行页面脚本（能读本站 `localStorage`、能调 RPC 读整个
+  挂载目录）。这是读者对自己机器上自己的文件按下的动作，与 `file://` 打开本地 HTML 同级，
+  **接受**并写进 §4 的边界；要收紧只需加一条 `content-security-policy: sandbox`，不动 `content-type`。
+- **三条命令都作用于活动 tab 的文件**：页面级命令没有「哪一行」这个上下文，能命名的只有活动 tab
+  （§3.7 的 `CommandContext.activeTab`）。**不绑键位**：`mod+d`（书签）、`mod+c`（复制）、
+  `mod+o`（打开）都是浏览器自己的，语义也不同；这三条在 palette 里被找到。
+- **菜单只有文件行有**：三个动作都是关于**字节**的，目录没有字节。目录行与空白处保留浏览器原生菜单。
+- **右键不改导航状态**：不选中、不开 tab、不动 URL——读者是在问「这一行能做什么」，不是在打开它
+  （与 §35「定位不是导航」同一条规矩）。
+- **失败要说出来**：剪贴板在非 secure context 下会**拒绝**（`--host 0.0.0.0` 后用 LAN 地址打开），
+  弹窗会被拦截。两者都**不静默**：菜单那条路在视图顶部显示一条带 URL 的提示，命令那条路在
+  console 里给同样的文本。回退链是 `navigator.clipboard` → `execCommand('copy')` → 手抄 URL。
+- **「独立窗口」= 新标签页**：`window.open(url, '_blank')`，**不带宽高、也不要 `popup=yes`**。
+  动作的名字是读者视角的（「在 diorama 外面打开这个文件」），浏览器怎么放由浏览器决定：现代浏览器
+  对不带 features 的 `_blank` 给的就是标签页。第一版写了 `popup=yes`，结果真开出一个没有工具栏、
+  没有标签条、**也没有地址栏**的 OS 窗口——而这个动作的全部意义就是「我要这个文件的地址」。
+  被拦截时 `window.open` 返回 `null`，此时把 URL 显示出来（不静默）。
+- **纯函数放在两处可测的地方**：`diorama-kernel` 的 `shared/raw.ts`（编码、URL、disposition、
+  类型）与 `file-tree` 的 `actions.ts`（动作表与三种结果），都是 `node --test` 直接吃的 `.ts`。
 
 ## 待定清单（v0.4 后仍 🔲）
 

@@ -47,6 +47,18 @@ export interface FsWatchEvent {
  */
 export const ROUTE_PREFIX = '/~/'
 
+/**
+ * The URL prefix of the mount's **raw bytes** (contract.md §4): a file URL is
+ * `<origin>/~raw~/<RelPath>`.
+ *
+ * Two prefixes, two jobs, and they never collide: `/~/a.md` is the page that
+ * *shows* `a.md`, `/~raw~/a.md` is `a.md` itself. The same reason as
+ * {@link ROUTE_PREFIX} picks `~`: a file name cannot contain it, so a mount
+ * directory called `raw` is still reachable at `/~raw~/raw/x` instead of being
+ * shadowed by the route.
+ */
+export const RAW_PREFIX = '/~raw~/'
+
 /** Bytes `probe` matchers may look at (contract.md §5.1). */
 export const PROBE_HEAD_BYTES = 4096
 

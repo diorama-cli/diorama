@@ -45,6 +45,7 @@ export {
 } from './splitpane.ts'
 export { Splitter, type SplitterProps } from './splitter.tsx'
 export { KeyHint, useHeldModifier, type KeyHintProps } from './keys.tsx'
+export { ContextMenu, type ContextMenuProps, type MenuItem } from './contextmenu.tsx'
 export {
   highlighter,
   highlighterStore,

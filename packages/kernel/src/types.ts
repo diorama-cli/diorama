@@ -39,8 +39,16 @@ export type {
   SearchResult,
 } from './shared/search.ts'
 export type { DescribedService, MethodDescriptor } from './shared/rpc.ts'
-export { ROUTE_PREFIX } from './shared/types.ts'
+export { RAW_PREFIX, ROUTE_PREFIX } from './shared/types.ts'
 export { mimeOf, extensionOf } from './shared/mime.ts'
+export {
+  contentDisposition,
+  decodeRawPath,
+  DOWNLOAD_QUERY,
+  encodeRawPath,
+  rawContentType,
+  rawUrl,
+} from './shared/raw.ts'
 export type { TabsSnapshot } from './client/tabs.ts'
 export type { TreeReveal, TreeSnapshot } from './client/tree.ts'
 export type { BootFailure, BootOptions, BootResult, MountsFace } from './client/boot.ts'

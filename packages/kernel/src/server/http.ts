@@ -14,8 +14,10 @@ import { stat } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { basename, dirname, extname, join, normalize, resolve, sep } from 'node:path'
 import { isErrorCode } from '../shared/errors.ts'
-import { ROUTE_PREFIX } from '../shared/types.ts'
+import { contentDisposition, decodeRawPath, DOWNLOAD_QUERY, rawContentType } from '../shared/raw.ts'
+import { ROUTE_PREFIX, type RelPath } from '../shared/types.ts'
 import { HttpError } from './errors.ts'
+import { resolveInside } from './fs.ts'
 import type { BootManifest } from './plan.ts'
 import { RpcChannel, type RpcDispatcher } from './rpc.ts'
 import { withShellTitle } from './shell-title.ts'
@@ -95,6 +97,60 @@ async function serveStatic(dir: string, urlPath: string, res: ServerResponse): P
   return true
 }
 
+/**
+ * Answer `/~raw~/<path>` with the file's own bytes (contract.md §4).
+ *
+ * The media type is the kernel's table and nothing else: a `.png` is an image
+ * the browser shows, a `.zip` is something it saves, a `.html` is a page it
+ * renders. **`inline` is the default** — only `?download=1` sends
+ * `content-disposition: attachment` — so the same URL is the link a reader
+ * copies and the one a window opens.
+ *
+ * Containment is `resolveInside`'s, exactly as `ctx.fs` does it (contract.md
+ * §3.1): absolute paths, `..` escapes and NUL are refused before the disk is
+ * touched. `ignore` is not consulted: hiding a name from `list` never made it
+ * unreadable by path, and the reader right-clicked a row they could see.
+ *
+ * There is no size limit here, unlike `fs.readBytes` (`MAX_BINARY_BYTES`): the
+ * bytes stream to the browser, which has its own progress and its own disk.
+ */
+async function serveRaw(options: MountOptions, path: RelPath, download: boolean, head: boolean, res: ServerResponse): Promise<void> {
+  const abs = resolveInside(options.root, path)
+  let info
+  try {
+    info = await stat(abs)
+  } catch (error) {
+    // A missing file and a broken symlink are the same answer to the reader.
+    if ((error as { code?: unknown }).code === 'ENOENT') throw new HttpError(404, 'ENOENT', `no such file: ${path}`)
+    throw error
+  }
+  if (!info.isFile()) throw new HttpError(400, 'EISDIR', `not a file: ${path}`)
+  const name = path.slice(path.lastIndexOf('/') + 1)
+  const headers: Record<string, string> = {
+    'content-type': rawContentType(path),
+    'content-length': String(info.size),
+    // The file is on disk and may change under the reader: revalidate, do not
+    // cache blindly, and do not re-download a 200 MB video on every open.
+    'cache-control': 'no-cache',
+    etag: `"${info.mtimeMs.toString(36)}-${info.size.toString(36)}"`,
+    // The bytes are the file, not something this page inferred: never let a
+    // sniffing browser turn them into another type.
+    'x-content-type-options': 'nosniff',
+    ...(download ? { 'content-disposition': contentDisposition(name) } : {}),
+  }
+  res.writeHead(200, headers)
+  if (head) {
+    res.end()
+    return
+  }
+  await new Promise<void>((resolveStream, reject) => {
+    const stream = createReadStream(abs)
+    stream.on('error', reject)
+    stream.on('end', resolveStream)
+    stream.pipe(res)
+  })
+}
+
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body)
   res.writeHead(status, {
@@ -119,6 +175,8 @@ async function handleRequest(
     sendError(res, 405, 'EBADREQUEST', `method ${req.method ?? '?'} not allowed`)
     return
   }
+  // (HEAD is answered like GET with the body left out: every route below writes
+  // through `res`, and Node drops the payload for a HEAD response itself.)
   const url = new URL(req.url ?? '/', 'http://mount.local')
   const pathname = url.pathname
 
@@ -169,6 +227,18 @@ async function handleRequest(
     }
     if (await serveStatic(dirname(entry), `/${basename(entry)}`, res)) return
     sendError(res, 404, 'ENOENT', `client entry of plugin "${id}" is missing`)
+    return
+  }
+
+  // The mount's raw bytes (contract.md §4): `/~raw~/<path>` is the file itself,
+  // not the page that shows it. It sits before the shell fallback below, which
+  // would otherwise answer every unknown path with the page.
+  const raw = decodeRawPath(pathname)
+  if (raw === false) {
+    throw new HttpError(400, 'EBADPATH', 'malformed URL encoding')
+  }
+  if (raw !== undefined) {
+    await serveRaw(options, raw, url.searchParams.get(DOWNLOAD_QUERY) !== null, req.method === 'HEAD', res)
     return
   }
 
