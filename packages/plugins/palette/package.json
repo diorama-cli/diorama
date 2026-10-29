@@ -1,6 +1,6 @@
 {
   "name": "diorama-plugin-palette",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "private": true,
   "description": "Diorama piece: command palette (a layout.overlay entry over ctx.commands)",
   "type": "module",
@@ -22,7 +22,7 @@
     "src"
   ],
   "diorama": {
-    "contract": ">=0.0.6 <0.1.0",
+    "contract": ">=0.0.7 <0.1.0",
     "id": "palette",
     "client": {
       "entry": "./lib/client.cjs"

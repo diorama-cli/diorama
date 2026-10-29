@@ -1,6 +1,6 @@
 {
   "name": "diorama-ui",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "private": true,
   "description": "Diorama client UI: React renderer over the slot registry",
   "type": "module",

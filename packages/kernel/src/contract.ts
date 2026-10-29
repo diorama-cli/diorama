@@ -8,7 +8,7 @@ export const KERNEL_NAME = 'diorama'
  * settled, but the *number* restarts at `0.0.1` for the first publish, and a
  * bump to the next `0.0.x` is what a breaking change looks like until the
  * surface stabilises. Plugins declare a narrow range
- * (`>=0.0.6 <0.1.0`), so a published kernel never loads a piece built against
+ * (`>=0.0.7 <0.1.0`), so a published kernel never loads a piece built against
  * a different line.
  *
  * What the line contains today (contract §13–§20): the multi-tab model,
@@ -25,7 +25,7 @@ export const KERNEL_NAME = 'diorama'
  * (`ctx.theme`, §3.10) with the token palette of `diorama-ui/styles.css`
  * (docs/m9/spec.md).
  */
-export const CONTRACT_VERSION = '0.0.6'
+export const CONTRACT_VERSION = '0.0.7'
 
 /** What every plugin built against this kernel declares. */
-export const CONTRACT_RANGE = '>=0.0.6 <0.1.0'
+export const CONTRACT_RANGE = '>=0.0.7 <0.1.0'

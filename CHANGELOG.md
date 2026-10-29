@@ -3,6 +3,17 @@
 Every published version of `@diorama-cli/diorama`, newest first. Generated from
 the commit log by `pnpm release` — see [docs/release.md](docs/release.md).
 
+## 0.0.7 (2026-10-29)
+
+### Features
+
+- **editor:** line numbers, and a way to say "line 42"
+- **git-changes:** pick a repository from a dropdown, and let a fresh repository be empty
+
+### Documentation
+
+- **release:** file the 0.0.7 change lists under their version
+
 ## 0.0.6 (2026-10-28)
 
 ### Features

@@ -1,6 +1,6 @@
 {
   "name": "diorama-plugin-code",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "private": true,
   "description": "Diorama piece: syntax-highlighted source renderer",
   "type": "module",
@@ -22,7 +22,7 @@
     "src"
   ],
   "diorama": {
-    "contract": ">=0.0.6 <0.1.0",
+    "contract": ">=0.0.7 <0.1.0",
     "id": "code",
     "client": {
       "entry": "./lib/client.cjs"
