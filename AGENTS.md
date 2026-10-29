@@ -13,7 +13,13 @@
 | 3 | [docs/features.md](docs/features.md) | **有什么**：能力清单与档位（✅ / v1 / 未来 / 不做） |
 | 4 | 最近一档的 `docs/mN/spec.md` | **怎么实现的** + **§6.2 的坑**（见下面 §5） |
 
-最近一档是 [docs/m26/spec.md](docs/m26/spec.md)（历史视图的**多个仓库改成下拉切换**：顶部一行原生
+最近一档是 [docs/m27/spec.md](docs/m27/spec.md)（**行号与跳转到行**，一条链：`code` / `plaintext`
+改成**一行一个元素**，行号是每行的第一格，**默认显示**、渲染器头部一颗开关、偏好存 `localStorage`、
+状态在页面全局 `__diorama_line_numbers__`；reveal store 的目标变成**区间**并可 `flash`（跳转到行闪一下，
+搜索命中仍是常驻带），渲染器把目标**夹进文件**（`:999` 落在末行）；`mod+p` 认 `path:42` / `path:42-60`
+（最后一个冒号 + 合法行号才切分），palette 里以 `:` 开头就是 go to line，`shift+;` 直接开 palette 并
+预填 `:`。**全角 `：` 不认**。契约 §39）；
+上一档是 [docs/m26/spec.md](docs/m26/spec.md)（历史视图的**多个仓库改成下拉切换**：顶部一行原生
 `<select>`，一次只画一个仓库的提交，不再同屏并列可折叠的分组；只有一个仓库时不画这条行；
 变更视图**不变**——那里的分组是「同时浏览」而不是「换着看」。选择是视图自己的 state，不进 URL、
 不进 `localStorage`；`#history` 仍记提交，换仓库不清它。**还没 commit 过的仓库是状态不是错误**：
@@ -194,6 +200,9 @@ scripts/                  生成器（图标表；`pnpm icons` 重新生成）
 | 编辑替换文本里写 `${…}`，构建报 `Expected ',' or '}' but found '?'` | 替换字符串里的 `${…}` 被当成插值，写出 `${{…}` | 改 `className={`…${…}`}` 这类模板后**回读一眼**（m20/spec §6 坑 4）|
 | 侧栏视图按钮是个空白方块 | `iconSvg` 在没装图标表的页面返回 `''`；切换器原先只判 `undefined` | 新按钮图标先进 `scripts/generate-icons.mjs` 的 `BUTTON_ICONS`、跑 `pnpm icons`，再重建**页面壳**（表由壳安装）；`icon` 为空也要退回标题首字（m17/spec §6 坑 9）|
 | **给某个插件加了新文件后，那个包里早就写着的 `ctx.provide(…)` 突然报 `TS2339: Property 'provide' does not exist on type 'Context'`** | 新文件 `import` 了 `diorama-kernel` 但**没先 `import 'cordis'`**：`cordis` 的 `declare module './context'`（`reflect.d.ts`）只有在它先被加载时才把 `provide` 合进 `Context`，于是整个包的增强静默消失。报的是旧代码，病因在新文件（文件顺序变了症状就变：叫 `actions.ts` 报、叫 `zz.ts` 不报） | 新模块**要么不 import 内核**（URL / 值由调用方拼好传进来），要么在 import 列表最前面加一行 `import type { Context } from 'cordis'`（m25/spec §6 坑 1）|
+| 按行渲染之后「圈选多行是一堆长短不一的条」 | 浏览器只画 **inline box**，行号格被 `user-select: none` 跳过，块边界之间还有缝 | 选区**自己画**（`ui/src/selection.ts`）：原生高亮透明，按行填满整行 / 实测局部；位置用 `Range` 量，不要用 `ch`（tab 与字体都会偏）（m27/spec §6 坑 6–7）|
+| 连按两次「跳转到第 42 行」，第二次没有闪烁动画 | 同一个 DOM 元素重渲染**不会重放** CSS 动画 | 闪烁带的 `key` 用请求的单调戳（`revealed.at`），新请求 = 新元素（m27/spec §6 坑 3）|
+| `:999` 在十行的文件里「什么都没发生」 | reveal 的区间由**渲染器**夹进文件：store 不知道文件多长 | `useRevealLine(path, focus, count)` 的 `count` 是行数；e2e 用「`:999` 仍有一条带」锁住（m27/spec §6 坑 2）|
 
 ## 6. 边界（不要越过的线）
 

@@ -4,8 +4,12 @@
  * A search result is a (path, line) pair, and opening the file is not enough:
  * the reader has to land on the line. Tabs carry a path only (contract.md
  * §3.4), so the line travels beside them: the search piece calls
- * {@link reveal}, the renderer that draws the file asks {@link useRevealLine}
- * and scrolls its own `<pre>` there.
+ * {@link reveal}, the renderer that draws the file asks {@link useReveal} and
+ * scrolls its own text there.
+ *
+ * Since v0.19 the target is a **range** (`src/app.ts:42-60`) and may ask for a
+ * **flash** — a band that fades once, for "take me to line 42", as opposed to
+ * the steady band a search hit leaves behind (§3.11).
  *
  * Page state, not a kernel service — the same reason as `overlay` and
  * `__diorama_layout__`: every client half is its own build, so a module-level
@@ -13,16 +17,22 @@
  * file" is not a service other pieces should depend on. The page's
  * `globalThis` is the one place they all see.
  */
-import { useEffect, useState, useSyncExternalStore, type RefObject } from 'react'
+import { useEffect, useRef, useSyncExternalStore } from 'react'
+import { clampTarget } from './line-numbers.ts'
 
-/** Where the reader was sent: a file and a 1-based line. */
+/** Where the reader was sent: a file and a 1-based line range (inclusive). */
 export interface RevealTarget {
   path: string
+  /** First line of the range (1-based). */
   line: number
+  /** Last line of the range; equal to `line` for a single line. */
+  endLine: number
   /** 1-based column of the match; absent for "just this line". */
   column?: number
   /** Characters matched, for a renderer that wants to mark them. */
   length?: number
+  /** Fade the band once (a "go to line") instead of leaving it up (a hit). */
+  flash: boolean
   /** Monotonic stamp: asking for the same line twice reveals it twice. */
   at: number
 }
@@ -48,15 +58,35 @@ function notify(current: RevealState): void {
   for (const listener of [...current.listeners]) listener()
 }
 
-/** Send the reader to one line of one file (opening the file is the caller's job). */
-export function reveal(path: string, line: number, column?: number, length?: number): void {
+/** What a caller may ask of {@link reveal}. */
+export interface RevealOptions {
+  /** Last line of a range; absent means "this line only". */
+  endLine?: number
+  /** 1-based column of the match. */
+  column?: number
+  /** Characters matched. */
+  length?: number
+  /** Fade once instead of staying up (default: stay, the search-hit behaviour). */
+  flash?: boolean
+}
+
+/**
+ * Send the reader to a line (or a range) of one file; opening the file is the
+ * caller's job. A range is normalised (the smaller line first) and never
+ * empty, so a renderer can draw it without checking.
+ */
+export function reveal(path: string, line: number, options: RevealOptions = {}): void {
   const current = state()
+  const first = Math.max(1, Math.floor(line))
+  const last = options.endLine === undefined ? first : Math.max(1, Math.floor(options.endLine))
   current.stamp++
   current.target = {
     path,
-    line: Math.max(1, Math.floor(line)),
-    ...(column === undefined ? {} : { column }),
-    ...(length === undefined ? {} : { length }),
+    line: Math.min(first, last),
+    endLine: Math.max(first, last),
+    ...(options.column === undefined ? {} : { column: options.column }),
+    ...(options.length === undefined ? {} : { length: options.length }),
+    flash: options.flash === true,
     at: current.stamp,
   }
   notify(current)
@@ -97,60 +127,65 @@ export function useReveal(path: string | undefined): RevealTarget | undefined {
   return target
 }
 
-/** What a renderer draws for a revealed line: a band at `top` px, `height` px tall. */
+/** What a renderer draws for a revealed range: lines `line`…`endLine`. */
 export interface RevealedLine {
   line: number
-  top: number
-  height: number
+  /** Last line of the range (equal to `line` for one line). */
+  endLine: number
+  /** `true` for a one-shot flash ("go to line"), `false` for a steady band. */
+  flash: boolean
+  /** 1-based column of the match, when the caller knew one. */
+  column?: number
+  /** Characters matched, when the caller knew them. */
+  length?: number
+  /** The stamp of the request (a new value = a new request). */
+  at: number
 }
 
 /**
- * Follow the reveal store inside a renderer: scrolls the element's scroller so
- * the line sits in the middle, and reports where to draw the band.
+ * Follow the reveal store inside a renderer: reports the range to draw and
+ * asks the caller to scroll to it.
  *
- * The element must lay its text out with `white-space: pre` and one line height
- * for every line (both built-in text renderers do), which is what makes
- * `line × lineHeight` the line's position without measuring each line.
+ * The renderer supplies `focus(line)`: it knows how its text is laid out (the
+ * text renderers draw one element per line, so the line is found, not
+ * measured — docs/m19/spec.md §6). The hook only decides *when*.
+ *
+ * `count` is the file's line count when the renderer knows it: the target is
+ * then clamped into the file, so `:999` in a ten-line file lands on line 10
+ * instead of pointing at nothing (§3.11).
  */
-export function useRevealLine(path: string | undefined, ref: RefObject<HTMLElement | null>): RevealedLine | undefined {
+export function useRevealLine(
+  path: string | undefined,
+  focus: (line: number) => void,
+  count?: number,
+): RevealedLine | undefined {
   const target = useReveal(path)
-  const [shown, setShown] = useState<RevealedLine | undefined>(undefined)
   const stamp = target?.at
-  const line = target?.line
+  const raw = target === undefined ? undefined : clampTarget({ start: target.line, end: target.endLine }, count ?? Number.MAX_SAFE_INTEGER)
+  const line = raw?.start
+  const endLine = raw?.end
+  const flash = target?.flash
+  const column = target?.column
+  const length = target?.length
+  // The callback is read through a ref: a renderer passes an inline function,
+  // and a fresh identity every render must not re-run the scroll. The ref is
+  // refreshed in its own effect (declared first, so it has already run when the
+  // scroll effect below looks at it in the same commit).
+  const focusRef = useRef(focus)
   useEffect(() => {
-    if (line === undefined) {
-      setShown(undefined)
-      return
-    }
-    const element = ref.current
-    if (element === null) return
-    const style = getComputedStyle(element)
-    const height = lineHeightOf(style)
-    if (height <= 0) return
-    const top = (line - 1) * height + (Number.parseFloat(style.paddingTop) || 0)
-    const scroller = scrollParent(element)
-    const base = element.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop
-    scroller.scrollTop = Math.max(0, base + top - scroller.clientHeight / 2 + height / 2)
-    setShown({ line, top, height })
-  }, [stamp, line, ref])
-  return shown
-}
-
-/** A computed line height in px (`normal` is measured by the font's own metrics). */
-function lineHeightOf(style: CSSStyleDeclaration): number {
-  const declared = Number.parseFloat(style.lineHeight)
-  if (Number.isFinite(declared) && declared > 0) return declared
-  const fontSize = Number.parseFloat(style.fontSize)
-  return Number.isFinite(fontSize) ? fontSize * 1.5 : 0
-}
-
-/** The nearest ancestor that scrolls vertically (the tab pane, in practice). */
-function scrollParent(element: HTMLElement): HTMLElement {
-  let current = element.parentElement
-  while (current !== null) {
-    const overflow = getComputedStyle(current).overflowY
-    if (overflow === 'auto' || overflow === 'scroll') return current
-    current = current.parentElement
+    focusRef.current = focus
+  })
+  useEffect(() => {
+    if (line === undefined) return
+    focusRef.current(line)
+  }, [stamp, line])
+  if (line === undefined || endLine === undefined) return undefined
+  return {
+    line,
+    endLine,
+    flash: flash === true,
+    ...(column === undefined ? {} : { column }),
+    ...(length === undefined ? {} : { length }),
+    at: stamp ?? 0,
   }
-  return (document.scrollingElement as HTMLElement | null) ?? document.documentElement
 }

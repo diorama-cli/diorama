@@ -24,12 +24,30 @@ export {
   useReveal,
   useRevealLine,
   type RevealedLine,
+  type RevealOptions,
   type RevealTarget,
 } from './reveal.ts'
+export {
+  clampTarget,
+  formatLineSpec,
+  LINE_NUMBERS_ICON,
+  LINE_NUMBER_TOGGLE_COMMAND,
+  LINE_NUMBER_TOGGLE_TITLE,
+  LINE_NUMBERS_DEFAULT,
+  LINE_NUMBERS_STORAGE_KEY,
+  lineNumbersShown,
+  lineNumbersStore,
+  parseLineSpec,
+  setLineNumbers,
+  splitLineSuffix,
+  toggleLineNumbers,
+  type LineTarget,
+} from './line-numbers.ts'
 export {
   closeOverlay,
   hideOverlay,
   overlayOpen,
+  overlayPayload,
   overlayStore,
   showOverlay,
   toggleOverlay,
@@ -46,6 +64,8 @@ export {
 export { Splitter, type SplitterProps } from './splitter.tsx'
 export { KeyHint, useHeldModifier, type KeyHintProps } from './keys.tsx'
 export { ContextMenu, type ContextMenuProps, type MenuItem } from './contextmenu.tsx'
+export { inRevealed, LineRow, RevealBand } from './lines.tsx'
+export { selectionSlices, slicesOfSelection, watchSelection, type SelectionSlice } from './selection.ts'
 export {
   highlighter,
   highlighterStore,

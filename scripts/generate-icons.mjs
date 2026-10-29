@@ -69,6 +69,7 @@ const BUTTON_ICONS = {
   'unfold': 'arrows-vertical',
   'info': 'info-circle',
   'keyboard': 'keyboard',
+  'line-numbers': 'list-numbers',
   'loader': 'loader-2',
   'play': 'player-play',
   'regex': 'regex',

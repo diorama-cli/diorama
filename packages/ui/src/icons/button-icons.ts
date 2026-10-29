@@ -37,6 +37,7 @@ export const BUTTON_GLYPHS: Readonly<Record<string, ButtonGlyph>> = {
   "unfold": { body: "<path d=\"M8 7l4 -4l4 4\"/><path d=\"M8 17l4 4l4 -4\"/><path d=\"M12 3l0 18\"/>" },
   "info": { body: "<path d=\"M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0\"/><path d=\"M12 9h.01\"/><path d=\"M11 12h1v4h1\"/>" },
   "keyboard": { body: "<path d=\"M2 8a2 2 0 0 1 2 -2h16a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-16a2 2 0 0 1 -2 -2l0 -8\"/><path d=\"M6 10l0 .01\"/><path d=\"M10 10l0 .01\"/><path d=\"M14 10l0 .01\"/><path d=\"M18 10l0 .01\"/><path d=\"M6 14l0 .01\"/><path d=\"M18 14l0 .01\"/><path d=\"M10 14l4 .01\"/>" },
+  "line-numbers": { body: "<path d=\"M11 6h9\"/><path d=\"M11 12h9\"/><path d=\"M12 18h8\"/><path d=\"M4 16a2 2 0 1 1 4 0c0 .591 -.5 1 -1 1.5l-3 2.5h4\"/><path d=\"M6 10v-6l-2 2\"/>" },
   "loader": { body: "<path d=\"M12 3a9 9 0 1 0 9 9\"/>" },
   "play": { body: "<path d=\"M7 4v16l13 -8l-13 -8\"/>" },
   "regex": { body: "<path d=\"M6.5 15a2.5 2.5 0 1 1 0 5a2.5 2.5 0 0 1 0 -5\"/><path d=\"M17 7.875l3 -1.687\"/><path d=\"M17 7.875v3.375\"/><path d=\"M17 7.875l-3 -1.687\"/><path d=\"M17 7.875l3 1.688\"/><path d=\"M17 4.5v3.375\"/><path d=\"M17 7.875l-3 1.688\"/>" },

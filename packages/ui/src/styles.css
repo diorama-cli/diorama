@@ -31,6 +31,12 @@
   --dio-hover-faint: rgba(0, 0, 0, 0.05);
   --dio-selected: rgba(47, 111, 235, 0.12);
   --dio-selected-soft: rgba(47, 111, 235, 0.09);
+  /* Text selection in the readers, drawn by `ui/src/selection.ts` (§3.11). The
+     opaque form is the block a whole row is painted with; the translucent one
+     is the run a partial line is painted with. Two tokens, because the block
+     and the run must read as one selection at different densities. */
+  --dio-selection: rgba(47, 111, 235, 0.2);
+  --dio-selection-soft: rgba(47, 111, 235, 0.16);
   --dio-accent-underline: rgba(47, 111, 235, 0.75);
   --dio-backdrop: rgba(0, 0, 0, 0.28);
   --dio-shadow: rgba(0, 0, 0, 0.22);
@@ -91,6 +97,8 @@
   --dio-hover-faint: rgba(255, 255, 255, 0.05);
   --dio-selected: rgba(110, 160, 255, 0.22);
   --dio-selected-soft: rgba(110, 160, 255, 0.16);
+  --dio-selection: rgba(110, 160, 255, 0.32);
+  --dio-selection-soft: rgba(110, 160, 255, 0.26);
   --dio-accent-underline: rgba(110, 160, 255, 0.8);
   --dio-backdrop: rgba(0, 0, 0, 0.55);
   --dio-shadow: rgba(0, 0, 0, 0.55);
@@ -741,23 +749,68 @@ body.diorama-resizing {
 
 /* Plaintext piece */
 .diorama-plaintext {
-  /* The reveal band (contract.md §3.9) is positioned against this box. */
-  position: relative;
   margin: 0;
   padding: 12px 16px;
   font-family: var(--dio-mono);
   font-size: 12.5px;
   line-height: 1.6;
   tab-size: 4;
-  white-space: pre;
+  /* Same rule as the code reader: rows size to content, the pane scrolls. */
+  width: max-content;
+  min-width: 100%;
+  box-sizing: border-box;
 }
 
-.diorama-plaintext__path {
-  display: block;
-  padding: 6px 16px;
+/* The renderer's own header (contract.md §3.11): the path, and the switches
+   that belong to this file. The same row shape as the tree's toolbar. */
+.diorama-plaintext__header,
+.diorama-code__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 8px;
   border-bottom: 1px solid var(--dio-border);
+}
+
+.diorama-plaintext__path,
+.diorama-code__path {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 16px;
   color: var(--dio-muted);
   font: 12px var(--dio-font);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diorama-plaintext__tool,
+.diorama-code__tool {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--dio-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.diorama-plaintext__tool:hover,
+.diorama-code__tool:hover {
+  background: var(--dio-hover);
+  color: inherit;
+}
+
+/* The switch is a toggle, not a one-shot button: on = the gutter is drawn. */
+.diorama-plaintext__tool--on,
+.diorama-code__tool--on {
+  color: var(--dio-accent);
 }
 
 /* Markdown piece (M1) */
@@ -765,8 +818,7 @@ body.diorama-resizing {
   min-height: 100%;
 }
 
-.diorama-markdown__path,
-.diorama-code__path {
+.diorama-markdown__path {
   display: block;
   padding: 6px 16px;
   border-bottom: 1px solid var(--dio-border);
@@ -1024,15 +1076,113 @@ body.diorama-resizing {
 
 /* Code piece (M1) */
 .diorama-code {
-  /* The reveal band (contract.md §3.9) is positioned against this box. */
-  position: relative;
   margin: 0;
   padding: 12px 16px 48px;
   font-family: var(--dio-mono);
   font-size: 12.5px;
   line-height: 1.6;
   tab-size: 4;
+  /* Rows size to their content and the pane scrolls sideways (contract.md
+     §5.2): a long line is read by scrolling, never cut with an ellipsis. */
+  width: max-content;
+  min-width: 100%;
+  box-sizing: border-box;
+}
+
+/* One row per line (contract.md §3.11): the gutter cell, the text, the band. */
+.diorama-line {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+}
+
+.diorama-line__num {
+  flex: none;
+  width: 4.5em;
+  padding-right: 0.9em;
+  color: var(--dio-muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+  opacity: 0.75;
+}
+
+/* The gutter is a preference (§3.11): hidden, the rows keep their geometry —
+   the cell collapses, the text does not move sideways per line. */
+.diorama-code:not(.diorama-code--numbered) .diorama-line__num,
+.diorama-plaintext:not(.diorama-plaintext--numbered) .diorama-line__num {
+  display: none;
+}
+
+.diorama-line__text {
+  flex: none;
   white-space: pre;
+}
+
+/* Selection in the readers (§3.11). The browser paints inline boxes, which with
+   one element per line reads as one strip per line — so its highlight is made
+   transparent here and `ui/src/selection.ts` paints the rows instead: a row the
+   selection covers to its end is filled edge to edge (that is what joins
+   consecutive rows into one block), a row it only partly covers is filled over
+   the selected characters, measured. Text stays selectable, copyable and
+   searchable: only the paint is ours. */
+.diorama-code ::selection,
+.diorama-plaintext ::selection {
+  background: transparent;
+}
+
+.diorama-line[data-sel] {
+  position: relative;
+}
+
+.diorama-line[data-sel='full']::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--dio-selection);
+  pointer-events: none;
+}
+
+.diorama-line[data-sel='part']::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--dio-line-gutter, 0px) + var(--dio-sel-left, 0px));
+  width: var(--dio-sel-width, 0);
+  background: var(--dio-selection-soft);
+  pointer-events: none;
+}
+
+/* The revealed range (§3.9): one band per row, so a range needs no measuring. */
+.diorama-line__reveal {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+  background: var(--dio-reveal-bg);
+  border-top: 1px solid var(--dio-reveal-border);
+  border-bottom: 1px solid var(--dio-reveal-border);
+}
+
+/* "Go to line" flashes once and leaves nothing behind; a search hit keeps its
+   band (the reader came back to read the hit, not to be pointed at it). */
+.diorama-line__reveal--flash {
+  animation: diorama-line-flash 1.6s ease-out forwards;
+}
+
+@keyframes diorama-line-flash {
+  from {
+    background: var(--dio-reveal-bg);
+    border-color: var(--dio-reveal-border);
+  }
+  to {
+    background: transparent;
+    border-color: transparent;
+  }
 }
 
 .diorama-code .hljs-comment,
@@ -2243,21 +2393,18 @@ body.diorama-resizing {
   color: inherit;
 }
 
-/* The revealed line: a band drawn over the text renderer's `<pre>`. */
+/* The two text renderers fill the tab and scroll inside it. */
 .diorama-code-wrap,
 .diorama-plaintext-wrap {
   min-height: 100%;
 }
 
-.diorama-code__reveal,
-.diorama-plaintext__reveal {
-  position: absolute;
-  left: 0;
-  right: 0;
-  pointer-events: none;
-  background: var(--dio-reveal-bg);
-  border-top: 1px solid var(--dio-reveal-border);
-  border-bottom: 1px solid var(--dio-reveal-border);
+/* The reveal band is a row of the text (see "One row per line" above); this
+   keeps the flash still under `prefers-reduced-motion`. */
+@media (prefers-reduced-motion: reduce) {
+  .diorama-line__reveal--flash {
+    animation-duration: 0.01ms;
+  }
 }
 
 /* Icons (docs/m7/spec.md): button glyphs inherit the text colour, file glyphs

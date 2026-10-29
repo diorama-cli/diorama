@@ -18,6 +18,13 @@
 interface OverlayState {
   /** The id of the open overlay, if any (one at a time). */
   open: string | undefined
+  /**
+   * What the opener handed the overlay it is opening (v0.19): the palette is
+   * opened by `:` **with a query already typed**, and the query cannot live in
+   * the palette's own state — the opener is another half (§3.7). Absent for an
+   * overlay that was opened without one; cleared when the overlay closes.
+   */
+  payload: string | undefined
   listeners: Set<() => void>
 }
 
@@ -31,18 +38,22 @@ interface OverlayScope {
 
 function state(): OverlayState {
   const page = globalThis as unknown as OverlayScope
-  page.__diorama_overlay__ ??= { open: undefined, listeners: new Set() }
+  page.__diorama_overlay__ ??= { open: undefined, payload: undefined, listeners: new Set() }
   return page.__diorama_overlay__
 }
 
 /**
  * Open `id` and close whatever else was open (opening the open one is a
- * no-op). Readers subscribe through {@link overlayStore}.
+ * no-op). `payload` is what the opener wants the overlay to start with — the
+ * palette takes the text its field begins with. Readers subscribe through
+ * {@link overlayStore}; the payload is read once, through {@link overlayPayload}.
  */
-export function showOverlay(id: string): void {
+export function showOverlay(id: string, payload?: string): void {
   const current = state()
-  if (current.open === id) return
+  const next = payload === undefined ? undefined : payload
+  if (current.open === id && current.payload === next) return
   current.open = id
+  current.payload = next
   notify(current)
 }
 
@@ -51,6 +62,7 @@ export function hideOverlay(id: string): void {
   const current = state()
   if (current.open !== id) return
   current.open = undefined
+  current.payload = undefined
   notify(current)
 }
 
@@ -59,7 +71,17 @@ export function closeOverlay(): void {
   const current = state()
   if (current.open === undefined) return
   current.open = undefined
+  current.payload = undefined
   notify(current)
+}
+
+/**
+ * What the opener handed the open overlay, or `undefined`. Read it while the
+ * overlay opens (its own effect): the value is cleared as soon as it closes.
+ */
+export function overlayPayload(id: string): string | undefined {
+  const current = state()
+  return current.open === id ? current.payload : undefined
 }
 
 /** Whether `id` is the overlay that is up right now. */
@@ -68,9 +90,9 @@ export function overlayOpen(id: string): boolean {
 }
 
 /** Toggle one overlay: opening it closes the others. */
-export function toggleOverlay(id: string): void {
+export function toggleOverlay(id: string, payload?: string): void {
   if (overlayOpen(id)) hideOverlay(id)
-  else showOverlay(id)
+  else showOverlay(id, payload)
 }
 
 /**

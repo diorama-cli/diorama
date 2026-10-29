@@ -10,6 +10,11 @@
  * Only commands that are executable *now* are listed (contract.md §3.7): the
  * palette never shows a row that would do nothing.
  *
+ * A query that starts with `:` is not a command search — it is **go to line**
+ * (§3.11): `:42`, `:42-60`. The palette is where a reader already looks for
+ * "somewhere I can type at", so the line jump lives here rather than in a second
+ * input; `:` itself is a shortcut that opens this palette with the colon typed.
+ *
  * Whether it is open is page state shared with the other overlays (v0.7): the
  * seat is a list, so the palette and the shortcut sheet take turns. That state
  * lives on the page global (`overlayStore` in `diorama-ui`), not in a module
@@ -18,8 +23,8 @@
  */
 import type { Context } from 'cordis'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import type { CommandsService } from 'diorama-kernel/client'
-import { hideOverlay, overlayStore, provideEntry, showOverlay, toggleOverlay, useKernel } from 'diorama-ui'
+import type { CommandsService, TabsService } from 'diorama-kernel/client'
+import { formatLineSpec, hideOverlay, overlayPayload, overlayStore, parseLineSpec, provideEntry, reveal, showOverlay, toggleOverlay, useKernel, useStore, type LineTarget } from 'diorama-ui'
 
 export const name = 'palette'
 export const inject = ['slots']
@@ -53,15 +58,18 @@ function Palette() {
   const kernel = useKernel()
   const commands = kernel.ctx.commands as unknown as CommandsService
   const snapshot = useSyncExternalStore(commands.subscribe, commands.getSnapshot, commands.getSnapshot)
+  const tabs = tabsOf(kernel.ctx)
+  const activePath = useActivePath(tabs)
   const open = useOpen()
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState(0)
   const input = useRef<HTMLInputElement | null>(null)
 
-  // Reset the query each time it opens, and focus its field.
+  // Reset the query each time it opens, and focus its field. The opener may
+  // hand one in — `:` opens the palette with the colon already typed (§3.11).
   useEffect(() => {
     if (!open) return
-    setQuery('')
+    setQuery(overlayPayload(OVERLAY_ID) ?? '')
     setSelected(0)
     const timer = setTimeout(() => input.current?.focus(), 0)
     return () => clearTimeout(timer)
@@ -69,10 +77,19 @@ function Palette() {
 
   if (!open) return null
 
-  const rows = snapshot.commands
-    .filter(command => commands.canRun(command.id))
-    .filter(command => query === '' || fuzzy(command.title, query) || fuzzy(command.id, query))
-    .sort((a, b) => a.title.localeCompare(b.title, 'zh-Hans-CN'))
+  // `:` is go-to-line, not a command search (§3.11): the text after the colon
+  // is a line or a range, and the list becomes the one thing Enter can do.
+  const lineQuery = query.startsWith(':') ? parseLineSpec(query.slice(1)) : undefined
+  const goToLine = query.startsWith(':')
+  const lineTarget: LineTarget | undefined = goToLine ? lineQuery : undefined
+  const canJump = lineTarget !== undefined && activePath !== undefined
+
+  const rows = goToLine
+    ? []
+    : snapshot.commands
+      .filter(command => commands.canRun(command.id))
+      .filter(command => query === '' || fuzzy(command.title, query) || fuzzy(command.id, query))
+      .sort((a, b) => a.title.localeCompare(b.title, 'zh-Hans-CN'))
   const active = Math.min(selected, Math.max(rows.length - 1, 0))
 
   /**
@@ -94,6 +111,17 @@ function Palette() {
   const run = (id: string): void => {
     setOpen(false)
     void commands.run(id)
+  }
+
+  /**
+   * Go to line (§3.11): the line travels through the reveal store, which the
+   * text renderer follows (a tab carries a path only, §3.4). A line past the
+   * end lands on the last one — see `clampTarget`.
+   */
+  const jump = (target: LineTarget): void => {
+    if (activePath === undefined) return
+    setOpen(false)
+    reveal(activePath, target.start, { endLine: target.end, flash: true })
   }
 
   const move = (delta: number): void => {
@@ -129,11 +157,36 @@ function Palette() {
               move(-1)
             } else if (event.key === 'Enter') {
               event.preventDefault()
+              if (goToLine) {
+                if (lineTarget !== undefined) jump(lineTarget)
+                return
+              }
               const target = rows[active]
               if (target !== undefined) run(target.id)
             }
           }}
         />
+        {goToLine ? (
+          <ul className="diorama-palette__list" role="listbox">
+            {canJump ? (
+              <li
+                role="option"
+                aria-selected
+                className="diorama-palette__item diorama-palette__item--active"
+                data-testid="palette-goto-line"
+                data-line={formatLineSpec(lineTarget as LineTarget)}
+                onClick={() => jump(lineTarget as LineTarget)}
+              >
+                <span className="diorama-palette__title">跳转到第 {formatLineSpec(lineTarget as LineTarget)} 行</span>
+                <span className="diorama-palette__id">{activePath}</span>
+              </li>
+            ) : (
+              <li className="diorama-palette__empty" data-testid="palette-goto-line-empty">
+                {lineTarget === undefined ? '输入行号，例如 :42 或 :42-60' : '没有打开的文件，无法跳转'}
+              </li>
+            )}
+          </ul>
+        ) : (
         <ul className="diorama-palette__list" role="listbox">
           {rows.map((command, index) => {
             const keys = keysFor(command.id)
@@ -171,9 +224,26 @@ function Palette() {
             </li>
           )}
         </ul>
+        )}
       </div>
     </div>
   )
+}
+
+/** `ctx.tabs` when this page has one (the palette works without it). */
+function tabsOf(ctx: Context): TabsService | undefined {
+  try {
+    return (ctx as unknown as { tabs?: TabsService }).tabs
+  } catch {
+    return undefined
+  }
+}
+
+/** The path of the active tab: what `:42` jumps inside (§3.11). */
+function useActivePath(tabs: TabsService | undefined): string | undefined {
+  const snapshot = tabs === undefined ? undefined : useStore(tabs)
+  if (snapshot === undefined) return undefined
+  return snapshot.tabs.find(tab => tab.id === snapshot.activeId)?.path
 }
 
 export function apply(ctx: Context) {
@@ -192,6 +262,15 @@ export function apply(ctx: Context) {
     run: () => toggleOverlay(OVERLAY_ID),
   })
   commands.bind({ keys: 'mod+k', command: 'palette.toggle' })
+  // Go to line (§3.11): the palette opened **with the colon typed**, so the
+  // reader lands in the one mode that is about a line. `:shift+;` because the
+  // binding spells the keycap, and ⇧; is what types a colon (see `SHIFTED`).
+  commands.register({
+    id: 'palette.goToLine',
+    title: '跳转到行…',
+    run: () => showOverlay(OVERLAY_ID, ':'),
+  })
+  commands.bind({ keys: 'shift+;', command: 'palette.goToLine' })
 }
 
 /**

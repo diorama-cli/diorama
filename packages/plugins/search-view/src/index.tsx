@@ -29,7 +29,7 @@ import type { FileInfo, MountHandle } from 'diorama-kernel/client'
 import type { SearchOptions, SearchResult } from 'diorama-kernel/client'
 import type { TabsService } from 'diorama-kernel/client'
 import { fuzzyMatch } from 'diorama-kernel/client'
-import { closeOverlay, FileIcon, hideOverlay, Icon, iconSvg, overlayStore, provideEntry, reveal, toggleOverlay, useKernel } from 'diorama-ui'
+import { closeOverlay, FileIcon, formatLineSpec, hideOverlay, Icon, iconSvg, overlayStore, provideEntry, reveal, splitLineSuffix, toggleOverlay, useKernel, useStore, type LineTarget } from 'diorama-ui'
 import type {} from 'diorama-plugin-slots'
 import { flattenResult, highlightPositions, highlightRange, splitPath, summarize, type ResultRow } from './results.ts'
 
@@ -103,10 +103,21 @@ function tabsOf(ctx: Context): TabsService | undefined {
 }
 
 /** Open a file at a line: the tab first, the reveal second (the renderer is not mounted yet). */
-function openAt(tabs: TabsService | undefined, path: string, line?: number, column?: number, length?: number): void {
+function openAt(
+  tabs: TabsService | undefined,
+  path: string,
+  target?: LineTarget,
+  options: { column?: number; length?: number; flash?: boolean } = {},
+): void {
   if (tabs === undefined) return
   tabs.open(fileOf(path))
-  if (line !== undefined) reveal(path, line, column, length)
+  if (target === undefined) return
+  reveal(path, target.start, {
+    endLine: target.end,
+    ...(options.column === undefined ? {} : { column: options.column }),
+    ...(options.length === undefined ? {} : { length: options.length }),
+    ...(options.flash === undefined ? {} : { flash: options.flash }),
+  })
 }
 
 function Segments({ segments }: { segments: ReturnType<typeof highlightRange> }) {
@@ -184,7 +195,13 @@ function SearchView({ active }: { active: boolean }) {
 
   const pick = (row: ResultRow): void => {
     const match = row.match
-    openAt(tabs, row.path, match?.line, match?.column, match?.length)
+    const line = match?.line
+    // A hit keeps its band (the reader came back to read it); only "go to
+    // line" flashes (§3.11).
+    openAt(tabs, row.path, line === undefined ? undefined : { start: line, end: line }, {
+      ...(match?.column === undefined ? {} : { column: match.column }),
+      ...(match?.length === undefined ? {} : { length: match.length }),
+    })
   }
 
   // Focusing the field when the view becomes active is what makes `mod+alt+4`
@@ -321,6 +338,18 @@ function SearchView({ active }: { active: boolean }) {
   )
 }
 
+/** One row of the quick-open list: a file, or a line of the file being read. */
+type QuickItem =
+  | { kind: 'file'; path: string; positions: number[] }
+  | { kind: 'line'; path: string; target: LineTarget }
+
+/** The path of the active tab, for `:42` with no file named (contract.md §3.11). */
+function useActivePath(tabs: TabsService | undefined): string | undefined {
+  const snapshot = tabs === undefined ? undefined : useStore(tabs)
+  if (snapshot === undefined) return undefined
+  return snapshot.tabs.find(tab => tab.id === snapshot.activeId)?.path
+}
+
 /** Whether the quick-open overlay is the one that is up (a primitive snapshot). */
 function useQuickOpen(): boolean {
   return useSyncExternalStore(overlayStore.subscribe, overlayStore.getSnapshot, overlayStore.getSnapshot) === QUICK_OPEN_ID
@@ -336,6 +365,7 @@ function useQuickOpen(): boolean {
 function QuickOpen() {
   const { mount, ctx } = useKernel()
   const tabs = tabsOf(ctx)
+  const activePath = useActivePath(tabs)
   const open = useQuickOpen()
   const [query, setQuery] = useState('')
   const [paths, setPaths] = useState<readonly string[] | undefined>(undefined)
@@ -367,27 +397,49 @@ function QuickOpen() {
     }
   }, [open, mount])
 
+  // `path:42` / `path:42-60` names a line as well as a file (§3.11): the filter
+  // runs on the path half, the suffix rides along to the reveal store. A colon
+  // that is not a line suffix stays part of the name (a path may have one).
+  const { path: wanted, target } = splitLineSuffix(query)
   const rows = useMemo(() => {
     if (paths === undefined) return []
     const scored: { path: string; score: number; positions: number[] }[] = []
     for (const path of paths) {
-      const match = query === '' ? { positions: [] as number[], score: 0 } : fuzzyMatch(path, query)
+      const match = wanted === '' ? { positions: [] as number[], score: 0 } : fuzzyMatch(path, wanted)
       if (match === undefined) continue
       scored.push({ path, score: match.score, positions: match.positions })
     }
     scored.sort((a, b) => b.score - a.score || a.path.localeCompare(b.path))
     return scored.slice(0, QUICK_OPEN_LIMIT)
-  }, [paths, query])
+  }, [paths, wanted])
+
+  /**
+   * `:42` with no file named is "line 42 of the file I am reading" — the same
+   * promise the palette's `:` makes (§3.7) — so it is a row of its own, ahead
+   * of the file list, and it needs no listing to be useful.
+   */
+  const lineItem: QuickItem | undefined =
+    target !== undefined && wanted === '' && activePath !== undefined
+      ? { kind: 'line', path: activePath, target }
+      : undefined
+  const items = useMemo<QuickItem[]>(
+    () => [
+      ...(lineItem === undefined ? [] : [lineItem]),
+      ...rows.map(row => ({ kind: 'file' as const, path: row.path, positions: row.positions })),
+    ],
+    [lineItem, rows],
+  )
 
   if (!open) return null
-  const active = Math.min(selected, Math.max(rows.length - 1, 0))
-  const run = (path: string): void => {
+  const active = Math.min(selected, Math.max(items.length - 1, 0))
+  const run = (item: QuickItem): void => {
     hideOverlay(QUICK_OPEN_ID)
-    openAt(tabs, path)
+    // A line asked for by name flashes once (§3.11); a plain file opens.
+    openAt(tabs, item.path, item.kind === 'line' ? item.target : target, { flash: true })
   }
   const move = (delta: number): void => {
-    if (rows.length === 0) return
-    setSelected((active + delta + rows.length) % rows.length)
+    if (items.length === 0) return
+    setSelected((active + delta + items.length) % items.length)
   }
 
   return (
@@ -416,33 +468,53 @@ function QuickOpen() {
               move(-1)
             } else if (event.key === 'Enter') {
               event.preventDefault()
-              const target = rows[active]
-              if (target !== undefined) run(target.path)
+              const item = items[active]
+              if (item !== undefined) run(item)
             }
           }}
         />
         <ul className="diorama-palette__list" role="listbox">
-          {rows.map((row, index) => {
-            const { dir, name } = splitPath(row.path)
+          {items.map((item, index) => {
+            const { dir, name } = splitPath(item.path)
+            if (item.kind === 'line') {
+              return (
+                <li
+                  key="line"
+                  role="option"
+                  aria-selected={index === active}
+                  className={`diorama-palette__item${index === active ? ' diorama-palette__item--active' : ''}`}
+                  data-path={item.path}
+                  data-line={formatLineSpec(item.target)}
+                  data-testid="quick-open-line"
+                  onMouseEnter={() => setSelected(index)}
+                  onClick={() => run(item)}
+                >
+                  <span className="diorama-search__name">
+                    跳转到第 {formatLineSpec(item.target)} 行
+                  </span>
+                  <span className="diorama-palette__id">{item.path}</span>
+                </li>
+              )
+            }
             return (
               <li
-                key={row.path}
+                key={item.path}
                 role="option"
                 aria-selected={index === active}
                 className={`diorama-palette__item${index === active ? ' diorama-palette__item--active' : ''}`}
-                data-path={row.path}
+                data-path={item.path}
                 data-testid="quick-open-row"
                 onMouseEnter={() => setSelected(index)}
-                onClick={() => run(row.path)}
+                onClick={() => run(item)}
               >
                 <span className="diorama-search__name">
-                  <Segments segments={highlightPositions(name, row.positions.filter(position => position >= row.path.length - name.length).map(position => position - (row.path.length - name.length)))} />
+                  <Segments segments={highlightPositions(name, item.positions.filter(position => position >= item.path.length - name.length).map(position => position - (item.path.length - name.length)))} />
                 </span>
                 <span className="diorama-palette__id">{dir}</span>
               </li>
             )
           })}
-          {rows.length === 0 && paths !== undefined ? (
+          {items.length === 0 && paths !== undefined ? (
             <li className="diorama-palette__empty" data-testid="quick-open-empty">
               没有匹配的文件
             </li>
