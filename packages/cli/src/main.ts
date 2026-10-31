@@ -6,7 +6,7 @@
  * directory, print the URL, exit. `--foreground` runs the gateway in this
  * process instead (the debug/test form).
  */
-import { resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import {
   ConfigError,
   dioramaHome,
@@ -135,9 +135,13 @@ async function gatewayCommand(io: CliIo, argv: readonly string[]): Promise<numbe
           pid: number
           state: string
           mounts: MountStatus[]
+          index?: string
         }
         io.out(`gateway running (pid ${status.pid})${status.state === 'degraded' ? ' — degraded' : ''}`)
         io.out(`  socket: ${socketPath(io.env)}`)
+        // The index page is the one address that survives a restart
+        // (contract.md §7.7); "off" says why there is none.
+        io.out(`  index:  ${status.index ?? 'off (set [gateway] port in ' + join(dioramaHome(io.env), 'diorama.toml') + ')'}`)
         io.out(`  mounts: ${status.mounts.length}`)
         for (const mount of status.mounts) {
           io.out(`  [${mount.mountId}] ${mount.state} ${mount.url} ${mount.root}`)
@@ -413,6 +417,12 @@ function reportFailure(io: CliIo, failure: unknown): number {
   const code = (failure as { code?: string }).code
   const message = failure instanceof Error ? failure.message : String(failure)
   const clean = code !== undefined && message.startsWith(`${code}: `) ? message.slice(code.length + 2) : message
+  // A broken `diorama.toml` is a usage error (contract.md §7.6: exit 2), even
+  // when the file is the global one the gateway reads for its index page.
+  if (failure instanceof ConfigError) {
+    io.err(`${cliName(io)}: ${message}`)
+    return 2
+  }
   switch (code) {
     case 'EADDRINUSE':
     case 'ENOMOUNT':

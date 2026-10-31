@@ -111,6 +111,15 @@ export function parseConfigValue(key: string, raw: string): unknown {
       if (value === undefined) throw new UsageError(`--${key} must be true or false (got "${raw}")`)
       return value
     }
+    case 'gateway.host': {
+      const value = raw.trim()
+      if (value === '') throw new UsageError('--gateway.host must not be empty')
+      return value
+    }
+    case 'gateway.port':
+      // 0 is "no index page", which is why this one is documented with the
+      // other numbers instead of hiding behind a flag (contract.md §7.7).
+      return parseInteger(key, raw, 0, 65_535)
     case 'ui.theme': {
       const value = raw.trim()
       if (value === '') throw new UsageError('--ui.theme must not be empty')
@@ -164,7 +173,9 @@ function menuFor(field: WizardField, current: unknown, defaults: EffectiveConfig
     case 'host': {
       const value = String(current ?? field.fallback(defaults))
       return {
-        title: 'host — where the page listens',
+        // `host` and `gateway.host` are both "which interface"; the hint says
+        // which page each one is about (contract.md §4.1, §7.7).
+        title: `${field.key} — ${field.hint}`,
         candidates: hostCandidates(interfaces, value),
         multi: false,
         selected: [value],
@@ -237,7 +248,7 @@ function showList(value: unknown): string {
 const FIELDS: readonly WizardField[] = [
   {
     key: 'host',
-    hint: 'loopback only; widen it on purpose',
+    hint: 'where the page listens (loopback unless widened)',
     fallback: defaults => defaults.host,
     parse: raw => parseConfigValue('host', raw),
     menu: 'host',
@@ -297,6 +308,22 @@ const FIELDS: readonly WizardField[] = [
     parse: raw => parseConfigValue('ui.theme', raw),
     menu: 'theme',
   },
+  // The gateway's own address (contract.md §7.7). It is asked last because it
+  // is not about the served directory: it decides the machine-wide index page,
+  // and 0 (the default) means there is none.
+  {
+    key: 'gateway.host',
+    hint: 'where the index page listens (loopback unless widened)',
+    fallback: defaults => defaults.gateway.host,
+    parse: raw => parseConfigValue('gateway.host', raw),
+    menu: 'host',
+  },
+  {
+    key: 'gateway.port',
+    hint: '0 = no index page; the page lists every mount and opens it in a new window',
+    fallback: defaults => defaults.gateway.port,
+    parse: raw => parseConfigValue('gateway.port', raw),
+  },
 ]
 
 /** One change the wizard made, for the summary printed before writing. */
@@ -332,7 +359,9 @@ export async function runWizard(
   const apply = (field: WizardField, value: unknown): void => {
     next = patchFileConfig(next, { [field.key]: value }, 'config')
     changes.push({ key: field.key, value, cleared: false })
-    if (field.key === 'host' && typeof value === 'string' && isExposed(value)) {
+    // Both hosts are "reachable from the network" when they are not loopback;
+    // the warning names the field so the reader knows which page it widens.
+    if (field.key.endsWith('host') && typeof value === 'string' && isExposed(value)) {
       options.out('  ! reachable from other machines on this network')
     }
   }
@@ -716,11 +745,16 @@ Keys for set/unset:
   watch.maxDirectories    --watch.maxDirectories 64
   html.scripts            --html.scripts true   (an HTML preview runs its scripts)
   ui.theme                --ui.theme dark       (system / light / dark / a theme id)
+  gateway.host            --gateway.host 127.0.0.1
+  gateway.port            --gateway.port 7777   (0 = no index page)
 
 Where it writes:
   no --dir/--config       $DIORAMA_HOME/diorama.toml (the global default)
   --dir <dir>             <dir>/diorama.toml
   --config <path>         exactly that file
+
+The gateway reads [gateway] from $DIORAMA_HOME/diorama.toml only: it is one
+process for the whole machine, so a served directory cannot set its port.
 
 Environment:
   DIORAMA_HOME            state directory (default ~/.diorama)

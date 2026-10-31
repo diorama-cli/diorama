@@ -111,6 +111,20 @@ test('config value grammar: ui.theme takes the three built-ins or a theme id', (
   assert.throws(() => parseConfigValue('ui.theme', 'has:colon'), /--ui\.theme must match/)
 })
 
+test('config value grammar: the gateway index page takes a host and a port (0 = off)', () => {
+  assert.equal(parseConfigValue('gateway.port', '7777'), 7777)
+  assert.equal(parseConfigValue('gateway.port', '0'), 0)
+  assert.equal(parseConfigValue('gateway.host', ' 0.0.0.0 '), '0.0.0.0')
+  for (const [key, raw] of [
+    ['gateway.port', '70000'],
+    ['gateway.port', '-1'],
+    ['gateway.port', 'seventy'],
+    ['gateway.host', '   '],
+  ] as const) {
+    assert.throws(() => parseConfigValue(key, raw), UsageError, `${key}=${raw} must be rejected`)
+  }
+})
+
 test('config value grammar: unknown keys are rejected with the known list', () => {
   assert.throws(() => parseConfigValue('colour', 'red'), /unknown key "colour".*watch\.maxDirectories/)
   assert.throws(() => parseConfigValue('host', '  '), /must not be empty/)
@@ -127,7 +141,10 @@ test('wizard: Enter keeps a field, a typed value replaces it, "-" clears it', as
   const seen: string[] = []
   const result = await runWizard(
     { port: 4000, ignore: ['dist'] },
-    scripted(['', '8080', '', '-', '2', '', '', '', '']),
+    // One answer per field: host(menu), port, plugins(menu), ignore(menu),
+    // watch.enabled(menu), debounceMs, maxDirectories, html.scripts(menu),
+    // ui.theme(menu), gateway.host(menu), gateway.port.
+    scripted(['', '8080', '', '-', '2', '', '', '', '', '', '']),
     { defaults: defaultConfig(), out: message => seen.push(message) },
   )
   assert.deepEqual(result.config, {
@@ -149,8 +166,9 @@ test('wizard: Enter keeps a field, a typed value replaces it, "-" clears it', as
 test('wizard: a value the file would reject re-asks instead of aborting', async () => {
   const seen: string[] = []
   // host(menu) '', port 'eighty' then '9090', plugins(menu) '', ignore(menu) '',
-  // watch.enabled(menu) '', debounce '', maxDirectories '', html.scripts(menu) ''.
-  const answers = ['', 'eighty', '9090', '', '', '', '', '', '', '']
+  // watch.enabled(menu) '', debounce '', maxDirectories '', html.scripts(menu) '',
+  // ui.theme(menu) '', gateway.host(menu) '', gateway.port ''.
+  const answers = ['', 'eighty', '9090', '', '', '', '', '', '', '', '', '']
   let index = 0
   const questions: string[] = []
   const result = await runWizard(
@@ -176,7 +194,7 @@ test('wizard: a value the file would reject re-asks instead of aborting', async 
 })
 
 test('wizard: nothing typed writes nothing', async () => {
-  const result = await runWizard({ port: 4000 }, scripted(['', '', '', '', '', '', '', '', '']), {
+  const result = await runWizard({ port: 4000 }, scripted(['', '', '', '', '', '', '', '', '', '', '']), {
     defaults: defaultConfig(),
     out: () => {},
   })
@@ -207,10 +225,11 @@ test('wizard: numeric fields ask for a number; only listed fields open a menu', 
     },
     { defaults: defaultConfig(), out: () => {} },
   )
-  // The four fields with sensible candidates are menus; the three numeric ones
-  // stay plain questions — a typed number is a number, never "item N".
+  // The fields with sensible candidates are menus; the numeric ones stay plain
+  // questions — a typed number is a number, never "item N". The gateway's own
+  // address is asked last: it is about the machine, not the served directory.
   assert.deepEqual(asked, [
-    'host — where the page listens',
+    'host — where the page listens (loopback unless widened)',
     '  port [4000] (file, 0 = a free port): ',
     'plugins — client pieces, in boot order',
     'ignore — hidden patterns (gitignore syntax)',
@@ -219,6 +238,8 @@ test('wizard: numeric fields ask for a number; only listed fields open a menu', 
     '  watch.maxDirectories [64] (default, 1–4096): ',
     "html.scripts — true = an HTML preview runs the page's scripts without asking",
     'ui.theme — the theme a page starts with (system / light / dark / a theme id)',
+    'gateway.host — where the index page listens (loopback unless widened)',
+    '  gateway.port [0] (default, 0 = no index page; the page lists every mount and opens it in a new window): ',
   ])
   assert.equal(result.changed, false)
 })
@@ -267,13 +288,18 @@ test('wizard: drawing goes through the raw sink, so a redraw replaces a frame', 
     input.send = text => (input as unknown as EventEmitter).emit('data', Buffer.from(text, 'utf8'))
     input.end = () => (input as unknown as EventEmitter).emit('end')
 
+    // The first field's menu title (the menu is drawn before any answer).
+    const first = 'host — where the page listens'
     const running = configCommand(io, ['--dir', project], { stdin: input })
-    await until(lines, text => text.includes('host — where the page listens'))
+    await until(lines, text => text.includes(first))
     // Move down once: the frame is redrawn, not appended.
     input.send('\x1b[B')
-    await until(lines, text => text.split('host — where the page listens').length > 2)
+    await until(lines, text => text.split(first).length > 2)
     // Then keep every field, and decline the write once the preview asks.
-    for (const key of ['\r', '\r', '\r', '\r', '\r', '\r', '\r', '\r', '\r', 'n\r']) {
+    // One Enter per field (see FIELDS: host, port, plugins, ignore, the three
+    // watch fields, html.scripts, ui.theme, and the gateway's host and port).
+    const keeps = Array.from({ length: 11 }, () => '\r')
+    for (const key of [...keeps, 'n\r']) {
       input.send(key)
       await new Promise(done => setImmediate(done))
     }
@@ -283,7 +309,7 @@ test('wizard: drawing goes through the raw sink, so a redraw replaces a frame', 
     // One cursor-up per redraw, and the title is written once per frame — the
     // bug was `io.out` adding a newline after every escape, which made each
     // frame land below the last one.
-    const frames = written.split('host — where the page listens').length - 1
+    const frames = written.split(first).length - 1
     assert.equal(frames, 2, `expected 2 frames (initial + one redraw), got ${frames}`)
     assert.match(written, /\x1b\[\d+A\x1b\[J/, 'a redraw must move up before erasing')
     // No stray newline between the cursor-up and the erase.

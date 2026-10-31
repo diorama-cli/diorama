@@ -57,6 +57,15 @@ export interface EffectiveConfig {
      */
     theme: string
   }
+  /**
+   * The gateway's own index page (contract.md §7.7): one HTML page listing
+   * every mount with its directory and URL. `port: 0` is **off** — a random
+   * port would be a page nobody can find, which is not what a bookmark is.
+   */
+  gateway: {
+    host: string
+    port: number
+  }
 }
 
 /** What a `diorama.toml` may say (every field optional). */
@@ -69,6 +78,7 @@ export interface FileConfig {
   git?: { maxDepth?: number; maxRepos?: number; ignore?: string[] }
   html?: { scripts?: boolean }
   ui?: { theme?: string }
+  gateway?: { host?: string; port?: number }
 }
 
 /** Where the configuration came from. */
@@ -119,6 +129,9 @@ export function defaultConfig(): EffectiveConfig {
     // A fresh page follows the system scheme; the file can pin a start
     // (contract.md §4.1, §3.10).
     ui: { theme: DEFAULT_THEME_PREFERENCE },
+    // The index page is off unless a port is named (contract.md §7.7): a
+    // random port would be an address nobody can keep.
+    gateway: { host: '127.0.0.1', port: 0 },
   }
 }
 
@@ -128,11 +141,12 @@ export function dioramaHome(env: NodeJS.ProcessEnv = process.env): string {
   return home !== undefined && home !== '' ? resolve(home) : join(homedir(), '.diorama')
 }
 
-const ROOT_KEYS = new Set(['host', 'port', 'plugins', 'ignore', 'watch', 'git', 'html', 'ui'])
+const ROOT_KEYS = new Set(['host', 'port', 'plugins', 'ignore', 'watch', 'git', 'html', 'ui', 'gateway'])
 const WATCH_KEYS = new Set(['debounceMs', 'enabled', 'maxDirectories'])
 const GIT_KEYS = new Set(['maxDepth', 'maxRepos', 'ignore'])
 const HTML_KEYS = new Set(['scripts'])
 const UI_KEYS = new Set(['theme'])
+const GATEWAY_KEYS = new Set(['host', 'port'])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -247,6 +261,29 @@ export function validateFileConfig(raw: unknown, where: string): FileConfig {
     }
     out.ui = ui
   }
+  if (raw.gateway !== undefined) {
+    if (!isRecord(raw.gateway)) throw new ConfigError(`${where}: "gateway" must be a table`)
+    for (const key of Object.keys(raw.gateway)) {
+      if (!GATEWAY_KEYS.has(key)) {
+        throw new ConfigError(`${where}: unknown key "gateway.${key}" (known: ${[...GATEWAY_KEYS].join(', ')})`)
+      }
+    }
+    const gateway: NonNullable<FileConfig['gateway']> = {}
+    if (raw.gateway.host !== undefined) {
+      if (typeof raw.gateway.host !== 'string' || raw.gateway.host.trim() === '') {
+        throw new ConfigError(`${where}: "gateway.host" must be a non-empty string`)
+      }
+      gateway.host = raw.gateway.host
+    }
+    if (raw.gateway.port !== undefined) {
+      const value = raw.gateway.port
+      if (!Number.isInteger(value) || (value as number) < 0 || (value as number) > 65_535) {
+        throw new ConfigError(`${where}: "gateway.port" must be an integer 0-65535 (0 = no index page)`)
+      }
+      gateway.port = value as number
+    }
+    out.gateway = gateway
+  }
   return out
 }
 
@@ -314,6 +351,10 @@ export function mergeConfig(file: FileConfig, cli: ResolveOptions['cli'] = {}): 
     ui: {
       theme: file.ui?.theme ?? base.ui.theme,
     },
+    gateway: {
+      host: file.gateway?.host ?? base.gateway.host,
+      port: file.gateway?.port ?? base.gateway.port,
+    },
   }
 }
 
@@ -323,23 +364,50 @@ export function resolveConfig(options: ResolveOptions): { config: EffectiveConfi
   return { config: mergeConfig(config, options.cli), origin }
 }
 
+/**
+ * The gateway's own settings (contract.md §7.7).
+ *
+ * Read from **`$DIORAMA_HOME/diorama.toml` only**, never from a served
+ * directory: one gateway process serves every mount on the machine, so a
+ * project file must not decide a machine-wide port. `diorama <dir>` in a
+ * directory that happens to set `[gateway]` therefore changes nothing.
+ *
+ * A missing file means defaults (`port = 0` = the index page is off); a
+ * broken one fails loud, like every other read of this file.
+ */
+export function resolveGatewayConfig(options: {
+  home?: string
+  exists?: (path: string) => boolean
+  readFile?: (path: string) => string
+} = {}): { gateway: EffectiveConfig['gateway']; origin: ConfigOrigin } {
+  const path = join(options.home ?? dioramaHome(), CONFIG_FILE)
+  const file = readFileConfig({
+    path,
+    ...(options.exists === undefined ? {} : { exists: options.exists }),
+    ...(options.readFile === undefined ? {} : { readFile: options.readFile }),
+  })
+  return { gateway: mergeConfig(file).gateway, origin: file.gateway === undefined ? {} : { path } }
+}
+
 // --- Writing a `diorama.toml` (contract.md §4.2) ---------------------------
 
 /**
  * The keys a written file may carry, in the order they are emitted: the order
  * of the example in contract.md §4.1, so a written file reads like the docs.
  */
-export const CONFIG_KEYS = ['host', 'port', 'plugins', 'ignore', 'watch', 'git', 'html', 'ui'] as const
+export const CONFIG_KEYS = ['host', 'port', 'plugins', 'ignore', 'watch', 'git', 'html', 'ui', 'gateway'] as const
 export const WATCH_CONFIG_KEYS = ['debounceMs', 'enabled', 'maxDirectories'] as const
 export const GIT_CONFIG_KEYS = ['maxDepth', 'maxRepos', 'ignore'] as const
 export const HTML_CONFIG_KEYS = ['scripts'] as const
 export const UI_CONFIG_KEYS = ['theme'] as const
+export const GATEWAY_CONFIG_KEYS = ['host', 'port'] as const
 
 export type ConfigKey = (typeof CONFIG_KEYS)[number]
 export type WatchConfigKey = (typeof WATCH_CONFIG_KEYS)[number]
 export type GitConfigKey = (typeof GIT_CONFIG_KEYS)[number]
 export type HtmlConfigKey = (typeof HTML_CONFIG_KEYS)[number]
 export type UiConfigKey = (typeof UI_CONFIG_KEYS)[number]
+export type GatewayConfigKey = (typeof GATEWAY_CONFIG_KEYS)[number]
 
 /**
  * One field to write. `watch.*` is addressed as a dotted key (`watch.enabled`),
@@ -347,12 +415,34 @@ export type UiConfigKey = (typeof UI_CONFIG_KEYS)[number]
  */
 export type ConfigPatch = Record<string, unknown>
 
+/** The sub-tables a dotted key may address (`watch.enabled`, `gateway.port`, ...). */
+const TABLES = ['watch', 'git', 'html', 'ui', 'gateway'] as const
+type TableKey = (typeof TABLES)[number]
+
+/** The known keys of one sub-table, or `undefined` when it is not a table. */
+function tableKeys(table: string): readonly string[] | undefined {
+  switch (table) {
+    case 'watch':
+      return WATCH_CONFIG_KEYS
+    case 'git':
+      return GIT_CONFIG_KEYS
+    case 'html':
+      return HTML_CONFIG_KEYS
+    case 'ui':
+      return UI_CONFIG_KEYS
+    case 'gateway':
+      return GATEWAY_CONFIG_KEYS
+    default:
+      return undefined
+  }
+}
+
 /** Read one field from a file config (dotted keys address `watch.*`). */
 export function readConfigValue(config: FileConfig, key: string): unknown {
   const [head, tail] = key.split('.')
   if (tail !== undefined) {
-    if (head !== 'watch' && head !== 'git' && head !== 'html' && head !== 'ui') return undefined
-    return (config[head] as Record<string, unknown> | undefined)?.[tail]
+    if (!(TABLES as readonly string[]).includes(head as string)) return undefined
+    return (config[head as TableKey] as Record<string, unknown> | undefined)?.[tail]
   }
   return (config as Record<string, unknown>)[head as string]
 }
@@ -371,18 +461,11 @@ export function patchFileConfig(base: FileConfig, patch: ConfigPatch, where = 'c
   if (next.git !== undefined) next.git = { ...(next.git as Record<string, unknown>) }
   if (next.html !== undefined) next.html = { ...(next.html as Record<string, unknown>) }
   if (next.ui !== undefined) next.ui = { ...(next.ui as Record<string, unknown>) }
+  if (next.gateway !== undefined) next.gateway = { ...(next.gateway as Record<string, unknown>) }
   for (const [key, value] of Object.entries(patch)) {
     const [head = '', tail] = key.split('.')
     if (tail !== undefined) {
-      const table = head === 'watch'
-        ? WATCH_CONFIG_KEYS
-        : head === 'git'
-          ? GIT_CONFIG_KEYS
-          : head === 'html'
-            ? HTML_CONFIG_KEYS
-            : head === 'ui'
-              ? UI_CONFIG_KEYS
-              : undefined
+      const table = tableKeys(head)
       if (table === undefined || !(table as readonly string[]).includes(tail)) {
         throw new ConfigError(`${where}: unknown key "${key}" (known: ${knownKeys().join(', ')})`)
       }
@@ -405,11 +488,12 @@ export function patchFileConfig(base: FileConfig, patch: ConfigPatch, where = 'c
 /** Every addressable key, for messages: `host, port, plugins, ignore, watch.debounceMs, …`. */
 export function knownKeys(): string[] {
   return [
-    ...CONFIG_KEYS.filter(key => key !== 'watch' && key !== 'git' && key !== 'html' && key !== 'ui'),
+    ...CONFIG_KEYS.filter(key => tableKeys(key) === undefined),
     ...WATCH_CONFIG_KEYS.map(key => `watch.${key}`),
     ...GIT_CONFIG_KEYS.map(key => `git.${key}`),
     ...HTML_CONFIG_KEYS.map(key => `html.${key}`),
     ...UI_CONFIG_KEYS.map(key => `ui.${key}`),
+    ...GATEWAY_CONFIG_KEYS.map(key => `gateway.${key}`),
   ]
 }
 
@@ -453,6 +537,12 @@ export function formatFileConfig(config: FileConfig): string {
     if (value !== undefined) ui[key] = value
   }
   if (Object.keys(ui).length > 0) table.ui = ui
+  const gateway: Record<string, unknown> = {}
+  for (const key of GATEWAY_CONFIG_KEYS) {
+    const value = config.gateway?.[key]
+    if (value !== undefined) gateway[key] = value
+  }
+  if (Object.keys(gateway).length > 0) table.gateway = gateway
   if (Object.keys(table).length === 0) return ''
   // smol-toml already ends with a newline; a file should not end with a blank line.
   return `${stringifyToml(table).replace(/\n+$/, '')}\n`

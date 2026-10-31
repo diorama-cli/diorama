@@ -94,6 +94,16 @@ export {
   type PluginSource,
 } from './plan.ts'
 export { createMountServer, listen, type MountOptions, type MountServer } from './http.ts'
+export { CONTENT_TYPES, serveStatic } from './static.ts'
+export {
+  createIndexServer,
+  escapeHtml,
+  formatTime,
+  renderIndexPage,
+  type IndexPageInfo,
+  type IndexServer,
+  type IndexServerOptions,
+} from './index-page.ts'
 export { shellTitle, withShellTitle } from './shell-title.ts'
 export {
   Gateway,
@@ -103,11 +113,14 @@ export {
   type GatewayMount,
   type GatewayMountInput,
   type GatewayOptions,
+  type IndexInfo,
+  type IndexOptions,
   type MountTree,
 } from './gateway.ts'
 export {
   CONFIG_FILE,
   CONFIG_KEYS,
+  GATEWAY_CONFIG_KEYS,
   GIT_CONFIG_KEYS,
   HTML_CONFIG_KEYS,
   UI_CONFIG_KEYS,
@@ -125,6 +138,7 @@ export {
   readConfigValue,
   readFileConfig,
   resolveConfig,
+  resolveGatewayConfig,
   validateFileConfig,
   writeFileConfig,
   type ConfigKey,
@@ -132,6 +146,7 @@ export {
   type ConfigPatch,
   type EffectiveConfig,
   type FileConfig,
+  type GatewayConfigKey,
   type HtmlConfigKey,
   type ResolveOptions,
   type UiConfigKey,

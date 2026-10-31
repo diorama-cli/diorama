@@ -13,6 +13,7 @@ import { createServer } from 'node:net'
 import { controlError, type MountStatus } from '../shared/control.ts'
 import type { EffectiveConfig } from './config.ts'
 import { createMountServer, listen, type MountServer } from './http.ts'
+import { createIndexServer, type IndexServer } from './index-page.ts'
 import type { BootManifest } from './plan.ts'
 import type { RpcDispatcher } from './rpc.ts'
 
@@ -56,6 +57,22 @@ export interface GatewayOptions {
   restartDelayMs?: number
   /** Console sink; defaults to `console.error`. */
   log?: (message: string) => void
+}
+
+/** Where the index page listens (contract.md §7.7); `port: 0` is off. */
+export interface IndexOptions {
+  host: string
+  port: number
+  /** The control socket, printed in the page footer (the CLI knows it). */
+  socket?: string
+}
+
+/** What the index page says about the process it belongs to. */
+export interface IndexInfo {
+  pid: number
+  version: string
+  contract: string
+  startedAt: number
 }
 
 /** Whether a bound port is on every interface (the URL must not say `0.0.0.0`). */
@@ -160,10 +177,47 @@ export class Gateway {
   private readonly inputs = new Map<string, GatewayMountInput>()
   /** Delay before the single automatic restart (contract.md §11.1). */
   readonly restartDelayMs: number
+  /** The index page's listener, once `listenIndex()` bound it (contract.md §7.7). */
+  private index: IndexServer | undefined
+  /** The address the index page answered on, for the log line and `status`. */
+  private indexUrl: string | undefined
 
   constructor(private readonly options: GatewayOptions) {
     this.log = options.log ?? ((message: string) => console.error(message))
     this.restartDelayMs = options.restartDelayMs ?? DEFAULT_RESTART_DELAY_MS
+  }
+
+  /**
+   * Bind the index page (contract.md §7.7). `port: 0` means **off**: a random
+   * port would be an address nobody can bookmark, which is the whole point of
+   * the page. An explicit port that is taken is an error, like a mount's.
+   */
+  async listenIndex(options: IndexOptions, info: IndexInfo): Promise<string | undefined> {
+    if (options.port === 0) return undefined
+    const server = createIndexServer({
+      list: () => this.list(),
+      info,
+      ...(options.socket === undefined ? {} : { socket: options.socket }),
+      log: message => this.log(`[gateway] ${message}`),
+    })
+    try {
+      await listen(server.server, options.host, options.port)
+    } catch (failure) {
+      await server.close().catch(() => {})
+      if ((failure as { code?: string }).code === 'EADDRINUSE') {
+        throw controlError('EADDRINUSE', `index page port ${options.port} is already in use`)
+      }
+      throw failure
+    }
+    this.index = server
+    this.indexUrl = mountUrl(options.host, options.port)
+    this.log(`[gateway] index page on ${this.indexUrl}`)
+    return this.indexUrl
+  }
+
+  /** Where the index page answers, or `undefined` when it is off. */
+  get indexPage(): string | undefined {
+    return this.indexUrl
   }
 
   /** Observe degraded / recovered transitions (contract.md §11.1 → events). */
@@ -381,8 +435,12 @@ export class Gateway {
     return { mountId, root: mount.status.root }
   }
 
-  /** Unmount everything (gateway stop). Best effort: one failure does not stop the rest. */
+  /** Unmount everything and drop the index page (gateway stop). One failure does not stop the rest. */
   async close(): Promise<void> {
+    const index = this.index
+    this.index = undefined
+    this.indexUrl = undefined
+    if (index !== undefined) await index.close().catch(() => {})
     for (const mountId of [...this.mounts.keys()]) {
       await this.unmount({ mountId })
     }

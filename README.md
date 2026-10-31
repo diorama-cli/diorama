@@ -51,6 +51,7 @@ diorama serving /path/to/your/project
 ```bash
 diorama [dir] [options]        # 挂载一个目录（gateway 未运行时自动拉起），打印 URL
 diorama ls [--json]            # 列出所有挂载：目录、URL、状态、配置来源
+                               # （开了索引页时，表格前多一行 index: <url>）
 diorama stop [dir] [--all]     # 停止服务一个目录（缺省 = 当前目录）；--all 停全部挂载
 diorama restart <mount|dir>    # 卸载后重新挂载（加载新配置或从故障中恢复）
 diorama gateway start|stop|status|restart
@@ -117,6 +118,10 @@ scripts = false             # HTML 预览是否默认执行页面脚本（默认
 
 [ui]
 theme = "system"            # 页面没人选过主题时的起点：system / light / dark / 某个主题 id
+
+[gateway]
+host = "127.0.0.1"          # gateway 索引页监听哪块网卡
+port = 0                    # 0 = 不开索引页；给了端口就有一个固定地址
 ```
 
 ### 改配置：`diorama config`
@@ -140,9 +145,28 @@ diorama config unset port            # 删掉一个字段，回到默认
   `ui.theme` 是 `system` / `light` / `dark` 三选一；`port` 这类数字项只收数字。
   候选只是省打字，**打任何值都照常收**——主题 id 就靠打字（主题注册表在页面里，CLI 看不见它）。
 
+### 索引页：一个不会变的地址
+
+挂载 URL 是随机端口，gateway 一重启就全失效。想要一个**能收藏的入口**，在 `$DIORAMA_HOME/diorama.toml`
+（默认 `~/.diorama/diorama.toml`）里给它一个端口：
+
+```toml
+[gateway]
+port = 7777                 # 0（默认）= 不开
+```
+
+重启 gateway（`diorama gateway restart`）后打开 <http://127.0.0.1:7777/>：一页列出当前每个挂载的
+目录、路径与 URL，**点一下就新窗口打开**。它每次请求都重新读挂载表，所以新挂的目录刷新一下就在，
+卸载的也立刻消失。
+
+- **只从全局那份 `diorama.toml` 读**：一个 gateway 服务整台机器，某个项目的配置文件不该决定机器级端口。
+  `diorama config set --gateway.port 7777` 写的就是全局那份。
+- **端口被占直接报错**，不会悄悄换一个——书签跟着换就没意义了。
+- `diorama ls` 与 `diorama gateway status` 都会告诉你这一页的地址（关着时会说明怎么打开）。
+
 ## 进程模型与安全
 
-- **一个 gateway，多个目录**：整台机器只有一个常驻的 `diorama gateway` 进程；`diorama .` 是短命命令，通过 Unix socket（`~/.diorama/diorama.sock`）通知 gateway 挂载目录并分配端口。gateway 未持久化——重启后挂载清空，重新执行 `diorama .` 即可。
+- **一个 gateway，多个目录**：整台机器只有一个常驻的 `diorama gateway` 进程；`diorama .` 是短命命令，通过 Unix socket（`~/.diorama/diorama.sock`）通知 gateway 挂载目录并分配端口。gateway 未持久化——重启后挂载清空，重新执行 `diorama .` 即可（索引页地址不变）。
 - **目录级故障隔离**：每个目录是独立的插件子树与 HTTP 端口；一个目录的插件故障只把该目录标记为 degraded（页面显示横幅，自动重启一次，也可 `diorama restart <dir>`），不影响其它目录。
 - **只读边界**：`ctx.fs` / `ctx.git` 不提供任何写接口；插件禁止直接访问 Node 文件系统，必须走 `ctx.fs`。唯一的写盘位置是工具自己的状态目录 `~/.diorama/`。
 - **默认只监听 loopback**：`host` 只能由 `diorama.toml` 或 `--host` 显式放宽。
@@ -192,9 +216,9 @@ scripts/                  生成器（图标表；pnpm icons 重新生成）
 ```bash
 pnpm install
 pnpm build                 # 全量构建（含各包的类型声明产出）
-pnpm test:unit             # node --test，426 条单测
+pnpm test:unit             # node --test，438 条单测
 pnpm -r --no-sort run typecheck   # 注意：不要用 pnpm typecheck（任务图成环，会失败）
-pnpm --filter diorama-web exec playwright test   # 171 条端到端，真实 CLI + Chromium
+pnpm --filter diorama-web exec playwright test   # 174 条端到端，真实 CLI + Chromium
 ```
 
 端到端测试跑的是构建产物（`packages/*/lib`、`apps/web/dist`），改了源码先 `pnpm build` 再跑；每个用例使用独立的 `DIORAMA_HOME` 与 gateway，不碰真实的 `~/.diorama`。
@@ -223,6 +247,6 @@ diorama-beta .
 ## 状态与许可
 
 - 契约版本 `0.0.7`（pre-1.0 线：破坏性变更以 `0.0.x` 递增表达；插件声明 `>=0.0.7 <0.1.0`）。
-- 已实现：文件树、多标签、五类渲染器、git 变更与历史（diff 三档读法：行内 / 整文件单栏 / 新旧双栏）、文件搜索、命令面板与快捷键体系、watch、URL 深链、图标、明暗主题（跟随系统 / 锁定 / 第三方主题注册）、gateway 多目录挂载、`diorama.toml` 配置、挂载的 `--json` 输出、**一个目录里的多个 git 仓库**（并列与嵌套，变更 / 历史按仓库分组）、**可拖动的窗格**与长名字横滚、**侧栏可收起**、按住 ⌘ / Ctrl / ⌥ 时的快捷键浮层提示、**文件视图工具栏**（定位到正在浏览的文件）、**文件的原件链接**（右键下载 / 复制链接 / 在新标签页打开，`/~raw~/<path>`）、**行号与跳转到行**（文本渲染器一行一个元素，行号默认显示且可关；`mod+p` 认 `path:42` / `path:42-60`，palette 里以 `:` 开头即 go to line，`shift+;` 直接打开并预填 `:`；跨行圈选是一整块）。426 条单测 + 171 条端到端全部通过。
+- 已实现：文件树、多标签、五类渲染器、git 变更与历史（diff 三档读法：行内 / 整文件单栏 / 新旧双栏）、文件搜索、命令面板与快捷键体系、watch、URL 深链、图标、明暗主题（跟随系统 / 锁定 / 第三方主题注册）、gateway 多目录挂载、`diorama.toml` 配置、挂载的 `--json` 输出、**一个目录里的多个 git 仓库**（并列与嵌套，变更 / 历史按仓库分组）、**可拖动的窗格**与长名字横滚、**侧栏可收起**、按住 ⌘ / Ctrl / ⌥ 时的快捷键浮层提示、**文件视图工具栏**（定位到正在浏览的文件）、**文件的原件链接**（右键下载 / 复制链接 / 在新标签页打开，`/~raw~/<path>`）、**行号与跳转到行**（文本渲染器一行一个元素，行号默认显示且可关；`mod+p` 认 `path:42` / `path:42-60`，palette 里以 `:` 开头即 go to line，`shift+;` 直接打开并预填 `:`；跨行圈选是一整块）、**gateway 的索引页**（`[gateway] port` 一给，就有一个跨重启不变的地址：列出每个挂载的目录与 URL，点开即新窗口）。438 条单测 + 174 条端到端全部通过。
 - 尚未做：外部插件加载（`~/.diorama/plugins` 与 npm 来源）、界面语言（i18n）、编辑能力（永远不会做——这是只读查看器）。
 - [MIT](LICENSE)

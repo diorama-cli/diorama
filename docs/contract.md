@@ -1060,6 +1060,10 @@ scripts = false             # HTML 预览是否默认执行页面脚本（§5.1�
 
 [ui]
 theme = "system"            # 页面没人选过主题时从哪里开始（§3.10）；system / light / dark / 主题 id
+
+[gateway]
+host = "127.0.0.1"          # gateway 索引页监听哪块网卡（§7.7）
+port = 0                    # 0 = 不开索引页；非 0 = 固定地址
 ```
 
 | 字段 | 类型 | 默认 | 说明 |
@@ -1076,6 +1080,8 @@ theme = "system"            # 页面没人选过主题时从哪里开始（§3.1
 | `git.ignore` | string[] | 同 `ignore` | 走查时剪掉的目录；缺省沿用 `ignore`（即 `.git` + `node_modules`） |
 | `html.scripts` | boolean | `false` | HTML 预览是否**默认执行**页面脚本（§5.1）；`false` = 逐文件确认后才执行 |
 | `ui.theme` | string | `"system"` | 页面**没人选过主题时**的起点（§3.10）：`system` / `light` / `dark` / 某个已注册主题的 id。字符集同 hash 值（`[A-Za-z0-9_.-]+`），否则 fail loud。**是起点不是锁定**：读者选过（命令、快捷键、分享的 `#theme=…`）就以读者的为准 |
+| `gateway.host` | string | `"127.0.0.1"` | gateway **索引页**监听哪块网卡（§7.7）。与 `host` 无关：`host` 是每个挂载页面的网卡，这是那一个索引页的 |
+| `gateway.port` | integer 0–65535 | `0` | 索引页的端口（§7.7）。**`0` = 不开**——随机端口等于一个没人记得住的地址，而索引页存在的理由就是「一个固定地址」 |
 
 **优先级：CLI > `diorama.toml` > 默认值。**
 
@@ -1093,6 +1099,9 @@ theme = "system"            # 页面没人选过主题时从哪里开始（§3.1
   配置是**每个挂载目录各自一份**。**配置合成发生在短命 CLI 侧**（它知道用户敲的目录），
   合成后的 `EffectiveConfig` 连同来源路径随控制面 `mount` 请求交给 gateway；gateway 不自己读
   toml。因此 `$DIORAMA_HOME/diorama.toml` 是「每个目录在别处都没配置时」的全局默认。
+- **`[gateway]` 是唯一的例外（0.0.8 起，§7.7）**：它描述的是**那一个进程**，不是某个目录，
+  所以只从 `$DIORAMA_HOME/diorama.toml` 读（`resolveGatewayConfig`），**从不**从被服务的目录读。
+  一个项目文件不该决定整台机器的端口。文件不存在 = 默认值（索引页关着）；文件写坏仍然 fail loud。
 - **失败与展示**：CLI/`--dump-plan` 打印生效的配置来源（`config: <path>` 或 `config: none`）；
   `diorama ls` 的 `CONFIG` 列显示每个 mount 的来源。
 - **下发到页面**：`/plugin.json` 带 `config: EffectiveConfig`、`configFile`、`state`
@@ -1507,7 +1516,7 @@ CLI：连 socket → 不在就后台拉起 gateway → 请求 `mount` → 打印
 | `mount` | `{ root, config, configFile?, port?, host?, plugins?, all?, breakPlugin? }` | `MountStatus` + `{ created: boolean }` |
 | `unmount` | `{ mountId }` 或 `{ root }`（二选一） | `{ mountId, root }` |
 | `list` | `{}` | `{ mounts: MountStatus[] }` |
-| `status` | `{}` | `{ pid, version, contract, startedAt, state: 'ok' 或 'degraded', mounts: MountStatus[] }` |
+| `status` | `{}` | `{ pid, version, contract, startedAt, state: 'ok' 或 'degraded', mounts: MountStatus[], index? }` |
 | `stop` | `{ force?: boolean }` | `{ stopping: true }`（响应发出后 gateway 卸载全部 mount、关闭 socket 并退出） |
 | `events` | `{ topics?: ('mounted' / 'unmounted' / 'degraded' / 'recovered')[] }` | `{ subscribed: true }`，之后该连接收事件帧 |
 
@@ -1628,11 +1637,14 @@ diorama serving <realpath>
 `diorama ls`（表头固定；URL 一列**必须有**；非 TTY 不加颜色，不截断）：
 
 ```text
+index: http://127.0.0.1:7777/
 MOUNT      PORT   STATUS     DIR                       URL                              CONFIG
 abc12345   54321  ok         /Users/me/proj            http://127.0.0.1:54321/          diorama.toml
 def67890   54322  degraded   /Users/me/notes           http://127.0.0.1:54322/          (defaults)
 ```
 
+- **`index:` 那一行只在 gateway 开着索引页时出现**（§7.7）：它是重启后仍然有效的那个地址，
+  所以排在表格前面。表格本身一列都不变（脚本按表头解析）。
 - 无 mount：打印 `no mounts (run "diorama <dir>")`，**退出码 0**。
 - gateway 未运行：打印 `gateway is not running (run "diorama gateway start")`，**退出码 0**
   （`ls` 是查询，不是错误）。
@@ -1665,6 +1677,37 @@ diorama stopped /Users/me/proj
 
 `diorama config …` 的行为与退出码见 §4.2：成功 0，用法错误 / 文件写错 2（`config show` 在目录
 不可读时也是 2）。它**不**连 gateway，也不要求 gateway 在跑。
+
+### 7.7 索引页（`0.0.8` 起）
+
+gateway 自己的一页 HTML：**一个固定地址**，列出当前每个挂载的目录与 URL，点一下在新窗口打开。
+地址由 `$DIORAMA_HOME/diorama.toml` 的 `[gateway] host` / `port` 决定（§4.1）；`port = 0`（默认）
+表示**不开**。
+
+**为什么要有它**：挂载 URL 是随机的，而且 gateway 不持久化（architecture §10）——重启一次，
+书签全失效。索引页是唯一一个**跨重启不变**的地址，读者收藏它、从它进去。它不是挂载：没有页面壳、
+没有插件图、没有 RPC 通道，就是一个服务端渲染的列表。
+
+| 项 | 取值 |
+|---|---|
+| 地址 | `[gateway] host`:`[gateway] port`；`port = 0` = 没有这一页 |
+| 端口被占 | `EADDRINUSE`，**不重试**（与显式 `port` 同一条规矩，§7.3）；socket 与 pid 文件一起清掉，gateway 不启动 |
+| 内容 | 每个挂载一张卡片：目录名、绝对路径、URL、状态（degraded 时带原因）、插件数、配置来源 |
+| 链接 | `<a href="<mount url>" target="_blank" rel="noopener">`：**整张卡片都是链接**，点开就是新窗口 |
+| 渲染时机 | **每次请求重新渲染**（`cache-control: no-store`）：挂载来来去去，缓存的列表就是谎话 |
+| 零挂载 | 一句说明（`No mounts right now — run diorama <dir> to add one.`），不是空列表 |
+| 其它路径 | 404 JSON（`{ error: { code: 'ENOENT' } }`）；非 GET / HEAD 是 405 |
+| 暴露面 | 与挂载页面同一条规矩：**默认只监听 loopback**，放宽只能靠 `diorama.toml`（architecture §8） |
+
+- **`status` 多一个 `index`**（`GatewayStatus.index?: string`）：开着时是那个 URL，关着时字段**不出现**
+  （不是 `null`、不是 `''`）。`diorama ls` 的非 JSON 形式据此打印 `index: <url>` 一行；`--json` 里就是
+  `gateway.index`。
+- **`gateway status` 也打印它**：关着时打印 `index:  off (set [gateway] port in <path>)`——
+  「没有」必须能看出**怎么打开**。
+- **读的是全局那一份**：`$DIORAMA_HOME/diorama.toml`，从不读被服务目录的 `diorama.toml`（§4.1）。
+  所以 `diorama <dir>` 在哪个目录跑都一样；改完要 `diorama gateway restart` 才生效（配置不热加载）。
+- **`diorama config` 能改它**：`gateway.host` / `gateway.port` 是两个正常的键（§4.2），交互式里排在最后
+  （它不是这个目录的属性）。
 
 ## 8. 客户端模块表 ✅ v0.2 定（M0 §10.3/§10.6 的空洞）
 
@@ -2561,6 +2604,46 @@ URL / hash 语义、主题 token 表（新样式只用既有 token，无新 toke
   可复制、可搜索），`selectionchange` 把 DOM Range 换成**行的矩形**——被整行覆盖的画满整行（这才是
   相邻行接成一块的原因），只覆盖一部分的按**实测**的起止位置画。用实测而不是 `ch`：行里有 tab、
   字体也不保证正好一个 `ch` 宽。
+
+## 40. `0.0.7` 之后：gateway 的索引页（`0.0.8`）
+
+> 2026-11-01。用户要求：「gateway 也增加一个页面，用来显示所有的实例路径与 URL，点击可新窗口打开。
+> gateway 端口在配置文件里配置」。契约号不动（§6）：没有新增内核服务、没有加座位、没有改
+> `ctx.*` 签名；变的是 **§4.1 的 `diorama.toml`**（多一张 `[gateway]` 表）、**§7.3 的 `status`**
+> （多一个可选 `index`）、**§7.6 的 `ls` 输出**（多一行），以及新写的 **§7.7**（这一页本身）。
+
+| 条款 | 本档之前 | 本档 |
+|---|---|---|
+| 有没有一个跨重启不变的地址 | 没有：挂载 URL 是随机端口，gateway 不持久化 | **有**：`[gateway] port` 上的一页 HTML |
+| 怎么知道有哪些挂载 | `diorama ls`（终端表格） | 同一个事实也在一页网页上，**点一下就在新窗口打开** |
+| gateway 的端口 | 只有 Unix socket，没有 TCP 端口 | 多一个**可选**的 TCP 端口，只为这一页 |
+| 端口写在哪 | — | `$DIORAMA_HOME/diorama.toml` 的 `[gateway] port`；`0`（默认）= 不开 |
+| 被服务目录的 `diorama.toml` 能不能设它 | — | **不能**：一个进程服务整台机器，项目文件不该决定机器级端口 |
+| `status` | `{ pid, version, contract, startedAt, state, mounts }` | 多一个可选 `index?: string` |
+| `diorama ls` | 只有表格 | 开着索引页时表格**前面**多一行 `index: <url>` |
+| `gateway status` | socket 与 mounts | 多一行 `index:`（关着时说明怎么打开） |
+| 索引页端口被占 | — | `EADDRINUSE`，fail loud，gateway 不启动，socket/pid 一起清掉 |
+
+**没有变的东西**：控制面的方法表与错误码、`MountStatus` 的字段、挂载的页面与 RPC、
+`mount` / `unmount` / `stop` 的语义、`ls` 表格的六列（表头一字不改）。
+
+细则：
+
+- **为什么是 `port = 0` 表示关、而不是一个 `enabled = true` 开关**：开关加端口是两个要同时对的
+  字段，而「端口是多少」本来就能表达「开不开」。`0` 在内核里一直就是「不指定」，这里读作「不要」，
+  与 `[ui] theme` 那种「给一个值就生效」同一种风格。
+- **为什么默认关**：默认开就只能随机端口，而随机端口等于一个没人记得住的地址——那正好是这一页
+  存在的理由。要它，就得说一个数。
+- **为什么不用挂载那一套**：挂载 = 一个被浏览的目录 + 页面壳 + 插件图 + RPC 通道。这一页没有目录、
+  没有插件、没有 RPC，把它做成 mount 会让 `diorama ls` 多出一个假目录，`stop --all` 也要为它写特例。
+- **为什么每次请求重渲染**：挂载表是会变的（挂一个、卸一个），一张缓存的列表比没有更糟。
+- **为什么整张卡片都是链接**：这一页只有一个动作——「打开那个目录」。让读者瞄准一行 12px 的 URL 是
+  没必要的精度。
+- **为什么端口冲突不重试**：与显式 `--port` 同一条规矩（§7.3）：用户说了 7777，就该是 7777，
+  悄悄换一个端口等于把书签悄悄改掉。
+- **为什么失败要带日志尾巴**：守护进程起不来时，CLI 只能说「没应答」；真正的原因（`index page port
+  7777 is already in use`）在 `gateway.log` 里。`diorama gateway start` 现在把最后几行引出来，
+  并在子进程**已经退出**时立刻放弃等待，而不是干等 10 秒。
 
 ## 待定清单（v0.4 后仍 🔲）
 

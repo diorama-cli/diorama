@@ -387,8 +387,8 @@ test('wizard: a menu picks a candidate, and the change is summarized', async () 
   const lines: string[] = []
   // host(menu) '2', port '', plugins(menu) '1,2', ignore(menu) '3',
   // watch.enabled(menu) '2', debounceMs '', maxDirectories '', html.scripts(menu) '',
-  // ui.theme(menu) ''.
-  const answers = ['2', '', '1,2', '3', '2', '', '', '', '']
+  // ui.theme(menu) '', gateway.host(menu) '', gateway.port ''.
+  const answers = ['2', '', '1,2', '3', '2', '', '', '', '', '', '']
   let index = 0
   const result = await runWizard(
     {},

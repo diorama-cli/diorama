@@ -11,6 +11,7 @@ import {
   patchFileConfig,
   readFileConfig,
   resolveConfig,
+  resolveGatewayConfig,
   writeFileConfig,
   type FileConfig,
   type ResolveOptions,
@@ -26,6 +27,9 @@ test('config: defaults match contract §4.1', () => {
   assert.deepEqual(defaults.html, { scripts: false })
   // A page with no choice of its own follows the system (contract.md §4.1).
   assert.deepEqual(defaults.ui, { theme: 'system' })
+  // The gateway index page is off unless a port is named (contract.md §7.7):
+  // a random port would be an address nobody can bookmark.
+  assert.deepEqual(defaults.gateway, { host: '127.0.0.1', port: 0 })
   // Every built-in client plugin, in boot order (contract.md §1: the selection
   // is the boot order). `fs`/`git`/`search` are kernel services, not client
   // pieces (contract.md §3.1, §3.2, §3.9): they never appear in the page's
@@ -68,6 +72,8 @@ test('config: precedence is CLI > file > default', () => {
     html: { scripts: false },
     // Nor a `[ui]` table: a fresh page follows the system scheme.
     ui: { theme: 'system' },
+    // Nor a `[gateway]` table: no index page.
+    gateway: { host: '127.0.0.1', port: 0 },
   })
   // CLI wins field by field; `--all` empties the ignore list.
   const merged = mergeConfig(file, { port: 0, host: '127.0.0.1', all: true })
@@ -124,6 +130,64 @@ test('config: ui.theme is a non-empty, URL-safe preference and merges like every
   // The dotted key is addressable by `set` / `unset`, like `html.scripts`.
   assert.deepEqual(patchFileConfig({}, { 'ui.theme': 'light' }), { ui: { theme: 'light' } })
   assert.ok(knownKeys().includes('ui.theme'))
+})
+
+test('config: [gateway] is the index page address, and 0 is off (contract.md §7.7)', () => {
+  assert.deepEqual(mergeConfig(parseConfigFile(['[gateway]', 'port = 7777'].join('\n'), 'g.toml')).gateway, {
+    host: '127.0.0.1',
+    port: 7777,
+  })
+  assert.deepEqual(
+    mergeConfig(parseConfigFile(['[gateway]', 'host = "0.0.0.0"', 'port = 7777'].join('\n'), 'g.toml')).gateway,
+    { host: '0.0.0.0', port: 7777 },
+  )
+  // 0 is a value, not an absence: it says "no index page" (a random port would
+  // be an address nobody can keep).
+  assert.equal(mergeConfig(parseConfigFile(['[gateway]', 'port = 0'].join('\n'), 'g.toml')).gateway.port, 0)
+  for (const bad of ['70000', '-1', '1.5', '"7777"']) {
+    assert.throws(
+      () => parseConfigFile(['[gateway]', `port = ${bad}`].join('\n'), 'g.toml'),
+      /g\.toml: "gateway\.port" must be an integer 0-65535/,
+      bad,
+    )
+  }
+  assert.throws(() => parseConfigFile('[gateway]\nport = 1\nextra = 2', 'g.toml'), /unknown key "gateway\.extra"/)
+  assert.throws(() => parseConfigFile('gateway = 7777', 'g.toml'), /"gateway" must be a table/)
+  // The dotted key is addressable by `set` / `unset`, like `ui.theme`.
+  assert.deepEqual(patchFileConfig({}, { 'gateway.port': 7777 }), { gateway: { port: 7777 } })
+  assert.deepEqual(patchFileConfig({ gateway: { host: '0.0.0.0', port: 1 } }, { 'gateway.port': undefined }), {
+    gateway: { host: '0.0.0.0' },
+  })
+  assert.equal(formatFileConfig({ gateway: { port: 7777 } }), '[gateway]\nport = 7777\n')
+  assert.equal(formatFileConfig({ gateway: {} }), '')
+  assert.ok(knownKeys().includes('gateway.port'))
+})
+
+test('config: the gateway reads [gateway] from $DIORAMA_HOME only (contract.md §7.7)', () => {
+  const written = resolveGatewayConfig({
+    home: '/home/u/.diorama',
+    exists: path => path === '/home/u/.diorama/diorama.toml',
+    readFile: () => '[gateway]\nport = 7777\n',
+  })
+  assert.deepEqual(written.gateway, { host: '127.0.0.1', port: 7777 })
+  assert.equal(written.origin.path, '/home/u/.diorama/diorama.toml')
+  // No file at all: the defaults, and no origin to report.
+  const none = resolveGatewayConfig({ home: '/home/u/.diorama', exists: () => false })
+  assert.deepEqual(none.gateway, { host: '127.0.0.1', port: 0 })
+  assert.equal(none.origin.path, undefined)
+  // A file without a [gateway] table has no gateway origin either: nothing was chosen.
+  const partial = resolveGatewayConfig({
+    home: '/home/u/.diorama',
+    exists: () => true,
+    readFile: () => 'port = 8080\n',
+  })
+  assert.deepEqual(partial.gateway, { host: '127.0.0.1', port: 0 })
+  assert.equal(partial.origin.path, undefined)
+  // A broken file fails loud, exactly like every other read of it.
+  assert.throws(
+    () => resolveGatewayConfig({ home: '/h', exists: () => true, readFile: () => '[gateway]\nport = ' }),
+    /invalid TOML/,
+  )
 })
 
 test('config: a syntax error and unknown keys fail loud, naming the file', () => {

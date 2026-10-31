@@ -12,12 +12,13 @@ import { createReadStream } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { stat } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { basename, dirname, extname, join, normalize, resolve, sep } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { isErrorCode } from '../shared/errors.ts'
 import { contentDisposition, decodeRawPath, DOWNLOAD_QUERY, rawContentType } from '../shared/raw.ts'
 import { ROUTE_PREFIX, type RelPath } from '../shared/types.ts'
 import { HttpError } from './errors.ts'
 import { resolveInside } from './fs.ts'
+import { serveStatic } from './static.ts'
 import type { BootManifest } from './plan.ts'
 import { RpcChannel, type RpcDispatcher } from './rpc.ts'
 import { withShellTitle } from './shell-title.ts'
@@ -38,17 +39,6 @@ export interface MountOptions {
   log?: (message: string) => void
 }
 
-const CONTENT_TYPES: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.cjs': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.json': 'application/json; charset=utf-8',
-  '.woff2': 'font/woff2',
-}
-
 /** Errors raised by services carry `code`; the HTTP layer answers with them. */
 const ERROR_STATUS: Record<string, number> = {
   EINVAL: 400,
@@ -62,39 +52,6 @@ const ERROR_STATUS: Record<string, number> = {
   EMETHOD: 404,
   ESERVICE: 503,
   EIO: 500,
-}
-
-/** Serve one file under `dir`; returns false when nothing matched. */
-async function serveStatic(dir: string, urlPath: string, res: ServerResponse): Promise<boolean> {
-  let decoded: string
-  try {
-    decoded = decodeURIComponent(urlPath)
-  } catch {
-    throw new HttpError(400, 'EBADPATH', 'malformed URL encoding')
-  }
-  const base = resolve(dir)
-  const target = normalize(join(base, decoded))
-  if (target !== base && !target.startsWith(base + sep)) {
-    throw new HttpError(403, 'EBADPATH', 'path escapes the asset root')
-  }
-  let info
-  try {
-    info = await stat(target)
-  } catch {
-    return false
-  }
-  if (!info.isFile()) return false
-  res.writeHead(200, {
-    'content-type': CONTENT_TYPES[extname(target)] ?? 'application/octet-stream',
-    'content-length': info.size,
-  })
-  await new Promise<void>((resolveStream, reject) => {
-    const stream = createReadStream(target)
-    stream.on('error', reject)
-    stream.on('end', resolveStream)
-    stream.pipe(res)
-  })
-  return true
 }
 
 /**

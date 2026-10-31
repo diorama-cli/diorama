@@ -89,6 +89,8 @@ export interface GatewayInfo {
 export interface GatewayStatus extends GatewayInfo {
   state: 'ok' | 'degraded'
   mounts: MountStatus[]
+  /** Where the index page answers; absent when `[gateway] port` is 0 (contract.md §7.7). */
+  index?: string
 }
 
 /** What a client sends: an id plus either frame. */

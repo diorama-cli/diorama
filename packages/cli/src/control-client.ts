@@ -11,6 +11,7 @@ import {
   connectControl,
   controlError,
   dioramaHome,
+  resolveGatewayConfig,
   type ControlClient,
   type GatewayStatus,
   type MountStatus,
@@ -117,14 +118,20 @@ export function clearStaleFiles(env: NodeJS.ProcessEnv): void {
 export async function startGateway(io: CliIo = defaultIo()): Promise<{ started: boolean; status?: GatewayStatus }> {
   const existing = await gatewayStatus(io)
   if (existing !== undefined) return { started: false, status: existing }
+  // The gateway's own settings come from `$DIORAMA_HOME/diorama.toml` (contract
+  // §7.7). Read them **here** first: a broken file is a usage error this process
+  // can report (exit 2, naming the file) instead of a daemon that dies and a
+  // "did not answer" on the other end.
+  resolveGatewayConfig({ home: dioramaHome(io.env) })
 
   const home = dioramaHome(io.env)
   mkdirSync(home, { recursive: true })
   const log = logPath(io.env)
   const out = openSync(log, 'a')
   const executable = cliExecutable()
+  let child: ReturnType<typeof spawn>
   try {
-    const child = spawn(executable.command, [...executable.args, 'gateway', 'run'], {
+    child = spawn(executable.command, [...executable.args, 'gateway', 'run'], {
       detached: true,
       stdio: ['ignore', out, out],
       env: io.env,
@@ -133,19 +140,47 @@ export async function startGateway(io: CliIo = defaultIo()): Promise<{ started: 
   } finally {
     closeSync(out)
   }
-  const status = await waitForPing(io, START_TIMEOUT_MS)
+  const status = await waitForPing(io, START_TIMEOUT_MS, child)
   if (status === undefined) {
-    throw controlError('ESTARTING', `the gateway did not answer within ${START_TIMEOUT_MS}ms (see ${log})`)
+    // The daemon writes its own reason to the log (a taken index page port, a
+    // broken diorama.toml, ...): quote it, or the reader has to go and look.
+    const tail = logTail(log)
+    const reason = child.exitCode === null
+      ? `the gateway did not answer within ${START_TIMEOUT_MS}ms`
+      : `the gateway exited before it answered (code ${child.exitCode})`
+    throw controlError('ESTARTING', `${reason} (see ${log})${tail === '' ? '' : `\n  ${tail}`}`)
   }
   return { started: true, status }
 }
 
-/** Poll `ping` until the gateway answers (a freshly spawned one needs a moment). */
-async function waitForPing(io: CliIo, timeoutMs: number): Promise<GatewayStatus | undefined> {
+/** The last few lines a daemon wrote before it gave up (bounded: a log can be huge). */
+function logTail(path: string, lines = 5, maxChars = 1_200): string {
+  try {
+    const text = readFileSync(path, 'utf8')
+    const tail = text.split('\n').filter(line => line !== '').slice(-lines).join('\n')
+    return tail.length > maxChars ? `…${tail.slice(-maxChars)}` : tail
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * Poll `ping` until the gateway answers (a freshly spawned one needs a moment).
+ *
+ * A daemon that **exited** never will: stop waiting the moment its pid is gone
+ * (a taken index page port, a broken `diorama.toml`), so the caller reports the
+ * reason from the log instead of "did not answer in 10s".
+ */
+async function waitForPing(
+  io: CliIo,
+  timeoutMs: number,
+  child?: { exitCode: number | null; killed: boolean },
+): Promise<GatewayStatus | undefined> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     const status = await gatewayStatus(io)
     if (status !== undefined) return status
+    if (child !== undefined && child.exitCode !== null) return undefined
     await delay(50)
   }
   return undefined
@@ -249,8 +284,15 @@ function formatRow(cells: readonly string[], widths: readonly number[]): string 
   return cells.map((cell, index) => (index === cells.length - 1 ? cell : cell.padEnd(widths[index] ?? 0))).join('  ')
 }
 
-/** The mount table (contract.md §7.6): MOUNT PORT STATUS DIR URL CONFIG. */
-export function formatMounts(mounts: readonly MountStatus[]): string {
+/**
+ * The mount table (contract.md §7.6): MOUNT PORT STATUS DIR URL CONFIG.
+ *
+ * When the gateway has an index page (contract.md §7.7) it is named **before**
+ * the table: it is the one address that still works after a restart, so it is
+ * the one worth copying. It goes to stdout as a comment line so the table
+ * itself stays the machine-readable part.
+ */
+export function formatMounts(mounts: readonly MountStatus[], index?: string): string {
   const header = ['MOUNT', 'PORT', 'STATUS', 'DIR', 'URL', 'CONFIG']
   const rows = mounts.map(mount => [
     mount.mountId,
@@ -261,7 +303,8 @@ export function formatMounts(mounts: readonly MountStatus[]): string {
     mount.configFile ?? '(defaults)',
   ])
   const widths = columnWidths([header, ...rows])
-  return [formatRow(header, widths), ...rows.map(row => formatRow(row, widths))].join('\n')
+  const table = [formatRow(header, widths), ...rows.map(row => formatRow(row, widths))]
+  return index === undefined ? table.join('\n') : [`index: ${index}`, ...table].join('\n')
 }
 
 /** `diorama ls`: the table, `--json`, and the two no-gateway / no-mount messages. */
@@ -281,6 +324,6 @@ export async function listMounts(io: CliIo = defaultIo(), options: { json?: bool
     io.out(`no mounts (run "${cliName(io)} <dir>")`)
     return 0
   }
-  io.out(formatMounts(status.mounts))
+  io.out(formatMounts(status.mounts, status.index))
   return 0
 }

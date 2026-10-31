@@ -13,7 +13,13 @@
 | 3 | [docs/features.md](docs/features.md) | **有什么**：能力清单与档位（✅ / v1 / 未来 / 不做） |
 | 4 | 最近一档的 `docs/mN/spec.md` | **怎么实现的** + **§6.2 的坑**（见下面 §5） |
 
-最近一档是 [docs/m27/spec.md](docs/m27/spec.md)（**行号与跳转到行**，一条链：`code` / `plaintext`
+最近一档是 [docs/m28/spec.md](docs/m28/spec.md)（**gateway 的索引页**：`[gateway] port` 一给，gateway
+多一个固定地址——一页列出每个挂载的目录与 URL，整张卡片都是 `<a target="_blank">`，点开就是新窗口；
+每次请求重渲染，零挂载是一句话；`port = 0`（默认）**表示不开**，因为随机端口的索引页等于没有。
+它**只**读 `$DIORAMA_HOME/diorama.toml`（一个进程服务整台机器，项目文件不该决定机器级端口），
+端口被占 fail loud 且清掉 socket；`status` 多一个可选 `index`，`ls` / `gateway status` 各多一行。
+契约 §7.7、§40）；
+上一档是 [docs/m27/spec.md](docs/m27/spec.md)（**行号与跳转到行**，一条链：`code` / `plaintext`
 改成**一行一个元素**，行号是每行的第一格，**默认显示**、渲染器头部一颗开关、偏好存 `localStorage`、
 状态在页面全局 `__diorama_line_numbers__`；reveal store 的目标变成**区间**并可 `flash`（跳转到行闪一下，
 搜索命中仍是常驻带），渲染器把目标**夹进文件**（`:999` 落在末行）；`mod+p` 认 `path:42` / `path:42-60`

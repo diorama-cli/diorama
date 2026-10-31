@@ -45,6 +45,8 @@ export interface GatewayServeOptions {
   log?: (message: string) => void
   /** Written once the socket is bound, removed on shutdown (contract.md §7.4). */
   pidFile?: string
+  /** The index page's address (`[gateway]` in `$DIORAMA_HOME/diorama.toml`, contract.md §7.7). */
+  index?: { host: string; port: number }
 }
 
 export interface StoppableGateway {
@@ -52,6 +54,8 @@ export interface StoppableGateway {
   /** The bound control socket. */
   readonly socket: ControlServer
   readonly mounts: Gateway
+  /** Where the index page answers, or `undefined` when `[gateway] port` is 0. */
+  readonly indexUrl: string | undefined
   /** Unmount everything, then drop the control socket. */
   close(): Promise<void>
 }
@@ -89,7 +93,12 @@ export async function serveGateway(options: GatewayServeOptions): Promise<Stoppa
   let gatewayState: GatewayStatus['state'] = 'ok'
   let closing = false
 
-  const status = (): GatewayStatus => ({ ...info, state: gatewayState, mounts: mounts.list() })
+  const status = (): GatewayStatus => ({
+    ...info,
+    state: gatewayState,
+    mounts: mounts.list(),
+    ...(mounts.indexPage === undefined ? {} : { index: mounts.indexPage }),
+  })
 
   /**
    * The plugin graph of this *process* (contract.md §2.5): loaded once, then
@@ -221,6 +230,20 @@ export async function serveGateway(options: GatewayServeOptions): Promise<Stoppa
     },
   })
 
+  // The index page (contract.md §7.7) is a machine-wide address from
+  // `$DIORAMA_HOME/diorama.toml`: the one URL that survives a restart, because
+  // mount URLs do not. It binds **before** the control socket on purpose:
+  // the socket is the gateway's "I am up" signal, and a gateway that is going
+  // to fail on a taken index port must never send it — a client that saw it
+  // would think the start worked. A failure here leaves nothing behind.
+  let indexUrl: string | undefined
+  if (options.index !== undefined && options.index.port !== 0) {
+    indexUrl = await mounts.listenIndex({ ...options.index, socket: options.socket }, info).catch(async (failure: unknown) => {
+      await control.close().catch(() => {})
+      throw failure
+    })
+  }
+
   await bindSocket(control, options.socket, log)
   if (options.pidFile !== undefined) writePidFile(options.pidFile, options.socket)
   log(`[diorama] gateway listening on ${options.socket} (pid ${process.pid})`)
@@ -229,6 +252,7 @@ export async function serveGateway(options: GatewayServeOptions): Promise<Stoppa
     info,
     socket: control,
     mounts,
+    indexUrl,
     async close() {
       await shutdown()
     },

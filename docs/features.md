@@ -15,17 +15,17 @@
 | # | 功能 | 档位 | 说明 |
 |---|---|---|---|
 | C1 | `diorama [dir]` | ✅ M0→M3 | 短命 CLI：确保 gateway → 挂载 → 打印 URL 并退出；`--foreground` 仍可前台跑（调试/测试）|
-| C2 | `diorama ls` | ✅ M3 | 表格 `MOUNT PORT STATUS DIR URL CONFIG`（含 URL）；`--json`；不做 `--watch` |
+| C2 | `diorama ls` | ✅ M3 | 表格 `MOUNT PORT STATUS DIR URL CONFIG`（含 URL）；开着索引页时表格前多一行 `index: <url>`；`--json`；不做 `--watch` |
 | C3 | `diorama gateway start / stop / status / restart` | ✅ M3 | 后台进程 + pid 文件 + `gateway.log`；另有 `gateway run` 与 `diorama restart <dir>` |
 | C12 | `diorama stop [dir] [--all]` | ✅ v0.6 | 只卸**一个**挂载（无参数 = 当前目录所在的挂载；嵌套取最深的包含者），gateway 与其它挂载照旧；`--all` 卸全部；不匹配 / 未运行 gateway 都是退出码 0；`--json` 给 `{ stopped, target, all }`（contract §7.6） |
 | C4 | `--port <n>` | ✅ M0→M2 | 显式冲突报错；**未给时落 `diorama.toml`，再默认随机** |
 | C5 | `--host <ip>` | ✅ M0→M2 | 默认 `127.0.0.1`；`diorama.toml` 可设 |
-| C9 | `diorama.toml`（`host`/`port`/`plugins`/`ignore`/`[watch]`/`[git]`/`[html]`/`[ui]`） | ✅ M2 | 目录 → `$DIORAMA_HOME` 查找；CLI > toml > 默认；写错 fail loud；`--config`、`--all`、`--dump-config`；`[html] scripts` 控制 HTML 预览是否默认执行页面脚本（contract §28）；`[ui] theme` 是页面没人选过主题时的起点（contract §33）|
+| C9 | `diorama.toml`（`host`/`port`/`plugins`/`ignore`/`[watch]`/`[git]`/`[html]`/`[ui]`/`[gateway]`） | ✅ M2 | 目录 → `$DIORAMA_HOME` 查找；CLI > toml > 默认；写错 fail loud；`--config`、`--all`、`--dump-config`；`[html] scripts` 控制 HTML 预览是否默认执行页面脚本（contract §28）；`[ui] theme` 是页面没人选过主题时的起点（contract §33）；`[gateway] port` 是 gateway 索引页的地址（contract §40），**只从 `$DIORAMA_HOME` 读** |
 | C10 | `diorama config`（读写 `diorama.toml`） | ✅ v0.3 | 交互式逐项编辑（回车保留 / `-` 清除 / 预览 + 确认）；`config show [--json]`、`config set --<key> <value>`、`config unset <key>`；**默认写 `$DIORAMA_HOME/diorama.toml`**，`--dir` / `--config` 才写项目文件（contract §4.2）；`--dry-run` / `--yes`；含 `--ui.theme`（三选一菜单，主题 id 靠打字）|
 | C11 | `diorama [dir] --json` / `diorama restart <dir> --json` | ✅ v0.3 | 把挂载输出成**一个** JSON 文档（`url` / `root` / `mountId` / `created` + 完整 `mount: MountStatus`），供其它程序直接取 URL；可与 `--foreground` 同用（打印后照常不退出，contract §7.6） |
 | C6 | 随机端口自动重试 | ✅ M3 | 随机端口上限 20 次；显式端口冲突直接 `EADDRINUSE`（退出码 1）|
 | C7 | realpath 挂载键 + 别名提示 | ✅ M3 | 挂载键 = realpath（同一真实目录幂等）；打印的目录是 realpath 后的 |
-| C8 | 单测/集成测试 | ✅ M0→本轮 | `apps/web/tests/`：171 条端到端（35 个 spec，真实 CLI/gateway + Chromium）；`pnpm test:unit`：426 条单测 |
+| C8 | 单测/集成测试 | ✅ M0→本轮 | `apps/web/tests/`：174 条端到端（36 个 spec，真实 CLI/gateway + Chromium）；`pnpm test:unit`：438 条单测 |
 
 ## 二、Gateway
 
@@ -38,6 +38,7 @@
 | G5 | 启动竞态 | **暂缓** | 用户明确先不考虑 |
 | G6 | supervisor 自拉起 | **未来** | O6 |
 | G7 | degraded 恢复策略 | ✅ M3 | 自动重启一次（2s，新 mountId）+ `diorama restart <dir>`；不阻断请求；页面横幅 |
+| G8 | 索引页（`[gateway] port`） | ✅ v0.8 | 一个**跨重启不变**的地址：列出每个挂载的目录与 URL，整张卡片都是 `<a target="_blank">`，点开就是新窗口；每次请求重渲染；`port = 0`（默认）= 不开；端口被占 fail loud（contract §7.7）|
 
 ## 三、插件内核
 

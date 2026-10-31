@@ -6,7 +6,7 @@
  * are short-lived clients of the control socket (`diorama[-beta].sock`).
  */
 import { join } from 'node:path'
-import { dioramaHome } from 'diorama-kernel/server'
+import { dioramaHome, resolveGatewayConfig } from 'diorama-kernel/server'
 import { serveGateway, type StoppableGateway } from './gateway.ts'
 import { assetsRoot } from './run.ts'
 
@@ -52,14 +52,21 @@ export interface RunOptions {
 /**
  * Run the gateway in the foreground until `close()` (used by `gateway run`
  * and by `--foreground`). Resolves when the socket is bound.
+ *
+ * The index page's address comes from **`$DIORAMA_HOME/diorama.toml` only**
+ * (contract.md §7.7): one gateway serves every mount on the machine, so the
+ * directory being served cannot decide a machine-wide port. A broken file
+ * throws `ConfigError`, exactly like every other read of it.
  */
 export async function runGateway(options: RunOptions = {}): Promise<StoppableGateway> {
   const env = options.env ?? process.env
   const log = options.log ?? ((message: string) => process.stderr.write(`${message}\n`))
+  const { gateway } = resolveGatewayConfig({ home: dioramaHome(env) })
   return serveGateway({
     socket: socketPath(env),
     pidFile: pidPath(env),
     assets: assetsRoot(env),
     log,
+    index: { host: gateway.host, port: gateway.port },
   })
 }
