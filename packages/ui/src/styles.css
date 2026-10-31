@@ -1123,9 +1123,10 @@ body.diorama-resizing {
 /* Selection in the readers (§3.11). The browser paints inline boxes, which with
    one element per line reads as one strip per line — so its highlight is made
    transparent here and `ui/src/selection.ts` paints the rows instead: a row the
-   selection covers to its end is filled edge to edge (that is what joins
-   consecutive rows into one block), a row it only partly covers is filled over
-   the selected characters, measured. Text stays selectable, copyable and
+   selection covers to its end is filled from the text column to the right edge
+   (that is what joins consecutive rows into one block), a row it only partly
+   covers is filled over the selected characters, measured. The gutter is never
+   painted: the number is not selected. Text stays selectable, copyable and
    searchable: only the paint is ours. */
 .diorama-code ::selection,
 .diorama-plaintext ::selection {
@@ -1136,14 +1137,23 @@ body.diorama-resizing {
   position: relative;
 }
 
+/* A block starts where the row's text starts — the gutter holds the line number,
+   which is not part of what was selected (the browser's own paint skips it for
+   the same reason) — and runs to the row's right edge. Every row measures the
+   same column, so the blocks of consecutive rows line up and read as one block. */
 .diorama-line[data-sel='full']::after {
   content: '';
   position: absolute;
-  inset: 0;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--dio-line-gutter, 0px) + var(--dio-sel-left, 0px));
+  right: 0;
   background: var(--dio-selection);
   pointer-events: none;
 }
 
+/* Both kinds of box are measured (`--dio-sel-left` / `--dio-sel-width`, against
+   the text element); they differ in where the box ends and in its tone. */
 .diorama-line[data-sel='part']::after {
   content: '';
   position: absolute;

@@ -3,8 +3,9 @@
  *
  * Pure arithmetic only: which rows a DOM selection covers, and how much of
  * each. The painting itself lives in `selection.ts` (it needs a DOM); the rule
- * that "a row selected to its last character is a full block" is what makes a
- * multi-line selection read as one block instead of a strip per line.
+ * that "a row selected from its first character to its last is a full block" is
+ * what makes a multi-line selection read as one block instead of a strip per
+ * line — while a selection that starts in the middle of a row keeps its head.
  */
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -17,7 +18,7 @@ const lengths = new Map<number, number>([
   [3, 0],
 ])
 
-test('selectionSlices: a row covered to its last character is a full block', () => {
+test('selectionSlices: a row covered from its first character to its last is a block', () => {
   const slices = selectionSlices([{ line: 2, start: 0, end: 10 }], lengths)
   assert.deepEqual(slices, [{ line: 2, start: 0, end: 10, full: true }])
 })
@@ -25,6 +26,14 @@ test('selectionSlices: a row covered to its last character is a full block', () 
 test('selectionSlices: a row covered in part is a run, not a block', () => {
   const slices = selectionSlices([{ line: 2, start: 3, end: 7 }], lengths)
   assert.deepEqual(slices, [{ line: 2, start: 3, end: 7, full: false }])
+})
+
+test('selectionSlices: reaching the last character is not enough — it must start at the first', () => {
+  // The first row of a selection dragged from the middle of that row: every
+  // character to the end is covered, but the row is not whole, so it stays a
+  // run that starts where the reader began.
+  const slices = selectionSlices([{ line: 2, start: 3, end: 10 }], lengths)
+  assert.deepEqual(slices, [{ line: 2, start: 3, end: 10, full: false }])
 })
 
 test('selectionSlices: several rows come back in line order', () => {
@@ -37,9 +46,9 @@ test('selectionSlices: several rows come back in line order', () => {
     lengths,
   )
   assert.deepEqual(slices, [
-    // Line 1 is "abc": reaching character 2 is reaching its last one, so it is
-    // a block (that is what joins it to the line below).
-    { line: 1, start: 1, end: 2, full: true },
+    // Line 1 is "abc" and the run starts at character 1: it reaches the last
+    // character but does not start at the first, so it is a run, not a block.
+    { line: 1, start: 1, end: 2, full: false },
     { line: 2, start: 0, end: 10, full: true },
     { line: 3, start: 0, end: 0, full: false },
   ])
