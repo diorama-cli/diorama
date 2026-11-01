@@ -3,6 +3,16 @@
 Every published version of `@diorama-cli/diorama`, newest first. Generated from
 the commit log by `pnpm release` — see [docs/release.md](docs/release.md).
 
+## 0.0.8 (2026-11-01)
+
+### Features
+
+- **gateway:** an index page at a fixed [gateway] port, listing every mount
+
+### Documentation
+
+- **release:** file the 0.0.8 change lists under their version
+
 ## 0.0.7 (2026-10-29)
 
 ### Features
