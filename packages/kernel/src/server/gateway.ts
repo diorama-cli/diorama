@@ -14,6 +14,7 @@ import { controlError, type MountStatus } from '../shared/control.ts'
 import type { EffectiveConfig } from './config.ts'
 import { createMountServer, listen, type MountServer } from './http.ts'
 import { createIndexServer, type IndexServer } from './index-page.ts'
+import { mountUrl } from './url.ts'
 import type { BootManifest } from './plan.ts'
 import type { RpcDispatcher } from './rpc.ts'
 
@@ -73,17 +74,6 @@ export interface IndexInfo {
   version: string
   contract: string
   startedAt: number
-}
-
-/** Whether a bound port is on every interface (the URL must not say `0.0.0.0`). */
-function displayHost(host: string): string {
-  return host === '0.0.0.0' || host === '::' ? '127.0.0.1' : host
-}
-
-/** `http://host:port/` with IPv6 brackets. */
-export function mountUrl(host: string, port: number): string {
-  const shown = displayHost(host)
-  return `http://${shown.includes(':') ? `[${shown}]` : shown}:${port}/`
 }
 
 /** The single automatic restart waits this long (contract.md §11.1). */

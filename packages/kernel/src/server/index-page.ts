@@ -11,8 +11,9 @@
  * The rows are plain links with `target="_blank"`: the whole point is "click
  * it, the scene opens in a window of its own".
  */
-import { createServer, type Server } from 'node:http'
+import { createServer, type IncomingMessage, type Server } from 'node:http'
 import type { MountStatus } from '../shared/control.ts'
+import { isLoopbackHost, requestHostname } from './url.ts'
 
 export interface IndexPageInfo {
   pid: number
@@ -61,17 +62,47 @@ function stateLabel(mount: MountStatus): string {
   return mount.state
 }
 
+/** The host part of a URL (`http://h:1/` → `h`), or `undefined` when it has none. */
+function urlHost(url: string): string | undefined {
+  const match = /^https?:\/\/(\[[^\]]*\]|[^/:]+)/.exec(url)
+  if (match === null) return undefined
+  return match[1]!.replace(/^\[(.*)\]$/, '$1')
+}
+
+/**
+ * The URL a card points at, from the reader's point of view (contract.md §7.7).
+ *
+ * `mount.url` is the *serving* address the gateway built, and a mount on
+ * loopback says `127.0.0.1` — true for a reader at this machine, and a dead
+ * link for everyone else: their `127.0.0.1` is their own computer. So when the
+ * card's address is loopback but the page was **not** reached over loopback,
+ * the card takes the name the request arrived on (it is the only one known to
+ * work) and keeps the mount's own port.
+ *
+ * Everything else is left alone: a reader on this machine gets the same links
+ * as before, and a mount already serving a real address keeps it.
+ */
+export function cardUrl(url: string, options: { requestHost?: string } = {}): string {
+  const host = options.requestHost
+  if (host === undefined || host === '') return url
+  const served = urlHost(url)
+  if (served === undefined || !isLoopbackHost(served) || isLoopbackHost(host)) return url
+  // Only the host is replaced: the port belongs to the mount, not to this page.
+  const shown = host.includes(':') ? `[${host}]` : host
+  return url.replace(/^(https?:\/\/)(\[[^\]]*\]|[^/:]+)/, (_match, scheme: string) => `${scheme}${shown}`)
+}
+
 /** One mount as a card: the whole card is the link, so a click opens a window. */
-function mountRow(mount: MountStatus): string {
+function mountRow(mount: MountStatus, href: string): string {
   const name = mount.root.slice(mount.root.lastIndexOf('/') + 1) || mount.root
   const config = mount.configFile ?? 'defaults'
   const plugins = mount.plugins.length
   return [
-    `    <li data-testid="gateway-index-mount" data-mount-id="${escapeHtml(mount.mountId)}" data-root="${escapeHtml(mount.root)}" data-url="${escapeHtml(mount.url)}">`,
-    `      <a class="mount mount--${escapeHtml(mount.state)}" href="${escapeHtml(mount.url)}" target="_blank" rel="noopener">`,
+    `    <li data-testid="gateway-index-mount" data-mount-id="${escapeHtml(mount.mountId)}" data-root="${escapeHtml(mount.root)}" data-url="${escapeHtml(href)}">`,
+    `      <a class="mount mount--${escapeHtml(mount.state)}" href="${escapeHtml(href)}" target="_blank" rel="noopener">`,
     `        <span class="mount__name">${escapeHtml(name)}</span>`,
     `        <span class="mount__path">${escapeHtml(mount.root)}</span>`,
-    `        <span class="mount__url">${escapeHtml(mount.url)}</span>`,
+    `        <span class="mount__url">${escapeHtml(href)}</span>`,
     `        <span class="mount__meta">${escapeHtml(stateLabel(mount))} · ${plugins} plugin${plugins === 1 ? '' : 's'} · config: ${escapeHtml(config)}</span>`,
     '      </a>',
     '    </li>',
@@ -82,12 +113,17 @@ function mountRow(mount: MountStatus): string {
  * The document. Pure: the whole page is a function of the mount table, so a
  * test can assert on it without a socket.
  */
-export function renderIndexPage(mounts: readonly MountStatus[], options: { info: IndexPageInfo; socket?: string }): string {
+export function renderIndexPage(
+  mounts: readonly MountStatus[],
+  options: { info: IndexPageInfo; socket?: string; requestHost?: string },
+): string {
   const { info } = options
   const count = mounts.length
+  const href = (mount: MountStatus): string =>
+    cardUrl(mount.url, options.requestHost === undefined ? {} : { requestHost: options.requestHost })
   const body = count === 0
     ? '    <p class="empty" data-testid="gateway-index-empty">No mounts right now — run <code>diorama &lt;dir&gt;</code> to add one.</p>'
-    : `    <ul class="mounts">\n${mounts.map(mountRow).join('\n')}\n    </ul>`
+    : `    <ul class="mounts">\n${mounts.map(mount => mountRow(mount, href(mount))).join('\n')}\n    </ul>`
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -169,6 +205,12 @@ ${body}
 `
 }
 
+/** The name this request was addressed to, when it names one (contract.md §7.7). */
+function requestHostOf(request: IncomingMessage): { requestHost?: string } {
+  const host = requestHostname(request.headers.host)
+  return host === undefined ? {} : { requestHost: host }
+}
+
 /**
  * The index listener. Every request is a fresh render: the table changes as
  * mounts come and go, and a cached page would be a lie.
@@ -192,6 +234,7 @@ export function createIndexServer(options: IndexServerOptions): IndexServer {
     try {
       page = renderIndexPage(options.list(), {
         info: options.info,
+        ...requestHostOf(request),
         ...(options.socket === undefined ? {} : { socket: options.socket }),
       })
     } catch (failure) {

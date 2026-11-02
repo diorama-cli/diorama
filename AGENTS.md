@@ -13,7 +13,12 @@
 | 3 | [docs/features.md](docs/features.md) | **有什么**：能力清单与档位（✅ / v1 / 未来 / 不做） |
 | 4 | 最近一档的 `docs/mN/spec.md` | **怎么实现的** + **§6.2 的坑**（见下面 §5） |
 
-最近一档是 [docs/m28/spec.md](docs/m28/spec.md)（**gateway 的索引页**：`[gateway] port` 一给，gateway
+最近一档是 [docs/m29/spec.md](docs/m29/spec.md)（**gateway 的绑定 IP**：`[gateway] host` 本来就能绑，
+这一档补的是「绑到 `0.0.0.0` 之后从别的机器打开索引页，卡片链接写死 `127.0.0.1`，点开是死链」——
+卡片地址是 loopback 且这次请求不是从 loopback 来时，主机名换成 `Host` 头里的那个（端口仍是挂载自己的），
+其余情况一字不改；`url.ts` 收拢地址 ↔ URL 的纯函数，索引页不再 import 挂载表；`fetch` 设不了 `Host`，
+测这条要么纯函数、要么真用 LAN 地址访问。契约 §7.7、§41）；
+上一档是 [docs/m28/spec.md](docs/m28/spec.md)（**gateway 的索引页**：`[gateway] port` 一给，gateway
 多一个固定地址——一页列出每个挂载的目录与 URL，整张卡片都是 `<a target="_blank">`，点开就是新窗口；
 每次请求重渲染，零挂载是一句话；`port = 0`（默认）**表示不开**，因为随机端口的索引页等于没有。
 它**只**读 `$DIORAMA_HOME/diorama.toml`（一个进程服务整台机器，项目文件不该决定机器级端口），
@@ -209,6 +214,8 @@ scripts/                  生成器（图标表；`pnpm icons` 重新生成）
 | 按行渲染之后「圈选多行是一堆长短不一的条」 | 浏览器只画 **inline box**，行号格被 `user-select: none` 跳过，块边界之间还有缝 | 选区**自己画**（`ui/src/selection.ts`）：原生高亮透明，按行填满整行 / 实测局部；位置用 `Range` 量，不要用 `ch`（tab 与字体都会偏）（m27/spec §6 坑 6–7）|
 | 连按两次「跳转到第 42 行」，第二次没有闪烁动画 | 同一个 DOM 元素重渲染**不会重放** CSS 动画 | 闪烁带的 `key` 用请求的单调戳（`revealed.at`），新请求 = 新元素（m27/spec §6 坑 3）|
 | `:999` 在十行的文件里「什么都没发生」 | reveal 的区间由**渲染器**夹进文件：store 不知道文件多长 | `useRevealLine(path, focus, count)` 的 `count` 是行数；e2e 用「`:999` 仍有一条带」锁住（m27/spec §6 坑 2）|
+| 想让测试「假装从别的机器访问」（改 `Host` 头），服务端却一直看到 `127.0.0.1` | **`fetch`（undici）静默丢掉 `host` 头**；Playwright 的 `extraHTTPHeaders` 与 `route.continue({ headers })` 也一样（实测都丢） | 要么在纯函数上测（`cardUrl`），要么 `node:http` 手搓请求，要么真的用本机 LAN 地址访问（m29/spec §6 坑 1）|
+| 索引页绑到 `0.0.0.0`，从手机点卡片「无法访问此网站」 | 卡片链接是 `MountStatus.url`，loopback 挂载报的是 `127.0.0.1`——在手机上那是**手机自己** | 卡片地址是 loopback 且请求不是从 loopback 来时，主机名换成 `Host` 头里的那个（端口仍是挂载的）；判据是**请求**不是配置（m29/spec §2）|
 
 ## 6. 边界（不要越过的线）
 
