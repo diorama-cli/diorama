@@ -1,6 +1,6 @@
 {
   "name": "@diorama-cli/diorama",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "private": false,
   "description": "A live diorama of your files: serve any directory as a browsable scene (tree, tabs, Markdown, code, git, search).",
   "type": "module",

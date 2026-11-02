@@ -3,6 +3,16 @@
 Every published version of `@diorama-cli/diorama`, newest first. Generated from
 the commit log by `pnpm release` — see [docs/release.md](docs/release.md).
 
+## 0.0.9 (2026-11-02)
+
+### Features
+
+- **gateway:** index-page cards follow the name the reader reached them by
+
+### Other
+
+- gateway bind IP onto main
+
 ## 0.0.8 (2026-11-01)
 
 ### Features
