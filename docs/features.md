@@ -38,7 +38,7 @@
 | G5 | 启动竞态 | **暂缓** | 用户明确先不考虑 |
 | G6 | supervisor 自拉起 | **未来** | O6 |
 | G7 | degraded 恢复策略 | ✅ M3 | 自动重启一次（2s，新 mountId）+ `diorama restart <dir>`；不阻断请求；页面横幅 |
-| G8 | 索引页（`[gateway] port`） | ✅ v0.20 | 一个**跨重启不变**的地址：列出每个挂载的目录与 URL，整张卡片都是 `<a target="_blank">`，点开就是新窗口；每次请求重渲染；`port = 0`（默认）= 不开；端口被占 fail loud（contract §7.7）|
+| G8 | 索引页（`[gateway] port`） | ✅ v0.21 | 一个**跨重启不变**的地址：列出每个挂载的目录与 URL，整张卡片都是 `<a target="_blank">`，点开就是新窗口；每次请求重渲染；`port = 0`（默认）= 不开；端口被占 fail loud；`[gateway] host` 决定绑哪块网卡，`0.0.0.0` 下从别的机器打开时卡片链接跟着 `Host` 头走（contract §7.7、§41）|
 
 ## 三、插件内核
 

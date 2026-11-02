@@ -22,6 +22,7 @@ import {
   dioramaHome,
   rpcError,
   listen,
+  mountUrl,
   planPlugins,
   resolveConfig,
   type BootManifest,
@@ -361,8 +362,7 @@ export async function main(argv: readonly string[], env: NodeJS.ProcessEnv = pro
     return 2
   }
 
-  const displayHost = config.host === '0.0.0.0' || config.host === '::' ? '127.0.0.1' : config.host
-  const url = `http://${displayHost.includes(':') ? `[${displayHost}]` : displayHost}:${port}/`
+  const url = mountUrl(config.host, port)
   const mount: MountStatus = {
     mountId,
     root,

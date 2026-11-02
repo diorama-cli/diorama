@@ -104,11 +104,11 @@ export {
   type IndexServer,
   type IndexServerOptions,
 } from './index-page.ts'
+export { displayHost, isLoopbackHost, isWildcardHost, mountUrl, requestHostname } from './url.ts'
 export { shellTitle, withShellTitle } from './shell-title.ts'
 export {
   Gateway,
   MAX_PORT_ATTEMPTS,
-  mountUrl,
   newMountId,
   type GatewayMount,
   type GatewayMountInput,

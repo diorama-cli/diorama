@@ -166,3 +166,45 @@ test('7c. an index port that is taken fails loud, naming the port', async () => 
     rmSync(second, { recursive: true, force: true })
   }
 })
+
+/**
+ * A non-loopback IPv4 of this machine, or `undefined` (a CI box may have none).
+ * The rewrite below only happens for a reader who did **not** come in on
+ * loopback, so the test needs a real second address.
+ */
+async function lanAddress(): Promise<string | undefined> {
+  const { networkInterfaces } = await import('node:os')
+  for (const addresses of Object.values(networkInterfaces())) {
+    for (const address of addresses ?? []) {
+      if (address.family === 'IPv4' && !address.internal) return address.address
+    }
+  }
+  return undefined
+}
+
+test('7d. a reader on the LAN gets card links they can actually open', async () => {
+  const lan = await lanAddress()
+  test.skip(lan === undefined, 'this machine has no non-loopback IPv4')
+  const port = await freePort()
+  const home = mkdtempSync(join(tmpdir(), 'diorama-index-'))
+  // Both halves widened: the index page *and* the mounts it lists. Only then is
+  // there a second address for the cards to point at.
+  writeFileSync(join(home, 'diorama.toml'), 'host = "0.0.0.0"\n\n[gateway]\nhost = "0.0.0.0"\nport = ' + port + '\n')
+  const directory = fixture({ 'one.txt': 'one\n' })
+  try {
+    expect((await diorama(home, [directory.root])).code).toBe(0)
+    // Reached by its LAN name, the page must not hand out `127.0.0.1`: on the
+    // reader's machine that address is their own computer.
+    const page = await (await fetch('http://' + lan + ':' + port + '/')).text()
+    const href = /href="([^"]+)"/.exec(page)?.[1]
+    expect(href).toBeDefined()
+    expect(href).toContain(lan)
+    expect(href).not.toContain('127.0.0.1')
+    // And the link really works: that address serves the mount's own page.
+    expect((await fetch(href!)).status).toBe(200)
+  } finally {
+    await diorama(home, ['gateway', 'stop', '--force'])
+    rmSync(home, { recursive: true, force: true })
+    directory.dispose()
+  }
+})
