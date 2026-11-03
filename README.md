@@ -19,6 +19,7 @@ Diorama 是一个**只读的文件查看器**：在任意目录执行一条命�
 - **搜索**：按内容（字面量 / 正则、大小写、全字匹配）或按文件名（子序列，VS Code `Ctrl+P` 口径）；点结果直接打开文件并跳到那一行。`mod+p` 随时快速打开文件。不做索引，每次现场扫描，遵守 `ignore` 规则。
 - **命令与快捷键**：命令面板（`mod+k`）与快捷键共用一套命令注册表；按 `?` 查看全部快捷键速查。**按住 ⌘ / Ctrl（或 ⌥）时，标签页与侧栏图标会浮出各自的快捷键**——浮层不挤动布局，松手即消失。
 - **主题**：默认跟随系统明暗（系统切换即时生效），`mod+alt+t` 或命令面板里锁定亮色 / 暗色；选择记在浏览器里、写进 URL（`#theme=dark`），刷新与分享都不闪。**每个目录可以在 `diorama.toml` 的 `[ui] theme` 里给自己的默认主题**（`system` / `light` / `dark` / 某个主题 id）——那是**起点**，你自己选过就以你的为准。第三方插件可以用 `ctx.theme.register({ id, title, scheme, tokens })` 加主题——一组 CSS 自定义属性，不用写 UI 就出现在命令面板里。
+- **状态栏**：页面底部一条——左边是**实例**（挂载的完整根目录路径、`mountId`、页面地址），中间是**当前文件**（路径、大小、行数、最后修改时间；diff 标签页另有「差异」标记），右边是标签页数量。它由一个内置 piece 填充，去掉那个 piece 就没有这条栏。
 - **实时刷新**：文件变化自动更新树与内容（300ms 合并，可在页面里关闭自动刷新）。
 - **网页标题是目录名**：浏览器标签条上写的是这个挂载的目录（`basename`），同时开着几个目录一眼分得清。
 - **URL 深链**：`/~/<路径>` 直接打开某个文件，刷新后恢复活动标签；git 视图的 `#diff`、`#history=<sha>` 同样可分享。
@@ -38,13 +39,13 @@ diorama .
 diorama serving /path/to/your/project
   http://127.0.0.1:54321/
   config: none (defaults)
-  [mount:78853ab4] plugins: slots, layout, file-tree, tabs, renderer-registry, plaintext, markdown, code, image, pdf, html, palette, help, theme, git-changes, search-view
+  [mount:78853ab4] plugins: slots, layout, file-tree, tabs, renderer-registry, plaintext, markdown, code, image, pdf, html, palette, help, theme, git-changes, search-view, status-bar
   hidden: .git, node_modules
 ```
 
 打开打印出的 URL 即可。默认监听 `127.0.0.1` 并随机分配端口；对同一目录重复执行是幂等的，不会重复占用端口。
 
-内置 15 个插件，装完即用，不需要再安装任何东西。发布包是一个整体：内核、UI 原语与全部内置插件都内联在内，运行时依赖只有 `cordis`。
+内置 17 个插件，装完即用，不需要再安装任何东西。发布包是一个整体：内核、UI 原语与全部内置插件都内联在内，运行时依赖只有 `cordis`。
 
 ## CLI 命令
 
@@ -223,6 +224,7 @@ scripts/                  生成器（图标表；pnpm icons 重新生成）
 | `theme` | 主题命令（跟随系统 / 亮色 / 暗色，`mod+alt+t`）与每个已注册主题的 `theme.use:<id>` |
 | `git-changes` | 左栏「变更」与「历史」视图、diff 与提交详情座位 |
 | `search-view` | 左栏「搜索」视图与 `mod+p` 快速打开 |
+| `status-bar` | 页面底部的状态栏（实例信息与当前文件） |
 
 ### 写插件
 

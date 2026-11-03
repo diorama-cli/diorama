@@ -1179,6 +1179,7 @@ port = 0                    # 0 = 不开索引页；非 0 = 固定地址
 | `sidebar.views` | **keyed** | `layout` | N | 左侧栏的视图（**key = 视图 id**：`files`、`changes`、`search`…），`layout` 画切换器（§5.2） |
 | `tabs.content` | **keyed** | `tabs` | N | 每个 tab 的内容区（**key = tab id**，§3.4） |
 | `file.renderer` | keyed（内部排序） | `renderer-registry` | N | 按文件类型派发；M1 起带 matcher（§5.1） |
+| `layout.status` | 单 | `layout` | 1 | 页面底部的状态栏（§5.4）：实例（**完整根目录路径** / mount id / 地址）与当前文件的路径、大小、行数、修改时间。**没填就没有状态栏** |
 | `layout.overlay` | **list**（v0.7） | `layout` | N | 覆盖层：命令面板（`palette`）、快捷键说明（`help`）等命令面。座位是 list，但同一时刻只有一个“开着”（§3.7 覆盖层互斥） |
 | `seats.git-diff` | 单 | `tabs` | 1 | `view: 'diff'` 的 tab 画在这里（v0.5）；没填时该 tab 显示「没有 diff 渲染器」 |
 | `seats.git-commit` | 单 | `git-changes` | 1 | 历史视图选中的提交的详情（v0.6）；**不是 tab**，由 `git-changes` 自己声明、自己填；没填时右侧不显示提交详情 |
@@ -1197,7 +1198,9 @@ port = 0                    # 0 = 不开索引页；非 0 = 固定地址
   `sidebar.views` / `tabs.content` 同一条规则，这样速查表的滚动位置、palette 的查询词都留得住），
   “谁开着”由页面全局的 `overlayStore`（`diorama-ui`）回答。开一个即关掉另一个。
   **不用内核服务**：这是页面 UI 状态；**也不能靠 import 互相知道**：每个 client 半边是各自的构建。
-- **`statusbar`：v1 不做**，从 slot 表移除（需要时再议）。
+- **`statusbar`（v0.22 起）：`layout.status`，单座位**。曾经的"v1 不做"是因为当时它只是一个想法；
+  现在的形态是「一个座位、一个内置 piece（`status-bar`）」——座位由 `layout` 声明并画在框架下方，
+  条目来自 piece，**没填就不画**（与侧栏、覆盖层同一条规则）。详见 §5.4。
 - **没有 toolbar**：只读工具没有“要对文件做的事”，v1 不提供 `file.toolbar` / `tabs.actions`（O8）。
 - **回退链**：`file.renderer` 的条目按 §5.1 排序，命中者渲染；渲染抛错 → 标记失败 → **尝试下一个**；matcher 全不命中 → 兜底条目（plaintext）；一个条目都没有 → 「无可用渲染器」。
 
@@ -1228,6 +1231,39 @@ port = 0                    # 0 = 不开索引页；非 0 = 固定地址
 - **预览 iframe 不跟主题**：预览的 HTML 是「文件是内容」，默认白底（`--dio-frame-bg`），
   文件自己的样式说了算。
 
+### 5.4 `layout.status`：状态栏（v0.22 定）
+
+页面底部的一条状态栏：左边说**这是哪个实例**（挂载的**完整根目录路径**、`mountId`、页面地址），中间说**正在读的文件**
+（挂载相对路径、大小、行数、最后修改时间；这个 tab 显示的是工作区改动时另有一个「差异」标记），右边说**开了几个标签页**。
+
+```ts
+// layout 声明、layout 画；条目没有 props（它从 mountCtx / ctx.tabs / ctx.fs 自己读）
+'layout.status': { kind: 'single' }
+```
+
+规则：
+
+- **座位是 `layout` 的，条目是 piece 的**：与 `sidebar.views` / `layout.overlay` 同一分工——框架的几何由
+  `layout` 负责，栏里写什么由填它的 piece 负责（本档的内置 piece 是 `status-bar`，`order: 100`）。
+- **单座位**：一个页面只有一条状态线。想加一格的 piece 应该让拥有这条栏的 piece 加，而不是注册第二条栏——
+  两条状态线谁在上谁在下没有正确答案。
+- **没填就没有栏**：座位空着时 `layout` 连 `<footer>` 都不画（M0 验收点 3：每个 piece 都是可选的），
+  `--plugins` 去掉 `status-bar` 的页面与这一档之前**逐像素相同**。
+- **不占别人的高度**：`layout` 的根是纵向 flex——框架 `flex: 1 1 auto; min-height: 0`，栏 `flex: none`。
+  加一条栏不会让窗口开始滚动，也不会改变 tab 条、侧栏、渲染器里任何东西的几何（它们只是少了一行的高度）。
+- **它只是装饰**：读不到文件（`ENOENT`、`EBINARY`、过大）时**省掉那几格**，不在栏里报错——文件读不出来的原因
+  由 tab 自己说（渲染器的错误面），状态栏再喊一遍只是噪音。
+- **行数有上限**：数行要读全文，所以超过 `MAX_LINES_BYTES`（2 MiB）的文件只给大小与时间。大小与时间是
+  一次 `stat`，一直在。
+- **行数的口径与阅读器一致**：末尾的换行是最后一行的结束，不是多出来的一行空行（`ui/src/lines.tsx` 与
+  渲染器都按这个口径数）。
+- **根目录路径写全路径，但缩下去的只能是父路径**：三个 checkout 可以都叫 `diorama`，「这是哪个目录」
+  由**整个路径**回答；宽度不够时父路径出省略号，**最后一段（目录自己的名字）不缩、不淡**——
+  被吃掉的永远不是读者要找的那一段。
+- **跟随变化**：换 tab、文件所在目录报出改动（`fs.watch`）、断线重连之后都重读一次（contract §4 的
+  `onReconnect`：断网期间的写盘没有事件）。
+- **不用新服务**：读的是内核已有的 `mountCtx`（`root` / `mountId` / `baseUrl` / `fs` / `rpc`）与 `ctx.tabs`
+  （那个 piece 不在页面里时按「没有标签页」画）。
 ### 5.2 `sidebar.views`（v0.5 定）
 
 侧栏是**一条栏、多个视图**，由 `layout` 拥有与绘制：
@@ -2683,11 +2719,41 @@ URL / hash 语义、主题 token 表（新样式只用既有 token，无新 toke
   `extraHTTPHeaders` 与 `route.continue` 也一样。测这条规则要么在纯函数（`cardUrl`）上测，
   要么用 `node:http` 手搓请求 / 真的用 LAN 地址访问。
 
+## 42. `0.0.9` 之后：页面底部的状态栏（未发版，下一个 `0.0.x`）
+
+> 2026-11-02。用户要求：「界面底部增加状态栏，显示实例信息、当前文件信息等」。
+> 契约不升号（§6）：没有新增内核服务、没有改 `ctx.*` 签名；新增一个座位（`layout.status`）与一个
+> 内置 piece（`status-bar`）。
+
+| 条款 | 本档之前 | 本档 |
+|---|---|---|
+| §5 slot 清单 | `statusbar` 在 v0.1 草案里，v1 标为「不做」，已从表里移除 | 新增 `layout.status`（单，`layout` 声明与绘制） |
+| §5 内置插件 | 16 个 | 17 个：新增 `status-bar`（客户端 piece，进默认清单与 boot 顺序末尾） |
+| 栏里的根路径 | — | **完整路径**（不是 `basename`）：拆成「父路径 + 最后一段」，窄了只有父路径出省略号（`splitRoot`，§5.4） |
+| §5.4 | — | 新的一节：状态栏写什么、为什么是单座位、为什么空着不画 |
+| `layout` 的根 | 框架 + 覆盖层（两个兄弟） | 框架与状态栏同在一个纵向 flex 里（`.diorama-shell`），覆盖层仍在外面 |
+| `--plugins` 去掉 `status-bar` 的页面 | — | 与之前**逐像素相同**（座位空着连 `<footer>` 都不画） |
+
+细则：
+
+- **为什么是座位而不是把栏画进 `layout`**：`layout` 已经只做「框架的几何」这件事——侧栏的宽度、
+  切换器、覆盖层座位都是几何；栏里**写什么**是另一件事，和 palette / help 属于同一类（内容归 piece）。
+  一个座位让「不想要状态栏」变成 `--plugins` 里少一个 id，而不是改 `layout`。
+- **为什么是单座位**：一条状态线只有一处能放。两个 piece 各注册一条，谁上谁下没有正确答案；
+  要加一格的人应该改拥有这条栏的 piece（本档就是 `status-bar`），与 `layout.main` 的取舍相同。
+- **为什么空着不画**：M0 验收点 3 的语义——每个 piece 都是可选的，去掉一个 piece 剩下的东西必须
+  仍然成立。一条空白的状态栏不是「没有状态栏」，它是一行背景色。
+- **为什么不加服务**：栏要的东西全在页面上——`mountCtx`（`root` / `mountId` / `baseUrl` / `fs` / `rpc`）
+  与 `ctx.tabs`。再加一个 `ctx.status` 只会多一份要同步的状态。
+- **为什么行数有上限**：数行要读全文。2 MiB 以上的文件只报大小与时间（一次 `stat`），
+  免得每次换 tab 都读一个大日志。
+
 ## 待定清单（v0.4 后仍 🔲）
 
 - [x] `ctx.git` 具体签名（只读：diff / status / log）— v0.5 定（§3.2）
 - [x] git history 视图（`show` / 提交列表在左栏的落点）— v0.6 定（§3.2、§5、§5.2）
 - [ ] `ctx.layout` 的服务面（overlay 走 slot）
+- [x] 状态栏（曾经的 U9「v1 不做」）— v0.22 定（§5.4、§42）：座位 `layout.status` + 内置 piece `status-bar`
 - [ ] `ctx.storage` 签名（跨 mount 的偏好同步）— 待定（主题偏好在 v0.9 已落浏览器 `localStorage`，§3.10；服务端同步留给 K14）
 - [ ] 插件异步任务托管 API — 待定
 - [x] O8 的 diff 部分：v0.10 定了**三档读法**（行内 / 整文件单栏 / 新旧双栏）+ 变更块间导航，开关归渲染器头部（§23）；图片缩放、Markdown 源码/预览仍在 O8 里

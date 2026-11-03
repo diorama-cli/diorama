@@ -2,7 +2,8 @@
  * layout — the split frame.
  *
  * Registers one component into the kernel's `root` seat, declares the seats it
- * owns (`sidebar.views`, `layout.main`, `layout.overlay`) and renders them.
+ * owns (`sidebar.views`, `layout.main`, `layout.status`, `layout.overlay`) and
+ * renders them.
  *
  * The left column is one column with **several views** (contract.md §5.2):
  * every piece registers into `sidebar.views` under a key of its own (`files`,
@@ -19,7 +20,7 @@ import type { Context } from 'cordis'
 import type { MountHandle } from 'diorama-kernel'
 import type { CommandsService } from 'diorama-kernel/client'
 import { useCallback, useLayoutEffect, useRef, useSyncExternalStore, type CSSProperties, type ReactElement } from 'react'
-import { iconSvg, KeyHint, provideEntry, Slot, Splitter, useHeldModifier, useKeyedSeat, useKernel, usePaneSize } from 'diorama-ui'
+import { iconSvg, KeyHint, provideEntry, Slot, Splitter, useHeldModifier, useKeyedSeat, useKernel, usePaneSize, useSeat } from 'diorama-ui'
 import type {} from 'diorama-plugin-slots'
 import type { SidebarViewProps, SlotEntry } from 'diorama-plugin-slots'
 import { readFolded, SIDEBAR_RAIL_PX, storeFolded } from './sidebar.ts'
@@ -247,6 +248,10 @@ const DECLARE = {
   // One column, many views: the key is the view id (contract.md §5.2).
   'sidebar.views': { kind: 'keyed' },
   'layout.main': { kind: 'single' },
+  // The bar under the frame (contract.md §5.4): one line for the whole page,
+  // filled by a piece (the `status-bar` one in this build). Single, and drawn
+  // only while it has an occupant — a page without that piece has no bar.
+  'layout.status': { kind: 'single' },
   // The overlay seat (contract.md §5, v0.7): every command surface draws here,
   // above the frame and outside it, and they take turns rather than stack
   // (the page-global `overlayStore` in `diorama-ui` decides which one is up).
@@ -587,10 +592,52 @@ function Overlay() {
   )
 }
 
+/**
+ * The bar under the frame (contract.md §5.4).
+ *
+ * A **single** seat with an occupant from another piece: the bar's contents are
+ * that piece's business, the bar's existence and geometry are the frame's. It is
+ * drawn only while something fills it, so a page without the `status-bar` piece
+ * has exactly the frame it had before this seat existed (M0 acceptance point 3:
+ * every piece stays optional).
+ *
+ * No early return above this component's hooks — it has none of its own, and
+ * `Slot` subscribes on every render (docs/m15/spec.md §6 trap 1).
+ */
+function StatusLine() {
+  // Drawn only while the seat has an occupant: an empty footer would be a line
+  // of the frame's background under a page that never asked for a bar.
+  const entries = useSeat('layout.status')
+  if (entries.length === 0) return null
+  return (
+    <footer className="diorama-statusbar-slot" data-slot="layout.status">
+      <Slot
+        name="layout.status"
+        empty={null}
+        exhausted={() => null}
+        render={entry => {
+          const Bar = entry.component as unknown as (props: object) => ReactElement | null
+          return <Bar />
+        }}
+      />
+    </footer>
+  )
+}
+
+/**
+ * The page: the frame, the bar under it, and the overlays above both.
+ *
+ * The frame and the bar share one column (the shell is a flex column, see the
+ * stylesheet), so the bar takes its own height and the frame gets the rest —
+ * a reader's window never scrolls just because a status line exists.
+ */
 function LayoutRoot(_props: LayoutRootProps) {
   return (
     <>
-      <SplitFrame />
+      <div className="diorama-shell">
+        <SplitFrame />
+        <StatusLine />
+      </div>
       <Overlay />
     </>
   )
