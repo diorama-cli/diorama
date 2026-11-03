@@ -53,6 +53,10 @@ const halves: Record<BuiltinPluginId | KernelServiceId, HalfLoader> = {
   // the kernel's server service, which every mount provides whether or not this
   // piece is selected (the same split as `git` / `git-changes`).
   'search-view': () => import('diorama-plugin-search-view'),
+  // The bar under the frame (contract.md §5.4). A client piece with no server
+  // half of its own; it is in this map because every id in the selection is
+  // resolved through it.
+  'status-bar': () => import('diorama-plugin-status-bar'),
 }
 
 /** Resolve the server-half module of one plugin id. */

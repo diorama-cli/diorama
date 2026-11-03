@@ -192,11 +192,115 @@ code {
   font-size: 12px;
 }
 
-/* Layout piece */
+/* Layout piece.
+
+   The page is a **column**: the frame (sidebar + main) takes everything but the
+   status line, and the bar (contract.md §5.4) keeps its own height at the
+   bottom. `min-height: 0` on the frame is what lets a long file scroll inside
+   it instead of stretching the column. */
+.diorama-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
 .diorama-layout {
   display: grid;
   grid-template-rows: 1fr;
-  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* The seat the bar lives in (contract.md §5.4). It draws nothing itself: the
+   bar is a piece's entry, and an empty seat is not rendered at all (layout
+   returns `null`), so this rule only exists for the occupied case. */
+.diorama-statusbar-slot {
+  flex: none;
+  min-width: 0;
+  border-top: 1px solid var(--dio-border);
+  background: var(--dio-panel);
+}
+
+/* The status bar piece. One line of small text, cells separated by space; the
+   path is the only cell that may shrink, and it truncates with an ellipsis
+   rather than pushing the cells after it out of the window. */
+.diorama-statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  height: 24px;
+  padding: 0 12px;
+  color: var(--dio-muted);
+  font: 11.5px/1 var(--dio-font);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.diorama-statusbar__group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* The file group takes the middle and may shrink: the instance on the left and
+   the tab count on the right stay whole. */
+.diorama-statusbar__group--file {
+  flex: 1 1 auto;
+  justify-content: center;
+}
+
+.diorama-statusbar__item {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The served directory, in full (contract.md §5.4). It is a flex row of two
+   parts so that shrinking costs the *parent* and never the name: the name is
+   what a reader scans for, and an ellipsis there would hide the one segment
+   that distinguishes two checkouts. */
+.diorama-statusbar__root {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  font-family: var(--dio-mono);
+  font-size: 11px;
+}
+
+.diorama-statusbar__root-parent {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dio-muted);
+}
+
+/* The last segment is the directory's own name: full contrast, and it never
+   shrinks. */
+.diorama-statusbar__root-name {
+  flex: none;
+  color: var(--dio-text);
+  font-weight: 600;
+}
+
+.diorama-statusbar__path {
+  color: var(--dio-text);
+  font-family: var(--dio-mono);
+  font-size: 11px;
+}
+
+/* A tab that shows a diff rather than the file: one word, in the accent. */
+.diorama-statusbar__badge {
+  flex: none;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--dio-selected);
+  color: var(--dio-accent);
+  font-size: 10px;
+  line-height: 14px;
 }
 
 .diorama-layout--split {

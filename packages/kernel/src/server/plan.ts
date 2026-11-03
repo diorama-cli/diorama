@@ -47,6 +47,7 @@ export const BUILTIN_PLUGIN_IDS = [
   'theme',
   'git-changes',
   'search-view',
+  'status-bar',
 ] as const
 
 export type BuiltinPluginId = (typeof BUILTIN_PLUGIN_IDS)[number]

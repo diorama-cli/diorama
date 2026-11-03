@@ -51,6 +51,7 @@ test('config: defaults match contract §4.1', () => {
     'theme',
     'git-changes',
     'search-view',
+    'status-bar',
   ])
 })
 

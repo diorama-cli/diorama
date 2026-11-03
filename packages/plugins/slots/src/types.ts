@@ -83,6 +83,13 @@ export interface SlotMap {
   'sidebar.views': SidebarViewProps
   /** Content area below the tab strip, declared by the `tabs` piece. */
   'tabs.content': { tab: TabInfo }
+  /**
+   * The bar under the frame, declared by `layout` (contract.md §5.4). A
+   * **single** seat: the page has one status line, and a piece that wants to
+   * add a cell asks the piece that owns the bar rather than registering a
+   * second bar. Absent entry = no bar (every piece stays optional).
+   */
+  'layout.status': Record<string, never>
   /** Dispatch seat for file content, declared by `renderer-registry`. */
   'file.renderer': FileRendererProps
   /**

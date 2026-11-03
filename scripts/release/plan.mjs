@@ -14,9 +14,9 @@
  * | what | where | why it has to move |
  * |---|---|---|
  * | the published version | `packages/cli/package.json` | the only public package |
- * | the 19 internal versions | `packages/**` | they ship inside the bundle; one number reads better than 19 |
+ * | the 20 internal versions | `packages/**` | they ship inside the bundle; one number reads better than 20 |
  * | the contract version | `kernel/src/contract.ts` | contract.md §6: it moves *at* a release |
- * | the 17 contract ranges | every `diorama.contract` | a stale range makes the new kernel refuse its own pieces |
+ * | the 18 contract ranges | every `diorama.contract` | a stale range makes the new kernel refuse its own pieces |
  * | the docs quoting the number | contract.md, features.md, AGENTS.md, README.md | people read them, and the README ships to npm |
  *
  * Missing any one is silent: the tarball still builds, and the failure only

@@ -26,9 +26,9 @@ CI **不做**任何版本决策，所以不会出现"merge 就自动发一版"�
 | # | 是什么 | 在哪 | 谁改 | 漏了会怎样 |
 |---|---|---|---|---|
 | 1 | **npm 发布版本** | `packages/cli/package.json` | `pnpm release` | npm 上是旧号，`npm i -g` 装到旧包 |
-| 2 | 内部包版本（19 个） | `packages/**/package.json` | `pnpm release` | 无功能影响，但仓库内版本对不上 |
+| 2 | 内部包版本（20 个） | `packages/**/package.json` | `pnpm release` | 无功能影响，但仓库内版本对不上 |
 | 3 | **契约版本** | `kernel/src/contract.ts` 的 `CONTRACT_VERSION` / `CONTRACT_RANGE` | `pnpm release` | 内核仍自称旧版本 |
-| 4 | **manifest 契约范围**（17 个） | 每个 `diorama.contract` | `pnpm release` | **新内核拒绝加载自己的内置插件**（最致命） |
+| 4 | **manifest 契约范围**（18 个） | 每个 `diorama.contract` | `pnpm release` | **新内核拒绝加载自己的内置插件**（最致命） |
 | 5 | 文档里的号 | `contract.md` / `features.md` / `AGENTS.md` / `README.md` | `pnpm release` | 读者看到旧号；README 会发布到 npm |
 | 6 | `bin/` 里的号 | `bin/diorama` / `bin/diorama-beta` | 无需改 | 已改成从 `package.json` 读 |
 
@@ -46,7 +46,7 @@ pnpm release next          # 0.0.2 → 0.0.3，也可以写死 pnpm release 0.0.
 脚本按顺序做六件事，任何一步失败就停：
 
 1. **要求干净的工作树**——否则散落的改动会被一起提交，tag 指向没人审过的 commit。
-2. **算出全部改动**：24 个文件（20 个 manifest + `contract.ts` + 4 个文档）。
+2. **算出全部改动**：25 个文件（21 个 manifest + `contract.ts` + 4 个文档）。
 3. **写 `CHANGELOG.md`**：从上一个 tag 以来的提交生成，conventional-commit 类型分节，
    解析不了的归到 "Other" 而不是丢掉。
 4. **跑四件套**：`pnpm build`、`pnpm test:unit`、`pnpm -r --no-sort run typecheck`。
