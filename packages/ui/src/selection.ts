@@ -16,12 +16,17 @@
  *   (`.diorama-code`, `.diorama-plaintext`), so text stays selectable, copyable
  *   and searchable exactly as before;
  * - a `selectionchange` listener turns the DOM range into **row boxes**:
- *   a row fully covered is a full-width block, a row covered in part is a run
- *   from its first character to its last. The gutter is always included, which
- *   is what makes consecutive rows join into one block.
+ *   every box starts at the row's **first selected character** and a row
+ *   covered to its end runs from there to the right edge. **The gutter is
+ *   never painted** — the line numbers are not part of what was selected, and
+ *   a box that covered them would say otherwise. What joins consecutive rows
+ *   into one block is the gutter being *constant*: the rows below the first
+ *   start at the same x and run to the same right edge, so there is no step
+ *   between them.
  *
- * The boxes are drawn by CSS on the rows themselves (`data-sel` plus two custom
- * properties), so nothing is re-rendered and scrolling costs nothing.
+ * The boxes are drawn by CSS on the rows themselves (`data-sel` plus a custom
+ * property for the column the text starts at), so nothing is re-rendered and
+ * scrolling costs nothing.
  *
  * No React: the rows are plain elements, and `node --test` can pin the
  * arithmetic (`selectionBoxes`) without a DOM.
@@ -47,6 +52,11 @@ export interface SelectionSlice {
  * but a caller may hand several (a future multi-cursor, a search highlight), and
  * two runs on one line must read as one slice rather than two boxes that meet.
  * Input is not assumed to be sorted.
+ *
+ * `full` means "this row is selected from its first character to its last", and
+ * is the only case drawn to the row's edges. A run that starts in the middle of
+ * a row stays a run: a selection whose first line was dragged from the middle
+ * of that line must show where it begins, not the whole line.
  */
 export function selectionSlices(runs: readonly Omit<SelectionSlice, 'full'>[], lineLengths: ReadonlyMap<number, number>): SelectionSlice[] {
   const byLine = new Map<number, { start: number; end: number }>()
@@ -61,9 +71,12 @@ export function selectionSlices(runs: readonly Omit<SelectionSlice, 'full'>[], l
   const slices: SelectionSlice[] = []
   for (const [line, run] of [...byLine].sort((a, b) => a[0] - b[0])) {
     const length = lineLengths.get(line) ?? 0
-    // The last character of the row is its newline: selecting it means the
-    // whole line is selected (an editor shows that as a full-width block).
-    const full = length > 0 && run.end >= length - 1
+    // A block is a row selected **from its first character to its last**: only
+    // then may it be drawn to the row's edges (an editor shows a whole line that
+    // way, and that is what joins consecutive rows into one block). A run that
+    // starts in the middle of the row is not a block, however far it reaches —
+    // the first row of a selection is exactly that case.
+    const full = length > 0 && run.start === 0 && run.end >= length - 1
     slices.push({ line, start: run.start, end: run.end, full })
   }
   return slices
@@ -186,8 +199,13 @@ export function slicesOfSelection(selection: Selection | null, container: HTMLEl
  * per row:
  *
  * - `data-sel="full"` on a row the selection covers to the end;
- * - `data-sel="part"` + `--dio-sel-left` / `--dio-sel-width` on a row it covers
- *   in part (measured, so a tab or a non-exact `ch` cannot drift).
+ * - `data-sel="part"` on a row it covers in part;
+ * - `--dio-sel-left` / `--dio-sel-width` on **both**: the measured box, from the
+ *   row's first selected character (so a selection that starts mid-row shows
+ *   that, rather than snapping to the text's edge);
+ * - `--dio-line-gutter` on both: the column the row's text starts at, which is
+ *   where the box starts when the row is selected from its beginning (the line
+ *   number is never inside the selection).
  *
  * Returns the unsubscriber (call it from the renderer's effect cleanup).
  */
@@ -211,27 +229,26 @@ export function watchSelection(container: HTMLElement): () => void {
         clear(row)
         continue
       }
-      // A row the selection covers to its last character is drawn edge to edge
-      // (that is what joins consecutive rows into one block); a row it only
-      // partly covers is drawn over the characters actually selected.
-      if (slice.full) {
-        row.setAttribute('data-sel', 'full')
-        row.style.removeProperty('--dio-sel-left')
-        row.style.removeProperty('--dio-sel-width')
-        continue
-      }
+      // Every box starts where the row's text starts: the gutter is not part of
+      // the selection, so it is never painted (the number would read as
+      // selected). What joins consecutive rows into one block is that this
+      // column is the same on every row — the blocks line up edge to edge.
+      const gutter = textLeft(row)
+      row.style.setProperty('--dio-line-gutter', `${gutter}px`)
       const box = runBox(row, slice.start, slice.end + 1)
       if (box === undefined) {
+        // Nothing of the row's text is selected (the range ends on the newline
+        // of the row above, or the row is empty): there is no run to draw.
         clear(row)
         continue
       }
-      row.setAttribute('data-sel', 'part')
+      // Measured for both kinds: "full" is the same box taken to the right edge
+      // of the row (rows of different lengths then read as one block), a partial
+      // run stops at the last selected character. Never at the text's start —
+      // a selection that begins in the middle of a row must show that.
+      row.setAttribute('data-sel', slice.full ? 'full' : 'part')
       row.style.setProperty('--dio-sel-left', `${box.left}px`)
       row.style.setProperty('--dio-sel-width', `${box.width}px`)
-      // The box is measured against the *text* element, so the gutter's width
-      // is measured too: the reader may have the gutter hidden, and a fixed
-      // offset would then paint the run shifted by the gutter.
-      row.style.setProperty('--dio-line-gutter', `${textLeft(row)}px`)
     }
   }
   // `selectionchange` fires on the document, not the element; listening there

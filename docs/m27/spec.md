@@ -86,11 +86,14 @@
   `background: transparent`。文字仍然**可选中、可复制、可搜索**，只有**画**归我们。
 - **`selectionchange` → 行矩形**：`slicesOfSelection` 把 DOM Range 换成「哪些行、每行从第几个字符到
   第几个」；`selectionSlices`（纯函数，单测覆盖）把同一行的多段并成一段，并判定「整行」——
-  覆盖到该行最后一个字符就算整行。
-- **画**：整行 `data-sel="full"` 用 `::after` 铺满整行（含行号格），相邻行因此接成一整块；
-  局部 `data-sel="part"` 用 `--dio-sel-left` / `--dio-sel-width` 画实测出来的那一段。
-  位置由 `Range.getBoundingClientRect()` **量**出来，不用 `ch`：行里有 tab，字体也不保证正好一个
-  `ch` 宽。行号格宽度也量（`--dio-line-gutter`），因为读者可以把行号关掉。
+  **从该行第一个字符覆盖到最后一个字符**才算整行（只够到末字符、从行中间开始的不是：选区第一行
+  常常是从行中间拖出来的，那样就得让人看见从哪儿开始）。
+- **画**：两种矩形都**实测**（`--dio-sel-left` / `--dio-sel-width`，由 `Range.getBoundingClientRect()`
+  量出来，不用 `ch`：行里有 tab，字体也不保证正好一个 `ch` 宽；行号格宽度也量
+  （`--dio-line-gutter`），因为读者可以把行号关掉）。整行 `data-sel="full"` 是同一段量出的矩形
+  **延伸到行尾**，相邻行因此接成一整块；局部 `data-sel="part"` 止于最后选中的字符。
+- **行号格不着色**：行号不是选中的内容，两种矩形都从文字列（或行内的实测起点）开始；相邻行仍接成
+  一整块，靠的是「第一行之后的每一行都从同一个文字列起点铺到行尾」。
 - **不重渲染**：矩形写在行的自定义属性上，滚动零成本；监听挂在 `document`（选区可以从外面拖进来）。
 
 ### 3.6 图标与样式
@@ -107,8 +110,8 @@
 |---|---|
 | `packages/ui/test/line-numbers.test.ts`（新） | `parseLineSpec` / `splitLineSuffix` / `clampTarget` / `formatLineSpec` 的边界；store 的默认值、记忆、只通知一次、storage 被挡时的回退 |
 | `apps/web/tests/m27-line-numbers.spec.ts`（新） | 行号默认开、按钮切换、刷新后仍是关；`mod+p` 的 `app.ts:30` 定位并 `data-flash="true"`；palette 的 `:10-12` 画三条带、`:999` 夹到末行；没有 tab 时那一行说明原因 |
-| `packages/ui/test/selection.test.ts`（新） | `selectionSlices`：整行判定、局部段、行序、同一行多段合并、反写的区间、空行与未知行 |
-| `apps/web/tests/m27-selection.spec.ts`（新） | 跨三行拖选：前两行 `data-sel="full"` 且**等宽、上下相接**（这就是「一整块」），最后一行是 `part`；原生高亮透明而 `getSelection()` 仍能拿到文本 |
+| `packages/ui/test/selection.test.ts`（新） | `selectionSlices`：整行判定（含「够到末字符但不是从首字符开始不算整行」）、局部段、行序、同一行多段合并、反写的区间、空行与未知行 |
+| `apps/web/tests/m27-selection.spec.ts`（新） | 跨三行拖选：前两行 `data-sel="full"` 且**等宽、上下相接**（这就是「一整块」），最后一行是 `part`；块的起点等于文字列、**不压行号格**；从行中间起拖：第一行是 `part` 且实测起点在文字列之后；原生高亮透明而 `getSelection()` 仍能拿到文本 |
 
 ## 5. 验证
 
