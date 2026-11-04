@@ -100,6 +100,26 @@ test('diff: both columns of the side-by-side reader are highlighted', async ({ p
     const keywordRows = split.locator('.diorama-diff__split-row').filter({ hasText: 'function greet' })
     await expect(keywordRows).toHaveCount(1)
     await expect(keywordRows.locator('[data-tone="context"] .hljs-keyword').first()).toHaveText('function')
+
+    // The indentation survives: a cell is a full row (the row model the readers
+    // share), so the leading spaces keep their width — measured, not eyeballed,
+    // because a collapsed run of spaces is white on white (docs/m32/spec.md).
+    const indent = await split
+      .locator('.diorama-diff__split-cell', { hasText: 'const message' })
+      .first()
+      .evaluate(cell => {
+        const code = cell.querySelector('.diorama-diff__code')
+        if (code === null) throw new Error('no code cell')
+        const text = code.textContent ?? ''
+        const lead = text.length - text.replace(/^\s+/, '').length
+        const range = document.createRange()
+        range.setStart(code, 0)
+        range.setEnd(code, Math.max(1, lead))
+        return { lead, whiteSpace: getComputedStyle(cell).whiteSpace, leadWidth: range.getBoundingClientRect().width }
+      })
+    expect(indent.whiteSpace).toBe('pre')
+    expect(indent.lead).toBe(2)
+    expect(indent.leadWidth).toBeGreaterThan(8)
   } finally {
     await server.stop()
     repo.dispose()
