@@ -13,7 +13,12 @@
 | 3 | [docs/features.md](docs/features.md) | **有什么**：能力清单与档位（✅ / v1 / 未来 / 不做） |
 | 4 | 最近一档的 `docs/mN/spec.md` | **怎么实现的** + **§6.2 的坑**（见下面 §5） |
 
-最近一档是 [docs/m31/spec.md](docs/m31/spec.md)（**Markdown 里的代码片段也上色**：围栏代码块按
+最近一档是 [docs/m32/spec.md](docs/m32/spec.md)（**diff 双栏的缩进**：缺陷修复——双栏的每一格**就是**
+行模型 `.diorama-diff__line`，于是 `display` / 对齐 / `white-space: pre` 全都跟着来，行首缩进与行内
+连续空格不再被浏览器折叠；长行在**本栏内**横向滚、不换行（换行会让左右两格高度不等、两栏错位）。
+**折叠空白不影响 `textContent`**，所以文本断言抓不到这类缺陷，要测计算样式或 `Range` 宽度；
+另有一条：不要照传闻覆盖行模型的对齐方式，量了再改。契约 §5.2、§44）；
+上一档是 [docs/m31/spec.md](docs/m31/spec.md)（**Markdown 里的代码片段也上色**：围栏代码块按
 info string 上色，颜色来自 `code` 发布到页面的那份引擎（`__diorama_highlight__`，与 diff 读法同源）——
 `Highlighter` 多一个**可选**的 `block(text, language, escaped?)`，因为文档是一整段 markup，不是 diff 的
 一行一个元素；围栏写短名（`ts` / `js`）而引擎注册长 id，按 highlight.js 的 `aliases` 反查回注册 id；
@@ -233,6 +238,7 @@ scripts/                  生成器（图标表；`pnpm icons` 重新生成）
 | Markdown 里同一段代码被叫成两个语言名（文档报 `ts`、文件报 `typescript`） | 围栏写的是短名，而引擎注册的是长 id；`hljs.getLanguage('ts')` 能解析别名，但**定义对象自己的 `name` 是 `'TypeScript'`**（带大写），都不是页面里那个 id | 按注册表反查：id 或 `aliases` 命中就用**注册 id**；围栏的语言名一律过这一步（m31/spec §6 坑 1）|
 | 文档里的代码块出现 `&amp;lt;` 这样的实体名 | marked 的 `token.escaped` 没透传，未知语言分支又转义了一次 | `highlightBlock(text, language, escaped)` 的第三个参数就是它：已经转义过的文本只原样交回（m31/spec §6 坑 2）|
 | 座位空着，页面底部还是多出一条 1px 线 / 一行背景 | `Slot` 的 `empty={null}` 只决定**座位里**画什么，外层 `<footer>` 照样渲染 | 画座位的组件先用 `useSeat(name)` 问有没有条目，空就 `return null`（`useSeat` 也是 hook，必须在任何提前 return 之前）（m30/spec §6 坑 2–3）|
+| **diff 双栏里的缩进没了 / 连续空格并成一个**，而 `textContent` 里空格还在 | 双栏的格子另写了一套 `display: flex`，没带上行模型 `.diorama-diff__line` 的 `white-space: pre`；`normal` 只在**排版**阶段折叠空白，所以文本断言全绿 | 格子**就是**行模型（再加 tone 类），`display` / 对齐 / 空白规则都别再另写一份；测这类缺陷要量计算样式 / `Range` 宽度（m32/spec §6 坑 1–2）|
 
 ## 6. 边界（不要越过的线）
 

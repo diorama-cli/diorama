@@ -1263,7 +1263,12 @@ function SplitFile({ diff, text, path, testId }: { diff: string; text: string; p
               return (
                 <div
                   key={side}
-                  className={`diorama-diff__split-cell${cell === undefined ? ' diorama-diff__split-cell--empty' : ` diorama-diff__line--${cell.tone}`}`}
+                  // The row model of the readers is a `diorama-diff__line` with
+                  // the gutter in front of the code: it carries `white-space:
+                  // pre`, and without it this cell would collapse every run of
+                  // spaces — the reader would see the file's indentation gone
+                  // (docs/m32/spec.md). The tone class is still the row's own.
+                  className={`diorama-diff__split-cell diorama-diff__line${cell === undefined ? ' diorama-diff__split-cell--empty' : ` diorama-diff__line--${cell.tone}`}`}
                   data-tone={cell?.tone ?? 'empty'}
                   data-line={cell?.number}
                 >

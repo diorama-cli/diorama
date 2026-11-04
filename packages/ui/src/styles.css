@@ -2085,12 +2085,25 @@ body.diorama-resizing {
   border-left: 1px solid var(--dio-border);
 }
 
-/* A row of the two-column reader: each cell is a line (number + text). */
+/* A cell of the two-column reader: one line of one side (number + text).
+   It is also a `.diorama-diff__line` — the row model every reader shares — and
+   that is where `white-space: pre` comes from: a line's indentation is part of
+   the line, so a cell that let the browser collapse runs of spaces showed the
+   reader a re-indented file (docs/m32/spec.md). The cell is half a row wide, so
+   it drops the row's right padding. */
 .diorama-diff__split-cell {
-  display: flex;
-  align-items: baseline;
   min-width: 0;
-  padding-right: 12px;
+  padding: 0;
+}
+
+/* A long line scrolls **its own column** (the gutter stays put, the seam stays
+   in the middle) instead of wrapping — the same reading as the one-column
+   reader, which scrolls rather than folding a line in two. */
+.diorama-diff__split-cell .diorama-diff__code {
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
 }
 
 .diorama-diff__split-cell + .diorama-diff__split-cell {
