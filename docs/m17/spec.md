@@ -55,10 +55,26 @@
 - **幂等**：每个占位元素上有 `data-rendered`，重跑不会渲染两遍。
 - **Mermaid 的 id**：每页一个自增计数器（`diorama-mermaid-N`），两个图不撞。
 - **失败**：`data-state="error"` + `title` 是 Mermaid 的原话；`<pre>` 里的源码留着。
-- **大纲的位置**：`.diorama-markdown-body` 是 `display: flex`，文章在左、目录在右；
-  目录 `position: sticky` 跟着滚。**文章 + 目录作为一块整体居中**：放任文章贴左、目录夹在
-  右侧留白里，宽屏上正文会被钉在左缘（§6 坑 10）。目录窄（180px）、字号低一档——它是文档的
-  **地图**，不是第二栏正文。窄于 900px 时换成一栏，目录落到正文**上面**（`column-reverse`）。
+- **大纲的位置**（v0.24 起）：`.diorama-markdown-body` 是 `display: flex`，文章在左、目录在右，
+  目录**贴着 tab 的右缘**、`position: sticky` 跟着滚。文章在「扣掉这一栏之后剩下的宽度」里用
+  `margin-inline: auto` 居中——**不是**文章 + 目录作为一块居中：那样目录夹在右侧留白里，宽屏上
+  读作一张浮在空白中的卡片（§6 坑 10、坑 12）。目录字号低一档——它是文档的 **地图**，不是第二栏
+  正文。**宽度是读者的**：与文章之间是一条 `Splitter`（§5.2 的原语），140–420px、缺省 220px、
+  `localStorage` 记忆、方向键 / Home / End 可调。窄到 760px 以下时换成一栏，目录落到正文**上面**
+  （`column-reverse`），分隔条不挂载。
+- **宽度看的是内容盒**：折叠成一栏的判据是 `@container (max-width: 760px)`，`.diorama-markdown-wrap`
+  是容器。媒体查询看的是窗口，而左栏拉宽到 720px 之后 1440px 的窗口只剩 660px——窗口没问题，
+  文章却被挤成一条（§6 坑 12）。
+- **目录是一列，不是浮层**（v0.24 修）：它画自己的底色（`--dio-panel`）、`z-index: 1` 压在文章
+  上方——正文从它底下穿过时在栏缘被裁住，不会从行间透出来跟字重叠（§6 坑 11）。
+- **底色画在「窗格」上，不画在 sticky 的那个盒子上**（v0.24 再修）：sticky 盒只有**自己内容那么高**，
+  把底色画在它身上，颜色就只到最后一个标题为止，下面半截列是空的。所以是两个盒子——
+  `.diorama-outline-pane`（`align-self: stretch`，与文章同高，承担底色与左边框）里放
+  `.diorama-outline`（`position: sticky; top: 0`，承担吸顶与自身滚动）。
+  同一档里文章自己 `overflow-x: clip`（不是 `hidden`：那会把文章变成自己的滚动容器），宽表格
+  `display: block; width: fit-content; max-width: 100%; overflow-x: auto` 在自己的框里横滚，
+  图片 `max-width: 100%`，正文 `overflow-wrap: break-word`——凡是能比阅读宽度还宽的东西，都在
+  自己这一栏里消化掉，不许画到目录那一栏上去。
 - **大纲的点击**：`scrollIntoView({ block: 'start' })`，**按文章限定查找**——每个 tab 的文章都还
   挂载着，全文档查找会撞上隐藏 tab 里同名 `id` 的那一份。
 - **当前小节**：滚动时取「最后一条落在阅读线上方」的标题。阅读线是**滚动框顶 + 24px**，必须**高于**
@@ -132,3 +148,32 @@
     目录夹在右侧的大片空白里——用户读作「大纲占了太多空间」，实际是**剩余宽度全堆在一边**。
     文章的 flex 收缩也要从 `1 1 auto` 改成 `0 1 860px`：窄于「文章 + 目录」时宽度从**正文**里扣
     （1024px 窗口剩 764px 给文章），而不是把目录推出右缘。
+    **v0.24 又改了判据**：用户接着指出「大纲窗格没有靠到最右」——整体居中把多余的宽度分给了左右
+    两边，目录就停在离右缘 66px 的地方，看起来像一张浮着的卡片。现在的规则是**目录贴右缘、文章在
+    剩下的宽度里居中**：`justify-content: center` 整个拿掉，改成 `.diorama-markdown` 的
+    `margin-inline: auto`。同一个改动顺手把目录做成可调宽的窗格（`Splitter` + `usePaneSize`，
+    140–420px、缺省 220px、`localStorage` 记忆）——固定的 180px 让长标题只能靠横向滚才能读全。
+12. **「窄了折成一栏」的判据不能看窗口**。原本是 `@media (max-width: 900px)`：1440px 的窗口永远
+    不满足，而左栏拉宽到 720px 之后文章只剩 660px，两栏挤成一条也不折。改用
+    `@container (max-width: 760px)`，容器是 `.diorama-markdown-wrap`（`container-type: inline-size`）。
+    附带一条：`display: flex` + `align-items: flex-start` 是给两栏用的，折成一栏后目录要
+    `align-self: stretch`，否则它只按内容宽（实测 75px）。**容器的宽度才是这条规则的输入**，
+    窗口的宽度不是。
+11. **目录透明 = 正文从行间透出来**（v0.24 修）。`.diorama-outline` 当初只给了 `border-left`，没有
+    底色：sticky 顶到上沿之后，正文就**从目录的行间穿过去**，读者看到的是两段文字叠在一起——用户
+    的原话是「浮动且背景是透明的，容易跟正文的文字重叠」。两件事一起补：**画底色**（`--dio-panel`，
+    与栏一样是 token，明暗两套共用）与 **`z-index: 1` 压上去**；否则一个画了底色的盒子被后画的
+    文章盖住，问题照旧。另一头是**宽内容**：表格原本按内容撑到 2238px，直接画过目录那一栏，还把
+    `.diorama-markdown-body` 的 `scrollWidth` 撑到 2328（多出来的正是目录的宽度）。所以文章
+    `overflow-x: clip`、表格 `display: block; width: fit-content; max-width: 100%; overflow-x: auto`
+    在自己的框里横滚、图片 `max-width: 100%`、正文 `overflow-wrap: break-word`（**先让长单词换行**，
+    裁剪只是不可信标记的兜底：一屏宽的 URL 被裁掉半截不是修复）。**验证不要用截图**：用计算样式
+    （`backgroundColor` 不是 `rgba(0,0,0,0)`、`zIndex` 不是 `auto`）与几何（表格右缘 ≤ 目录左缘、
+    `scrollWidth - clientWidth ≤ 1`）锁住，两条都在 `m17-markdown.spec.ts`。
+13. **底色画在 sticky 盒子上 = 只有标题那一截有颜色**。`.diorama-outline` 既 sticky 又要撑满列高
+    是矛盾的：sticky 盒的高度由**它自己的内容**决定，`align-self: stretch` 对它无效——于是面板色
+    从「大纲」标题画到最后一个标题就断了，下面半截列是白的（用户的原话是「有文字的部分才有背景
+    颜色，而不是整个窗格」）。拆成两个盒子就解决了：**外框** `.diorama-outline-pane`
+    （`align-self: stretch`、底色、左边框）与**里面的** `.diorama-outline`（`position: sticky;
+    `top: 0`、自身 `overflow-y`）。实测外框 6687px（= 文章高），里面那个只有 127px。
+    **一个盒子不能既当整列又当吸顶条**——凡是「整栏有底色 + 内容吸顶」的窗格都按这个拆法写。

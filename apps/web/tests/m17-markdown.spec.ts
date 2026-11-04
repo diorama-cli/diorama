@@ -129,6 +129,22 @@ test('outline: the rail lists this document\'s headings and scrolls to one', asy
     // The rail lives **inside the tab**, beside the article — not in the column.
     await expect(page.getByTestId('sidebar-switcher').locator('[data-view="outline"]')).toHaveCount(0)
     expect(await rail.evaluate(element => element.closest('[data-testid="tabs-content"]') !== null)).toBe(true)
+    // It is a **column, not a floating layer** (docs/m17/spec.md §3): the pane
+    // is painted (the text scrolling under the sticky rail must not show
+    // through between the rows) and rides above the article.
+    const surface = await page.evaluate(() => {
+      const pane = document.querySelector('.diorama-outline-pane') as HTMLElement
+      const rail = document.querySelector('.diorama-outline') as HTMLElement
+      const style = getComputedStyle(pane)
+      return {
+        background: style.backgroundColor,
+        zIndex: style.zIndex,
+        railPosition: getComputedStyle(rail).position,
+      }
+    })
+    expect(surface.railPosition).toBe('sticky')
+    expect(surface.zIndex).not.toBe('auto')
+    expect(surface.background).not.toBe('rgba(0, 0, 0, 0)')
   } finally {
     await server.stop()
     directory.dispose()
@@ -156,6 +172,161 @@ test('outline: clicking a row scrolls this article to that heading', async ({ pa
       .toBeLessThan(80)
     // The row of the section being read is marked as the current one.
     await expect(rail.locator('.diorama-outline__row--current')).toHaveText('Second part')
+  } finally {
+    await server.stop()
+    directory.dispose()
+  }
+})
+
+test('outline: the pane paints the whole column, not just the headings', async ({ page }) => {
+  const directory = fixture({ 'HEADED.md': HEADED })
+  const server = await startDiorama(directory.root)
+  try {
+    await page.goto(`${server.url}~/HEADED.md`)
+    await expect(page.getByTestId('outline')).toBeVisible()
+    const geometry = await page.evaluate(() => {
+      const pane = document.querySelector('.diorama-outline-pane') as HTMLElement
+      const rail = document.querySelector('.diorama-outline') as HTMLElement
+      const article = document.querySelector('.diorama-markdown') as HTMLElement
+      return {
+        paneHeight: Math.round(pane.getBoundingClientRect().height),
+        railHeight: Math.round(rail.getBoundingClientRect().height),
+        articleHeight: Math.round(article.getBoundingClientRect().height),
+        background: getComputedStyle(pane).backgroundColor,
+        borderLeft: getComputedStyle(pane).borderLeftWidth,
+      }
+    })
+    // A sticky box is only as tall as its content, so the surface belongs to
+    // the pane: it runs the full height of the article, headings or not.
+    expect(geometry.railHeight).toBeLessThan(geometry.paneHeight)
+    expect(Math.abs(geometry.paneHeight - geometry.articleHeight)).toBeLessThanOrEqual(1)
+    expect(geometry.background).not.toBe('rgba(0, 0, 0, 0)')
+    expect(geometry.borderLeft).not.toBe('0px')
+  } finally {
+    await server.stop()
+    directory.dispose()
+  }
+})
+test('outline: the rail is flush with the right edge of the tab', async ({ page }) => {
+  const directory = fixture({ 'HEADED.md': HEADED })
+  const server = await startDiorama(directory.root)
+  try {
+    await page.goto(`${server.url}~/HEADED.md`)
+    await expect(page.getByTestId('outline')).toBeVisible()
+    const edges = await page.evaluate(() => {
+      const rail = document.querySelector('.diorama-outline') as HTMLElement
+      const scroller = rail.closest('.diorama-tabs__content') as HTMLElement
+      return {
+        railRight: Math.round(rail.getBoundingClientRect().right),
+        scrollerRight: Math.round(scroller.getBoundingClientRect().right),
+      }
+    })
+    // A pane, not a card floating in a gutter: no trailing margin.
+    expect(Math.abs(edges.railRight - edges.scrollerRight)).toBeLessThanOrEqual(1)
+  } finally {
+    await server.stop()
+    directory.dispose()
+  }
+})
+
+test('outline: the rail is a pane whose width is dragged and remembered', async ({ page }) => {
+  const directory = fixture({ 'HEADED.md': HEADED })
+  const server = await startDiorama(directory.root)
+  const railWidth = async (): Promise<number> =>
+    await page.getByTestId('outline').evaluate(element => Math.round(element.getBoundingClientRect().width))
+  try {
+    await page.goto(`${server.url}~/HEADED.md`)
+    const splitter = page.getByTestId('outline-splitter')
+    await expect(splitter).toBeVisible()
+    const before = await railWidth()
+    expect(before).toBeGreaterThan(140)
+
+    // Dragging **left** widens a pane that sits to the right of the edge.
+    const box = await splitter.boundingBox()
+    if (box === null) throw new Error('the separator has no box')
+    expect(box.height).toBeGreaterThan(100)
+    await page.mouse.move(box.x + box.width / 2, box.y + 40)
+    await page.mouse.down()
+    await page.mouse.move(box.x + box.width / 2 - 90, box.y + 40, { steps: 6 })
+    await page.mouse.up()
+    const dragged = await railWidth()
+    expect(dragged).toBeGreaterThanOrEqual(before + 80)
+
+    // It is a preference: a reload comes back at the dragged width.
+    await page.reload()
+    await expect(page.getByTestId('outline')).toBeVisible()
+    expect(await railWidth()).toBe(dragged)
+
+    // The keyboard reaches the same edge: Shift+Left is four steps wider.
+    await page.getByTestId('outline-splitter').focus()
+    await page.keyboard.press('Shift+ArrowLeft')
+    expect(await railWidth()).toBe(dragged + 64)
+  } finally {
+    await server.stop()
+    directory.dispose()
+  }
+})
+test('outline: the rail keeps its surface while the article scrolls under it', async ({ page }) => {
+  const directory = fixture({ 'MATH.md': MATH })
+  const server = await startDiorama(directory.root)
+  try {
+    await page.goto(`${server.url}~/MATH.md`)
+    await expect(page.getByTestId('outline')).toBeVisible()
+    const before = await page.evaluate(() => {
+      const rail = document.querySelector('.diorama-outline') as HTMLElement
+      const scroller = rail.closest('.diorama-tabs__content') as HTMLElement
+      return { railTop: Math.round(rail.getBoundingClientRect().top), scrollerTop: Math.round(scroller.getBoundingClientRect().top) }
+    })
+    // Scroll the article: the rail sticks to the top of the tab's box instead of
+    // travelling with the text, and it is still painted (no text shows through).
+    await page.locator('.diorama-tabs__content').evaluate(element => {
+      ;(element as HTMLElement).scrollTop = 900
+    })
+    const after = await page.evaluate(() => {
+      const rail = document.querySelector('.diorama-outline') as HTMLElement
+      const pane = document.querySelector('.diorama-outline-pane') as HTMLElement
+      const scroller = rail.closest('.diorama-tabs__content') as HTMLElement
+      return {
+        railTop: Math.round(rail.getBoundingClientRect().top),
+        scrollerTop: Math.round(scroller.getBoundingClientRect().top),
+        // The surface belongs to the **pane** (a sticky box is only as tall as
+        // its content), so that is what has to stay painted.
+        background: getComputedStyle(pane).backgroundColor,
+        scrollTop: Math.round(scroller.scrollTop),
+      }
+    })
+    expect(after.scrollTop).toBeGreaterThan(500)
+    // It moved up with the scroll and then stopped at the top edge of the box.
+    expect(after.railTop).toBeLessThan(before.railTop)
+    expect(Math.abs(after.railTop - after.scrollerTop)).toBeLessThanOrEqual(1)
+    expect(after.background).not.toBe('rgba(0, 0, 0, 0)')
+  } finally {
+    await server.stop()
+    directory.dispose()
+  }
+})
+
+test('outline: a wide table scrolls in the article and never paints over the rail', async ({ page }) => {
+  const WIDE = ['# Wide', '', '| a | b |', '|---|---|', `| ${'x'.repeat(400)} | b |`, '', '## Second', '', 'text', ''].join('\n')
+  const directory = fixture({ 'WIDE.md': WIDE })
+  const server = await startDiorama(directory.root)
+  try {
+    await page.goto(`${server.url}~/WIDE.md`)
+    await expect(page.getByTestId('outline')).toBeVisible()
+    const geometry = await page.evaluate(() => {
+      const rail = document.querySelector('.diorama-outline') as HTMLElement
+      const table = document.querySelector('.diorama-markdown table') as HTMLElement
+      const body = document.querySelector('.diorama-markdown-body') as HTMLElement
+      return {
+        railLeft: rail.getBoundingClientRect().left,
+        tableRight: table.getBoundingClientRect().right,
+        // The flex box's own scroll width must not include the rail's column.
+        overflow: body.scrollWidth - body.clientWidth,
+      }
+    })
+    // The table's box stops at the article's edge (its own content scrolls).
+    expect(geometry.tableRight).toBeLessThanOrEqual(geometry.railLeft)
+    expect(geometry.overflow).toBeLessThanOrEqual(1)
   } finally {
     await server.stop()
     directory.dispose()

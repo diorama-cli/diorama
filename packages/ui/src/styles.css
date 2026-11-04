@@ -920,6 +920,9 @@ body.diorama-resizing {
 /* Markdown piece (M1) */
 .diorama-markdown-wrap {
   min-height: 100%;
+  /* The document + rail pair asks about **its own** width, not the window's
+     (see the `@container` block below the rail). */
+  container-type: inline-size;
 }
 
 .diorama-markdown__path {
@@ -934,45 +937,91 @@ body.diorama-resizing {
    rail is a column *inside the tab*, not a view of the left column — the
    headings belong to this file, and the column is shared by every tab.
 
-   The pair is **centred as one block**. Left to itself the article keeps its
-   860px reading measure and everything else is a right-hand gutter, which on a
-   wide screen pins the text to the left edge and leaves the rail stranded in
-   the middle of the empty space. Centring the pair spends the extra width on
-   two equal margins instead. */
+   The article is **centred in what the rail leaves**, and the rail is **flush
+   with the right edge**: it is a pane of its own, not a card floating in the
+   middle of a gutter. The article's centring is a pair of auto margins inside
+   the space that is left (see `.diorama-markdown`), so the reading measure
+   still sits in the middle of the *remaining* width on a wide screen. */
 .diorama-markdown-body {
   display: flex;
   align-items: flex-start;
-  justify-content: center;
   min-height: 100%;
 }
 
 .diorama-markdown {
   /* `0 1 860px`: the reading measure is fixed, but it may **shrink** — a content
      box narrower than article + rail (a 1024px window leaves 764px) must take
-     the width out of the text, never push the rail past the right edge. */
+     the width out of the text, never push the rail past the right edge.
+
+     The auto margins centre the measure in whatever the rail leaves over; the
+     rail itself is pinned right by `.diorama-markdown-body`'s own flex. */
   flex: 0 1 860px;
   min-width: 0;
   max-width: 860px;
+  margin-inline: auto;
+  /* A document is untrusted markup: a table, a formula or a diagram wider than
+     the measure scrolls **in its own box** instead of painting across the
+     outline rail beside it (contract.md §5.1). `clip` rather than `hidden`:
+     `hidden` would turn the article into a scroll container of its own. */
+  overflow-x: clip;
   padding: 16px 24px 64px;
   line-height: 1.65;
   font-size: 14px;
+  /* A long URL or hash in prose wraps instead of being clipped at the article's
+     edge: the sideways clip above is a safety net for untrusted markup, not a
+     licence to lose a word. */
+  overflow-wrap: break-word;
 }
 
-/* The rail sits on the right, sticks to the top while the article scrolls, and
-   is a column of its own so a long heading never squeezes the text.
+/* The rail is **two boxes**, and the split is what gives it a surface.
 
-   It is deliberately narrow (180px) and set one step down in size: it is a
-   *map* of the document, read at a glance, not a second column of prose. */
+   The **pane** is the column: it stretches to the full height of the article
+   (`align-self: stretch`), so its background and its left border run the whole
+   way down the tab even though the document is far taller than the headings.
+   Painting that surface on the sticky element instead was the bug — a sticky
+   box is only as tall as its own content, so the panel colour stopped where the
+   last heading did and the rest of the column was bare.
+
+   The **rail** inside it is what sticks: `top: 0` against the tab's scroll box,
+   with its own `overflow-y` so a document with fifty headings scrolls the map
+   rather than the page. It is deliberately narrow and set one step down in
+   size: it is a *map* of the document, read at a glance, not a second column of
+   prose.
+
+   It is a **column, not a floating layer**: the pane is opaque (`--dio-panel`)
+   and rides above the article, so text scrolling under it is clipped at the
+   rail's edge instead of showing through between the rows. */
+.diorama-outline-pane {
+  /* The reader's width (`usePaneSize` in the piece, written as a custom
+     property by the drag); 220px is what it starts at. `flex: 0 0 auto` keeps
+     the column from being squeezed by a long article beside it. */
+  flex: 0 0 auto;
+  align-self: stretch;
+  z-index: 1;
+  width: var(--dio-outline-width, 220px);
+  min-width: 140px;
+  max-width: 420px;
+  /* Flush with the right edge of the tab: no trailing margin. */
+  margin-left: 0;
+  border-left: 1px solid var(--dio-border);
+  background: var(--dio-panel);
+}
+
 .diorama-outline {
   position: sticky;
   top: 0;
-  flex: 0 0 auto;
-  width: 180px;
   max-height: 100vh;
   overflow-y: auto;
-  margin-left: 8px;
-  padding: 16px 8px 24px 12px;
-  border-left: 1px solid var(--dio-border);
+  padding: 16px 12px 24px 12px;
+}
+
+/* The edge between the article and the rail (`Splitter`, contract.md §5.2).
+   The body is a flex row with `align-items: flex-start`, so the edge needs its
+   own `stretch` to run the full height of the document — a 0px-tall separator
+   is a control nobody can grab. */
+.diorama-markdown-body > .diorama-splitter {
+  align-self: stretch;
+  height: auto;
 }
 
 .diorama-outline__title {
@@ -1020,20 +1069,42 @@ body.diorama-resizing {
 /* A narrow content area has no room for two columns: the rail goes above the
    text rather than squeezing it, and stops sticking. (Measured on the content
    box, not the window: a 260px column plus its splitter is not available to the
-   article.) */
-@media (max-width: 900px) {
+   article.)
+
+   The condition is on the **container**, not the window: a 1440px window with a
+   wide left column leaves the same 700px a media query cannot see. 760px is
+   where the rail plus a readable measure no longer fit side by side — at a
+   1024px window (a 764px content box) the two columns still stand. */
+@container (max-width: 760px) {
   .diorama-markdown-body--outlined {
     flex-direction: column-reverse;
   }
 
-  .diorama-outline {
-    position: static;
+  /* One column: the pane is a full-width row above the text, so it has no
+     surface of its own (the row's own border is the only rule it needs). */
+  .diorama-outline-pane {
+    align-self: stretch;
     width: auto;
-    max-height: none;
-    margin: 12px 24px 0;
-    padding: 8px 0;
+    min-width: 0;
+    max-width: none;
+    margin: 0;
     border-left: 0;
     border-bottom: 1px solid var(--dio-border);
+    background: none;
+  }
+
+  .diorama-outline {
+    position: static;
+    max-height: none;
+    padding: 8px 0;
+    margin: 12px 24px 0;
+  }
+
+  /* One column has no edge to drag: the rail's width is the column's own, and a
+     vertical edge here would resize nothing (the same rule the folded sidebar
+     follows, contract.md §5.2). */
+  .diorama-markdown-body--outlined > .diorama-splitter {
+    display: none;
   }
 }
 
@@ -1131,7 +1202,26 @@ body.diorama-resizing {
   color: var(--dio-muted);
 }
 
+/* An image is sized to the reading measure, not to its own pixels: a 2000px
+   screenshot would otherwise be clipped at the article's edge (the article
+   clips sideways so nothing paints across the outline rail). */
+.diorama-markdown img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* A wide table scrolls **inside the article**, never across the rail: as a
+   plain table it grows past the reading measure and paints over the outline
+   column beside it (the flex box's own scrollWidth then swallows the rail).
+   `display: block` + `overflow-x` keeps the table's box at the article's width
+   and scrolls its own content, which is what the fence reader does for code. */
 .diorama-markdown table {
+  /* `fit-content` keeps a small table hugging its cells; `max-width` caps a wide
+     one at the reading measure, where the box (not the page) scrolls. */
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
   border-collapse: collapse;
 }
 

@@ -35,8 +35,16 @@
  * mount, and the column is shared by every tab (contract.md §5.1).
  */
 import type { Context } from 'cordis'
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
-import { provideEntry, useHighlighter, useKernel, type Highlighter } from 'diorama-ui'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type MouseEvent,
+} from 'react'
+import { provideEntry, Splitter, useHighlighter, useKernel, usePaneSize, type Highlighter } from 'diorama-ui'
 import DOMPurify from 'dompurify'
 import { Marked, Renderer } from 'marked'
 import type { Tokens } from 'marked'
@@ -250,6 +258,18 @@ async function openPath(
   if (anchor !== undefined) scrollToHeading(anchor)
 }
 
+/** Where the rail's width is remembered (`localStorage`, like every other pane). */
+export const OUTLINE_WIDTH_KEY = 'diorama.markdown.outlineWidth'
+
+/** The rail's width before the reader drags its edge (px). */
+export const OUTLINE_DEFAULT_PX = 220
+
+/** Narrowest the rail may be dragged: a heading is still readable here. */
+export const OUTLINE_MIN_PX = 140
+
+/** Widest the rail may be dragged: past this it is a second column of prose. */
+export const OUTLINE_MAX_PX = 420
+
 /**
  * The outline rail beside one document: its headings, indented by level, each a
  * button that scrolls this article to that heading.
@@ -263,13 +283,29 @@ async function openPath(
  * `IntersectionObserver`: the article scrolls inside the tab's own box
  * (contract.md §5), and the heading that is "current" is the last one above the
  * top edge — a comparison, not an intersection.
+ *
+ * The rail is a **column, not a floating layer**: the stylesheet paints its
+ * surface (`--dio-panel`) and rides it above the article, so the text scrolling
+ * under its sticky box never shows through between the rows.
+ *
+ * It is **flush with the right edge** of the tab and its width is the reader's
+ * (contract.md §5.2): the edge between it and the article is a `Splitter` from
+ * `diorama-ui`, dragged with the pointer or moved with the arrow keys, and the
+ * width is remembered like every other pane's. A fixed 180px was the old answer
+ * — long headings could only be read by scrolling the rail sideways.
  */
 function OutlineRail({
   entries,
   article,
+  width,
+  onPreview,
+  onCommit,
 }: {
   entries: readonly OutlineEntry[]
   article: React.RefObject<HTMLElement | null>
+  width: number
+  onPreview(next: number): void
+  onCommit(next: number): void
 }) {
   const [current, setCurrent] = useState<string | undefined>(undefined)
   // Which heading is at the top of the reading area. Re-read on scroll and
@@ -300,24 +336,44 @@ function OutlineRail({
     return () => target.removeEventListener('scroll', read)
   }, [article, entries])
   return (
-    <nav className="diorama-outline" aria-label="大纲" data-testid="outline">
-      <div className="diorama-outline__title">大纲</div>
-      {entries.map(entry => (
-        <button
-          key={entry.id}
-          type="button"
-          className={`diorama-outline__row${entry.id === current ? ' diorama-outline__row--current' : ''}`}
-          data-depth={entry.depth}
-          data-target={entry.id}
-          title={entry.text}
-          aria-current={entry.id === current ? 'location' : undefined}
-          style={{ paddingLeft: `${8 + (entry.depth - 1) * 12}px` }}
-          onClick={() => scrollArticleTo(article.current, entry.id)}
-        >
-          {entry.text}
-        </button>
-      ))}
-    </nav>
+    <>
+      {/* The edge between the article and the rail. `side="end"`: the pane it
+          resizes is to the **right** of the edge, so dragging left widens it. */}
+      <Splitter
+        side="end"
+        size={width}
+        onPreview={onPreview}
+        onCommit={onCommit}
+        label="调整大纲宽度"
+        min={OUTLINE_MIN_PX}
+        max={OUTLINE_MAX_PX}
+        testId="outline-splitter"
+      />
+      {/* The pane is the **column** (full height, painted, bordered); the rail
+          inside it is what sticks while the article scrolls. One box cannot be
+          both: a sticky box is only as tall as its content, so painting it left
+          the lower half of the column bare. */}
+      <div className="diorama-outline-pane" data-testid="outline-pane">
+        <nav className="diorama-outline" aria-label="大纲" data-testid="outline">
+          <div className="diorama-outline__title">大纲</div>
+          {entries.map(entry => (
+            <button
+              key={entry.id}
+              type="button"
+              className={`diorama-outline__row${entry.id === current ? ' diorama-outline__row--current' : ''}`}
+              data-depth={entry.depth}
+              data-target={entry.id}
+              title={entry.text}
+              aria-current={entry.id === current ? 'location' : undefined}
+              style={{ paddingLeft: `${8 + (entry.depth - 1) * 12}px` }}
+              onClick={() => scrollArticleTo(article.current, entry.id)}
+            >
+              {entry.text}
+            </button>
+          ))}
+        </nav>
+      </div>
+    </>
   )
 }
 function Markdown({ file, text, mountCtx }: FileRendererProps) {
@@ -330,6 +386,21 @@ function Markdown({ file, text, mountCtx }: FileRendererProps) {
     [text, engine],
   )
   const article = useRef<HTMLElement | null>(null)
+  // The rail's width is a **preference** (contract.md §5.2): the same primitive
+  // the left column and a commit's file list use. Both hooks sit above the
+  // early returns below — a hook after a conditional return changes the order.
+  const [outlineWidth, setOutlineWidth] = usePaneSize(
+    OUTLINE_WIDTH_KEY,
+    OUTLINE_DEFAULT_PX,
+    OUTLINE_MIN_PX,
+    OUTLINE_MAX_PX,
+  )
+  const body = useRef<HTMLDivElement | null>(null)
+  // While the pointer is down only the CSS variable moves (see `splitpane`):
+  // committing every move to state would re-render the whole document per frame.
+  const previewOutline = useCallback((next: number): void => {
+    body.current?.style.setProperty('--dio-outline-width', `${next}px`)
+  }, [])
   // The page's services: `tabs` / `router` are provided by pieces, so they are
   // read through the page context (a renderer gets `mountCtx`, not `ctx`).
   const { ctx } = useKernel()
@@ -395,7 +466,14 @@ function Markdown({ file, text, mountCtx }: FileRendererProps) {
           二进制文件，无法以 Markdown 渲染
         </div>
       ) : (
-        <div className={`diorama-markdown-body${showOutline ? ' diorama-markdown-body--outlined' : ''}`}>
+        <div
+          ref={body}
+          className={`diorama-markdown-body${showOutline ? ' diorama-markdown-body--outlined' : ''}`}
+          // The rail's width is a CSS variable, so a drag writes it straight
+          // onto this element instead of re-rendering the document each frame
+          // (contract.md §5.2, `splitpane.ts`).
+          style={{ '--dio-outline-width': `${outlineWidth}px` } as CSSProperties}
+        >
           <article
             ref={article}
             className="diorama-markdown"
@@ -404,7 +482,15 @@ function Markdown({ file, text, mountCtx }: FileRendererProps) {
             dangerouslySetInnerHTML={{ __html: document.html }}
             onClick={onClick}
           />
-          {showOutline ? <OutlineRail entries={outline} article={article} /> : null}
+          {showOutline ? (
+            <OutlineRail
+              entries={outline}
+              article={article}
+              width={outlineWidth}
+              onPreview={previewOutline}
+              onCommit={setOutlineWidth}
+            />
+          ) : null}
         </div>
       )}
     </div>
