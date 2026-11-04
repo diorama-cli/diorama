@@ -57,9 +57,16 @@ test('tree toolbar: the same action is a command (palette and keyboard)', async 
     await waitForPage(page)
     const tree = page.getByTestId('file-tree')
     // No tab: the command is not executable, so the palette does not list it.
+    // Wait for the palette itself before reading its rows: the count of a row
+    // that is not listed yet is 0 whether the palette opened or not, and an
+    // `Escape` sent before the input exists is lost (its handler is the input's
+    // own `onKeyDown`, contract.md §3.7), leaving the backdrop over the tree.
     await page.keyboard.press(`${MOD}+k`)
+    const palette = page.getByTestId('palette')
+    await expect(palette).toBeVisible()
     await expect(page.locator('[data-command="tree.revealActive"]')).toHaveCount(0)
     await page.keyboard.press('Escape')
+    await expect(palette).toBeHidden()
 
     await tree.locator('[data-path="docs"]').click()
     await tree.locator('[data-path="docs/notes.md"]').click()

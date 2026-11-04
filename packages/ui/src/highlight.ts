@@ -23,17 +23,22 @@
  *
  * ## What an engine must do
  *
- * Only two things, and both are pure:
+ * Three things, and all of them pure:
  *
  * - {@link Highlighter.languageOf} — the language a path is read as, so a
  *   caller can show it (and so "no language" is a fact, not a guess);
  * - {@link Highlighter.lines} — one text as **HTML per line**, each line a
  *   self-contained fragment (the caller draws one row per element, so a span
- *   must not leak across a line break).
+ *   must not leak across a line break);
+ * - {@link Highlighter.block} — one **fenced block** of a Markdown document as
+ *   HTML (docs/m31/spec.md). A fence has an info string instead of a path and
+ *   is drawn whole, so it is neither of the two above.
  *
- * The contract is deliberately about *lines*, not about a document: that is
+ * The first two are deliberately about *lines*, not about a document: that is
  * the shape every diff reader needs, and it is what keeps a two-column reader
- * from having to re-highlight a whole file twice.
+ * from having to re-highlight a whole file twice. `block` is the one place
+ * where a document is the unit, because a document is what the Markdown
+ * renderer holds.
  */
 
 import { useSyncExternalStore } from 'react'
@@ -50,6 +55,19 @@ export interface Highlighter {
    * still get well-formed markup. An empty text has no lines (`[]`).
    */
   lines(text: string, path: string): string[]
+  /**
+   * One fenced block of a document as HTML — the **whole** block, one fragment.
+   *
+   * A Markdown fence is not a file: it has an info string (`ts`,
+   * `js title=x`) instead of a path, and a document is drawn as one run of
+   * markup rather than one row per line. `escaped` is what the parser says
+   * about the text it hands over (marked escapes it unless the token says
+   * otherwise), so an unknown language comes back as text, not as markup.
+   *
+   * Optional: a piece that publishes an engine without this only serves the
+   * readers that draw rows (`git-changes`), and a document stays plain.
+   */
+  block?(text: string, language: string | undefined, escaped?: boolean): { html: string; language: string }
 }
 
 /** The published engine, its version, and who is watching (one per page). */

@@ -13,7 +13,13 @@
 | 3 | [docs/features.md](docs/features.md) | **有什么**：能力清单与档位（✅ / v1 / 未来 / 不做） |
 | 4 | 最近一档的 `docs/mN/spec.md` | **怎么实现的** + **§6.2 的坑**（见下面 §5） |
 
-最近一档是 [docs/m30/spec.md](docs/m30/spec.md)（**页面底部的状态栏**：座位 `layout.status`（单，
+最近一档是 [docs/m31/spec.md](docs/m31/spec.md)（**Markdown 里的代码片段也上色**：围栏代码块按
+info string 上色，颜色来自 `code` 发布到页面的那份引擎（`__diorama_highlight__`，与 diff 读法同源）——
+`Highlighter` 多一个**可选**的 `block(text, language, escaped?)`，因为文档是一整段 markup，不是 diff 的
+一行一个元素；围栏写短名（`ts` / `js`）而引擎注册长 id，按 highlight.js 的 `aliases` 反查回注册 id；
+**不认识的语言不猜**（不上 `highlightAuto`）、内联 `code` 不上色、页面没有 `code` piece 时围栏退回转义
+文本；marked 的 `token.escaped` 要透传，否则未知语言会被转义两次。契约 §5.1、§30、§43）；
+上一档是 [docs/m30/spec.md](docs/m30/spec.md)（**页面底部的状态栏**：座位 `layout.status`（单，
 `layout` 声明与绘制）+ 内置 piece `status-bar`——左边是实例（**完整根目录路径** / `mountId` / 地址），
 中间是当前文件的路径、大小、行数、修改时间（diff tab 多一个「差异」标记），右边是标签页数；根路径
 拆成「父路径 + 最后一段」，窄了**只有父路径出省略号**、目录名不缩不淡（`splitRoot`）；**座位空着连
@@ -224,6 +230,8 @@ scripts/                  生成器（图标表；`pnpm icons` 重新生成）
 | 想让测试「假装从别的机器访问」（改 `Host` 头），服务端却一直看到 `127.0.0.1` | **`fetch`（undici）静默丢掉 `host` 头**；Playwright 的 `extraHTTPHeaders` 与 `route.continue({ headers })` 也一样（实测都丢） | 要么在纯函数上测（`cardUrl`），要么 `node:http` 手搓请求，要么真的用本机 LAN 地址访问（m29/spec §6 坑 1）|
 | 索引页绑到 `0.0.0.0`，从手机点卡片「无法访问此网站」 | 卡片链接是 `MountStatus.url`，loopback 挂载报的是 `127.0.0.1`——在手机上那是**手机自己** | 卡片地址是 loopback 且请求不是从 loopback 来时，主机名换成 `Host` 头里的那个（端口仍是挂载的）；判据是**请求**不是配置（m29/spec §2）|
 | 页面底部加了状态栏，**看不见**，而 `data-testid` 全在 | `.diorama-shell` 是纵向 flex，但框架仍是 `min-height: auto`：长文件把列撑高，栏被顶出视口 | 框架显式 `min-height: 0`（`flex: 1 1 auto`），栏 `flex: none`；e2e 用 `scrollHeight <= innerHeight` 锁住（m30/spec §6 坑 1）|
+| Markdown 里同一段代码被叫成两个语言名（文档报 `ts`、文件报 `typescript`） | 围栏写的是短名，而引擎注册的是长 id；`hljs.getLanguage('ts')` 能解析别名，但**定义对象自己的 `name` 是 `'TypeScript'`**（带大写），都不是页面里那个 id | 按注册表反查：id 或 `aliases` 命中就用**注册 id**；围栏的语言名一律过这一步（m31/spec §6 坑 1）|
+| 文档里的代码块出现 `&amp;lt;` 这样的实体名 | marked 的 `token.escaped` 没透传，未知语言分支又转义了一次 | `highlightBlock(text, language, escaped)` 的第三个参数就是它：已经转义过的文本只原样交回（m31/spec §6 坑 2）|
 | 座位空着，页面底部还是多出一条 1px 线 / 一行背景 | `Slot` 的 `empty={null}` 只决定**座位里**画什么，外层 `<footer>` 照样渲染 | 画座位的组件先用 `useSeat(name)` 问有没有条目，空就 `return null`（`useSeat` 也是 hook，必须在任何提前 return 之前）（m30/spec §6 坑 2–3）|
 
 ## 6. 边界（不要越过的线）

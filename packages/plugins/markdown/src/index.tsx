@@ -36,7 +36,7 @@
  */
 import type { Context } from 'cordis'
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
-import { provideEntry, useKernel } from 'diorama-ui'
+import { provideEntry, useHighlighter, useKernel, type Highlighter } from 'diorama-ui'
 import DOMPurify from 'dompurify'
 import { Marked, Renderer } from 'marked'
 import type { Tokens } from 'marked'
@@ -70,8 +70,15 @@ const parser = new Marked({ gfm: true, breaks: false, async: false }, mathExtens
  * document has to land somewhere), collects the outline, and turns a
  * ```mermaid fence into a placeholder. The counters and the outline live in the
  * closure: one renderer per parse (see {@link renderDocument}).
+ *
+ * A fenced block of code is coloured by the page's engine — the same
+ * highlight.js registration list the `code` renderer and the diff readers use
+ * (contract.md §5.1, §30; docs/m31/spec.md). A document may be parsed before
+ * that engine is published (boot order is the plugin graph's, not this file's)
+ * or on a page whose plugin selection leaves `code` out, and then a fence is
+ * escaped text, which is what it was before: a document never depends on it.
  */
-function documentRenderer(outline: OutlineEntry[]): Renderer {
+function documentRenderer(outline: OutlineEntry[], engine?: Highlighter): Renderer {
   const seen = new Map<string, number>()
   const renderer = new Renderer()
   renderer.heading = function (token: Tokens.Heading): string {
@@ -84,10 +91,26 @@ function documentRenderer(outline: OutlineEntry[]): Renderer {
     // A diagram is not code: Mermaid reads it, and the `<pre>` inside the
     // placeholder is what a reader sees if it never loads.
     if (isMermaidFence(token.lang)) return mermaidPlaceholder(token.text)
-    // Everything else is the base renderer's job (escaping included).
-    return Renderer.prototype.code.call(this, token)
+    const highlighted = engine?.block?.(token.text, token.lang, token.escaped === true)
+    if (highlighted === undefined || highlighted.language === 'plaintext') {
+      // Everything else is the base renderer's job (escaping included).
+      return Renderer.prototype.code.call(this, token)
+    }
+    // The same shape the base renderer emits, so the stylesheet's `pre code`
+    // rule applies unchanged; the language is on the block as well, which is
+    // what a reader (or a test) can see without parsing the tokens.
+    const language = token.lang?.trim().split(/\s+/)[0]?.toLowerCase() ?? ''
+    return (
+      `<pre class="diorama-markdown__code" data-language="${escapeAttr(highlighted.language)}">` +
+      `<code class="language-${escapeAttr(language)}">${highlighted.html}</code></pre>\n`
+    )
   }
   return renderer
+}
+
+/** The four characters that would end an attribute early. */
+function escapeAttr(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
 /**
@@ -98,9 +121,12 @@ function documentRenderer(outline: OutlineEntry[]): Renderer {
  * accumulate one copy per keystroke (`use` merges, it does not replace), and
  * the heading counters have to start over for each document.
  */
-export function renderDocument(text: string): { html: string; outline: OutlineEntry[] } {
+export function renderDocument(
+  text: string,
+  engine?: Highlighter,
+): { html: string; outline: OutlineEntry[] } {
   const outline: OutlineEntry[] = []
-  const html = parser.parse(text, { async: false, renderer: documentRenderer(outline) })
+  const html = parser.parse(text, { async: false, renderer: documentRenderer(outline, engine) })
   // A repository is untrusted input: no scripts, no event handlers, no
   // javascript: URLs, no inline styles that position over the page chrome.
   const clean = DOMPurify.sanitize(html, {
@@ -119,8 +145,8 @@ export function renderDocument(text: string): { html: string; outline: OutlineEn
 }
 
 /** Markdown text → sanitised HTML (the outline is dropped). */
-export function renderMarkdown(text: string): string {
-  return renderDocument(text).html
+export function renderMarkdown(text: string, engine?: Highlighter): string {
+  return renderDocument(text, engine).html
 }
 
 /** A `FileInfo` for a path (a tab carries the path only, contract.md §3.4). */
@@ -295,7 +321,14 @@ function OutlineRail({
   )
 }
 function Markdown({ file, text, mountCtx }: FileRendererProps) {
-  const document = useMemo(() => (text === undefined ? { html: '', outline: [] } : renderDocument(text)), [text])
+  // The page's engine, for the fenced blocks (docs/m31/spec.md). It arrives
+  // after this component's first render whenever `code` boots later, and the
+  // document is re-parsed then: a fence is coloured once the engine is here.
+  const engine = useHighlighter()
+  const document = useMemo(
+    () => (text === undefined ? { html: '', outline: [] } : renderDocument(text, engine)),
+    [text, engine],
+  )
   const article = useRef<HTMLElement | null>(null)
   // The page's services: `tabs` / `router` are provided by pieces, so they are
   // read through the page context (a renderer gets `mountCtx`, not `ctx`).

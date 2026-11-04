@@ -221,3 +221,49 @@ export function highlightLines(text: string, path: string): string[] {
   const { html } = highlight(text, path)
   return splitHighlightedHtml(html)
 }
+
+/**
+ * One **fence** as HTML — the shape a Markdown document needs (contract.md
+ * §5.1): the whole block in one fragment, because a document is drawn as one
+ * run of markup, not as rows.
+ *
+ * `language` is the fence's info string (`ts`, `js title=x`), so only
+ * its first word counts; a name this engine did not register (or none at all)
+ * leaves the code as escaped text, exactly like a file it does not know.
+ *
+ * `escaped` says whether the caller already escaped `text` (marked's token
+ * carries it), so the unknown-language path does not escape it twice.
+ */
+export function highlightBlock(
+  text: string,
+  language: string | undefined,
+  escaped = false,
+): { html: string; language: string } {
+  const name = canonicalLanguage((language ?? '').trim().split(/\s+/)[0]?.toLowerCase() ?? '')
+  if (name === undefined) return { html: escaped ? text : escapeHtml(text), language: 'plaintext' }
+  try {
+    return { html: hljs.highlight(text, { language: name, ignoreIllegals: true }).value, language: name }
+  } catch {
+    return { html: escaped ? text : escapeHtml(text), language: 'plaintext' }
+  }
+}
+
+/**
+ * The registered language a fence's name refers to, or `undefined`.
+ *
+ * A fence is written the short way — ```ts`, ```js`, ```sh`, ```yml — while
+ * this engine registered the long ids. highlight.js keeps the short forms as
+ * **aliases** of the definition it was given, so the answer is looked up there
+ * and normalised back to the id: a block always reports the language the rest
+ * of the page calls it.
+ */
+function canonicalLanguage(name: string): string | undefined {
+  if (name === '') return undefined
+  for (const id of Object.keys(REGISTERED)) {
+    const definition = hljs.getLanguage(id)
+    if (definition === undefined) continue
+    const aliases = (definition.aliases ?? []) as readonly string[]
+    if (id === name || aliases.includes(name)) return id
+  }
+  return undefined
+}

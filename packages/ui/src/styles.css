@@ -1086,6 +1086,45 @@ body.diorama-resizing {
   background: none;
 }
 
+/* A fenced block of code is coloured by the page's engine (contract.md §5.1,
+   §30; docs/m31/spec.md): the same six tokens the `code` renderer and the diff
+   readers use, so one snippet reads the same in a document and in a file.
+   An inline `code` span is a *name*, not a snippet, and stays uncoloured. */
+.diorama-markdown pre .hljs-comment,
+.diorama-markdown pre .hljs-quote {
+  color: var(--dio-syn-comment);
+}
+
+.diorama-markdown pre .hljs-keyword,
+.diorama-markdown pre .hljs-selector-tag,
+.diorama-markdown pre .hljs-literal,
+.diorama-markdown pre .hljs-type {
+  color: var(--dio-syn-keyword);
+}
+
+.diorama-markdown pre .hljs-string,
+.diorama-markdown pre .hljs-regexp {
+  color: var(--dio-syn-string);
+}
+
+.diorama-markdown pre .hljs-number,
+.diorama-markdown pre .hljs-attr,
+.diorama-markdown pre .hljs-variable,
+.diorama-markdown pre .hljs-template-variable {
+  color: var(--dio-syn-number);
+}
+
+.diorama-markdown pre .hljs-title,
+.diorama-markdown pre .hljs-name,
+.diorama-markdown pre .hljs-section {
+  color: var(--dio-syn-title);
+}
+
+.diorama-markdown pre .hljs-built_in,
+.diorama-markdown pre .hljs-symbol {
+  color: var(--dio-syn-builtin);
+}
+
 .diorama-markdown blockquote {
   padding-left: 12px;
   border-left: 3px solid var(--dio-border);

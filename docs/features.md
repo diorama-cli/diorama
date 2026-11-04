@@ -73,7 +73,7 @@
 | P2 | `file-tree` | ✅ M0 | 左侧导航；目录点击=导航，文件点击=打开 |
 | P3 | `tabs` | ✅ M2 | 多 tab：每文件一个 tab、keyed 座位、关闭回退、每 tab 独立滚动；**不提供编辑** |
 | P4 | `renderer-registry` | ✅ M0→M1 | matcher 三档（ext → mime → probe）+ 兜底 + 失败回退（contract §5.1）|
-| P5 | `markdown` | ✅ M1 | `.md` → HTML（marked + DOMPurify 消毒）；**链接留在页面内**（本站文件开 tab、`#fragment` 滚动、外部链接开新标签页、越界链接不动作；标题带 `id` 供锚点落点）——见 [m12/spec.md](m12/spec.md)。**v0.12：公式、图表与文档内大纲**（`$…$` / `$$…$$` → KaTeX，```mermaid 围栏 → Mermaid，两者**按需加载**、挂载后渲染、失败留源码；文章旁边一栏目录，属于这一篇、点一行滚过去）——见 [m17/spec.md](m17/spec.md) |
+| P5 | `markdown` | ✅ M1 | `.md` → HTML（marked + DOMPurify 消毒）；**v0.23：围栏代码块按语言上色**（引擎取自页面全局，见 U27、contract §43）；**链接留在页面内**（本站文件开 tab、`#fragment` 滚动、外部链接开新标签页、越界链接不动作；标题带 `id` 供锚点落点）——见 [m12/spec.md](m12/spec.md)。**v0.12：公式、图表与文档内大纲**（`$…$` / `$$…$$` → KaTeX，```mermaid 围栏 → Mermaid，两者**按需加载**、挂载后渲染、失败留源码；文章旁边一栏目录，属于这一篇、点一行滚过去）——见 [m17/spec.md](m17/spec.md) |
 | P6 | `code` | ✅ M1 | highlight.js 按语言注册；`.md` 不在其中（归 markdown），`.html` / `.htm` 也不在其中（归 html）。**v0.14 起它也是页面上唯一的引擎来源**：boot 时把「路径 → 语言」「文本 → 每行 HTML」发布到页面全局，diff 的整文件 / 双栏读法用它上色（contract §30）|
 | P7 | `plaintext` | ✅ M0 | 兜底渲染器 |
 | P8 | `palette` | ✅ M2 | 插件，`layout.overlay` 条目，`mod+k`；只列可执行命令 |
@@ -112,6 +112,7 @@
 | U19 | 公式（KaTeX）与图表（Mermaid） | ✅ v0.12 | `$…$` / `$$…$$` 与 ```mermaid 围栏；两个库**按需加载**（文档里没有就一个字节都不下），从插件自己的包 `/plugins/markdown/vendor/` 取，挂载后在消毒过的 DOM 上渲染；渲染失败留源码、不弹窗；Mermaid 跟随页面配色重画（contract §5.1、§27）|
 | U7 | 图片缩放 / 适配窗口 | 🔲 待定 | O8 |
 | U8 | diff 并排 / 行内切换 | ✅ | **并排已做**（v0.10）：三档读法「改动（行内）/ 整个文件（单栏）/ 新旧对照（双栏）」+ 变更块间导航（contract §23）|
+| U27 | Markdown 里的代码片段语法高亮 | ✅ v0.23 | 围栏代码块按 info string（```ts / ```js …）上色，用的是**页面上同一个引擎**（`code` 发布到 `__diorama_highlight__` 的那份，与 diff 读法同源），颜色只有 `--dio-syn-*` 六个 token；未注册的语言、没有 info string、或者页面没有 `code` piece 时退回转义文本（不猜语言、不报错）；内联 `code` 不上色（contract §5.1、§30、§43；docs/m31/spec.md）|
 | U21 | diff 的语法高亮（单栏 / 双栏） | ✅ v0.14 | 「整个文件」与「新旧对照」两档按文件语言上色（关键字 / 字符串 / 注释 / 数字 / 函数名 / 内建），与 `code` 渲染器同一套 token 与同一张语言表；行内那档是 git 自己的文本，**不**上色；没有引擎时退回纯文本（contract §5.2、§30；docs/m19/spec.md）|
 | U9 | 状态栏 | ✅ v0.22 | 页面底部一条：左边是**实例**（挂载的**完整根目录路径**——窄了只有父路径出省略号、目录名不缩不淡、`mountId`、页面地址），中间是**当前文件**（路径、大小、行数、最后修改时间；diff tab 另有「差异」标记），右边是标签页数量。座位 `layout.status`（单，`layout` 声明与绘制）由 `status-bar` piece 填充；**去掉那个 piece 就没有栏**（座位空着不画，框架几何不变）；读不到文件时省掉那几格、不在栏里报错；行数超过 2 MiB 不数（contract §5.4、§42；docs/m30/spec.md）|
 | U10 | 多 tab 状态持久化（刷新后恢复整组 tab） | 🔲 待定 | O5；刷新只恢复**活动文件**（URL）与 hash 里的视图（`#diff`、`#history=<sha>`）|
