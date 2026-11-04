@@ -25,12 +25,12 @@ import { useEffect, useMemo, useRef } from 'react'
 import { Icon, LineRow, LINE_NUMBERS_ICON, lineNumbersStore, publishHighlighter, provideEntry, setLineNumbers, toggleLineNumbers, useRevealLine, useStore, watchSelection } from 'diorama-ui'
 import type {} from 'diorama-plugin-slots'
 import type { FileRendererProps } from 'diorama-kernel'
-import { CODE_EXTENSIONS, CODE_LANGUAGES, escapeHtml, highlight, highlightLines, languageOf } from './highlight.ts'
+import { CODE_EXTENSIONS, CODE_LANGUAGES, escapeHtml, highlight, highlightBlock, highlightLines, languageOf } from './highlight.ts'
 
 export const name = 'code'
 export const inject = ['slots']
 
-export { CODE_EXTENSIONS, CODE_LANGUAGES, escapeHtml, highlight, highlightLines, languageOf }
+export { CODE_EXTENSIONS, CODE_LANGUAGES, escapeHtml, highlight, highlightBlock, highlightLines, languageOf }
 
 /**
  * Scroll the pane so `line` sits in the middle. The rows are found by their
@@ -119,7 +119,7 @@ export function apply(ctx: Context) {
   // The engine every diff reader of this page colours its rows with. Disposing
   // this piece takes it back off the page (another publisher is left alone).
   ctx.effect(
-    () => publishHighlighter({ languageOf, lines: highlightLines }),
+    () => publishHighlighter({ languageOf, lines: highlightLines, block: highlightBlock }),
     'code: publish the highlighter',
   )
   provideEntry(ctx, {

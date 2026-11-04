@@ -4,6 +4,7 @@ import {
   CODE_EXTENSIONS,
   escapeHtml,
   highlight,
+  highlightBlock,
   highlightLines,
   languageOf,
   splitHighlightedHtml,
@@ -84,4 +85,44 @@ test('highlight: an unknown language falls back to escaped text', () => {
   const result = highlight('const a = 1\n', 'notes.txt')
   assert.equal(result.language, 'plaintext')
   assert.equal(result.html, 'const a = 1\n')
+})
+
+/**
+ * A Markdown fence (docs/m31/spec.md): an info string instead of a path, and
+ * the **whole** block in one fragment — the document is drawn as one run of
+ * markup, so the per-line shape is the wrong one here.
+ */
+test('highlightBlock: the fence info string names the language', () => {
+  const block = highlightBlock('const a = 1', 'ts', false)
+  assert.equal(block.language, 'typescript')
+  assert.ok(block.html.includes('hljs-keyword'))
+})
+
+test('highlightBlock: only the first word of the info string counts', () => {
+  // ```ts title=x is still TypeScript.
+  assert.equal(highlightBlock('const a = 1', 'ts title=x', false).language, 'typescript')
+  assert.equal(highlightBlock('x', '  js  ', false).language, 'javascript')
+})
+
+test('highlightBlock: an unknown or missing language is escaped text', () => {
+  const raw = '<script>alert(1)</script>'
+  for (const language of [undefined, '', 'notalanguage']) {
+    const block = highlightBlock(raw, language, false)
+    assert.equal(block.language, 'plaintext')
+    assert.equal(block.html, '&lt;script&gt;alert(1)&lt;/script&gt;')
+  }
+})
+
+test('highlightBlock: text the parser already escaped is not escaped twice', () => {
+  // marked hands the text over as written unless the token says it is escaped.
+  assert.equal(highlightBlock('a &lt; b', 'notalanguage', true).html, 'a &lt; b')
+  assert.equal(highlightBlock('a &lt; b', 'notalanguage', false).html, 'a &amp;lt; b')
+})
+
+test('highlightBlock: a whole block stays one fragment, spans closed', () => {
+  const block = highlightBlock('function hi() {\n  return "one"\n}', 'js', false)
+  assert.ok(block.html.includes('hljs-keyword'))
+  assert.ok(block.html.includes('hljs-string'))
+  // No per-line cutting: the newlines are still there, inside the markup.
+  assert.ok(block.html.includes('\n'))
 })
