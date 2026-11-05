@@ -3,6 +3,31 @@
 Every published version of `@diorama-cli/diorama`, newest first. Generated from
 the commit log by `pnpm release` — see [docs/release.md](docs/release.md).
 
+## 0.0.10 (2026-11-05)
+
+### Features
+
+- **markdown:** fenced code blocks share the page highlight engine
+- **layout:** a status bar under the frame
+
+### Fixes
+
+- **git-changes:** the side-by-side reader keeps the file's indentation
+- **markdown:** the outline is a pane, flush right and resizable
+- **ui:** the selection block starts where the reader's drag did, and leaves the gutter alone
+
+### Documentation
+
+- **release:** file the 0.0.10 change lists under their version
+- **readme:** the page the features landed on, and screenshots that show it
+
+### Other
+
+- diff split indentation fix onto main
+- Markdown code highlighting onto main
+- selection paint fix onto main
+- status bar onto main
+
 ## 0.0.9 (2026-11-02)
 
 ### Features
