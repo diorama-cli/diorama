@@ -3,6 +3,35 @@
 Every published version of `@diorama-cli/diorama`, newest first. Generated from
 the commit log by `pnpm release` — see [docs/release.md](docs/release.md).
 
+## 0.0.11 (2026-11-06)
+
+### Features
+
+- **lsp:** go to definition, find usages and hover over source and diff
+- **git-changes:** draw the commit graph in the history view
+- **git-changes:** compare a stretch of history in the history view
+
+### Fixes
+
+- **git:** stop filtering log() by path, so the commit graph joins every line
+
+### Performance
+
+- **search:** decode once, cache by stat, and let ripgrep narrow the candidates
+
+### Documentation
+
+- **release:** file the 0.0.11 change lists under their version
+
+### Other
+
+- search performance — text cache, indexOf fast path, optional ripgrep narrowing
+- Merge branch 'worktree/fix-history-graph-paths'
+- Merge branch 'worktree/feat-lsp-definition'
+- definition jumps and language intelligence onto main
+- Merge branch 'worktree/feat-history-graph'
+- Merge branch 'worktree/feat-history-multi-commit'
+
 ## 0.0.10 (2026-11-05)
 
 ### Features

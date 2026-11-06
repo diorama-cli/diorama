@@ -8,7 +8,7 @@
 > 图片与 PDF 渲染器见 [实施说明](m4/spec.md)（§1–§6 是第一轮，§7–§11 是第二轮）；
 > 文件搜索见 [m6/spec.md](m6/spec.md)；界面图标见 [m7/spec.md](m7/spec.md)；
 > Markdown 的大纲 / 公式 / 图表见 [m17/spec.md](m17/spec.md)。其余仍是 v1 目标。
-> 契约见 [contract.md](contract.md) **v0.0.10**（变更清单自 §20 起按版本分段：`0.0.3` 是 §20–§22，此后每版一档）。
+> 契约见 [contract.md](contract.md) **v0.0.11**（变更清单自 §20 起按版本分段：`0.0.3` 是 §20–§22，此后每版一档）。
 
 ## 一、CLI
 
@@ -25,7 +25,7 @@
 | C11 | `diorama [dir] --json` / `diorama restart <dir> --json` | ✅ v0.3 | 把挂载输出成**一个** JSON 文档（`url` / `root` / `mountId` / `created` + 完整 `mount: MountStatus`），供其它程序直接取 URL；可与 `--foreground` 同用（打印后照常不退出，contract §7.6） |
 | C6 | 随机端口自动重试 | ✅ M3 | 随机端口上限 20 次；显式端口冲突直接 `EADDRINUSE`（退出码 1）|
 | C7 | realpath 挂载键 + 别名提示 | ✅ M3 | 挂载键 = realpath（同一真实目录幂等）；打印的目录是 realpath 后的 |
-| C8 | 单测/集成测试 | ✅ M0→本轮 | `apps/web/tests/`：188 条端到端（真实 CLI/gateway + Chromium）；`pnpm test:unit`：454 条单测 |
+| C8 | 单测/集成测试 | ✅ M0→本轮 | `apps/web/tests/`：212 条端到端（真实 CLI/gateway + Chromium）；`pnpm test:unit`：524 条单测 |
 
 ## 二、Gateway
 
@@ -55,7 +55,7 @@
 | K20 | `ctx.theme`（client） | ✅ v0.9 | 页面配色：跟随系统 / 锁定 / 主题注册表（§3.10）；纯客户端，不 RPC |
 | K21 | `ctx.lsp`（只读） | ✅ | 语言智能：`definition` / `typeDefinition` / `references` / `hover` / `documentSymbol` / `status`；每 mount 一个语言服务器进程（TS / C / C++ / Go），首次用到才起；**只转只读的那一半协议**（rename / applyEdit / executeCommand 永不调用）；缓存写 `/tmp/diorama/.cache/lsp/<normalised project>`，**被浏览的目录一个字节不动**；缺的 TypeScript 服务器连同 `typescript@5` 自动装到缓存目录；行号 1-based、列 0-based UTF-16（转换有单测）；第一次查询等工程加载完（`$/progress` + 两次答案一致）才回答（contract §3.12）|
 | K19 | `ctx.search`（只读） | ✅ v0.8 / v0.26 | `search(query, { kind, caseSensitive, wholeWord, regex, scope, maxFiles, maxMatchesPerFile })`；`name`（子序列）/ `content`（逐行报 line/column/length）；上限 200 文件 / 每文件 20 条 / 扫描 2 万文件，超限**截断**并报真实总数；二进制跳过；`EINVAL` / `ENOENT`。**v0.26 性能**：每个 mount 一份已解码文本缓存（32 MiB / 2 万文件，按 mtime + ctime + size 校验）、字面量走 `indexOf`、二进制扩展名不打开、新增 `paths(scope?)` 一次列出全部路径（上限 `SEARCH_MAX_PATHS` = 2 万）——重复查询 200–400 → 140–156 ms（contract §3.9、§49）。**v0.27 可选 ripgrep 引擎**：装了 `@vscode/ripgrep` 时先由它回答「哪些文件命中」（`--files-with-matches`），细节仍由 JavaScript 产出，两条路径结果逐字段相同；引擎只拿显式文件清单、不拿目录，`ignore` 仍是唯一强制点；正则也用它窄化（`--engine auto`，方言差异只会多给文件、不会少给，非法正则仍由 JavaScript 判定 `EINVAL`）；没装 / 命中面过宽 / 缓存已覆盖时静默退回（罕见词首次 165 → 26 ms，正则 176 → 76 ms，contract §3.9、§50）|
-| K9 | `ctx.git`（只读） | ✅ | `status` / `diff(scope)` / `log`（v0.5）；`show` / `showCommit` / `blob`、`base: 'index' \| <commit>`（v0.6）；**v0.10：一个挂载里的全部仓库**——`repos()` + 每个方法的可选 `repo`，向下走查 `.git`（`[git] maxDepth` 默认 3、`maxRepos`、`ignore` 剪枝），嵌套仓库不重复出现在外层；上限、错误码（contract §3.2）|
+| K9 | `ctx.git`（只读） | ✅ | `status` / `diff(scope)` / `log`（v0.5）；`show` / `showCommit` / `blob`、`base: 'index' \| <commit>`（v0.6）；**v0.10：一个挂载里的全部仓库**——`repos()` + 每个方法的可选 `repo`，向下走查 `.git`（`[git] maxDepth` 默认 3、`maxRepos`、`ignore` 剪枝），嵌套仓库不重复出现在外层；上限、错误码（contract §3.2）。**v0.25：`range(from, to, repo?)`**——一段历史（最旧 → 最新，起点是最旧提交的父提交）里每个提交的改动合起来，形状与上限同 `showCommit`（contract §45）；**v0.28：`log()` 去掉 `path`**，不再带 pathspec——pathspec 会打开 git 的历史简化，提交图因此出现悬空的线（contract §48）|
 | K10 | `ctx.slots` | ✅ M0→M1 | |
 | K11 | `ctx.commands` | ✅ M2 | 内核内置：命令 id fail loud、快捷键字面冲突抛错、`CommandContext` 内核采集、单一 keydown 分发 |
 | K12 | `ctx.diorama.mounts` | ✅ M3 | `onMount` 时机、卸载顺序、`MountInfo` 带 `port`/`url`/`configFile`（契约 §2.5/§3.5）|
