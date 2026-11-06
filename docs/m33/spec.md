@@ -1,142 +1,148 @@
-# m33 — 定义跳转与语言智能（`ctx.lsp` + `lsp-nav`）
+# 实施说明：历史视图里选多个提交来对比
 
-> 2026-11-06。用户要求：「调研能否接入 LSP，支持方法/变量等定义跳转，包括源码浏览 / git diff
-> 等界面」。契约见 [contract.md](../contract.md) **§3.12**（服务）与 **§45**（变更清单）；
-> 能力档位见 [features.md](../features.md) 的 K21 / P22 / U28。
+> 记录于 2026-11-06。用户要求：「git history 支持选择多个 commit 来展示这几个 commit 的变更」。
+> 契约不升号（§6）：新增一个内核方法（`ctx.git.range`）与一个座位的**可选** prop（`CommitSeatProps.commits`），
+> 没有改任何已有签名。契约正文改的是 **§3.2**（新方法与它的三条边界）、**§3.8**（值里的结构归插件）、
+> **§5**（座位 props）、**§5.2**（历史视图怎么多选），变更清单是新写的 **§45**。
 
-## 1. 调研：能不能接
+## 1. 出发点
 
-**能，而且成本比预想低。** 动手之前先在真实仓库上量过（不是纸面推演）：
+历史视图（v0.6）一次只能看**一个**提交：点一行，右侧就是那一个提交对它父提交的改动。读者的下一个问题
+很自然——「这三个提交合起来，代码变成了什么样」。要回答它，需要两件事：
 
-| 量的是什么 | 结果 |
-|---|---|
-| `typescript-language-server` 初始化 | 61 ms |
-| `documentSymbol`（一个 340 行的服务端文件） | 20 ms，25 个符号 |
-| `references` | 11 ms |
-| 第一次 `definition` | 293–340 ms（首次加载工程），之后 **1–4 ms** |
-| 跨包定义（插件 → `diorama-ui` 的 `useStore`） | 解析到 `packages/ui/lib/index.d.ts:69` ✅ |
-| 同包定义 | 精确到 `src/highlight.ts` 的声明行 ✅ |
-| clangd（C） | 99 ms → 0 ms ✅ |
-| gopls（Go） | 起来 337 ms，`definition` 回 `null`（需要工程配置，本机样例太裸）⚠️ |
-| **clangd 喂未落盘的缓冲区**（模拟 diff 视图里「+2 行偏移」的文本） | 定义仍解析到正确行 ✅ |
+1. **一次能选好几个提交**，并且知道哪两个是这段历史的**两端**；
+2. **一段历史有一个「净改动」**：不是把每个提交的改动拼起来，而是「从最旧那个到最新那个，文件差了什么」。
 
-最后一条是这次调研最关键的发现：**diff 视图可以直接接定义跳转**——把渲染器正在显示的文本
-通过 `didChange` 灌进语言服务器，不需要临时文件、也不写盘。
+第 2 条是关键。把三个提交的 patch 拼在一起会冒出**中间先加后删**的东西：它确实出现过，但它已经不在
+代码里了，而读者要看的是「现在是什么样」。`git diff <old> <new>` 做的正是这件事——一次**两树比较**。
 
-反面结论同样重要：**裸 `tsserver` 不说 LSP**。它自己那套是 `tsserver protocol`（命令式，
-`quickinfo` / `definition` 带 `file` / `line` / `offset`），我实测对 `initialize`
-**永远不回答**。适配器 `typescript-language-server` 是必需的，不是可选的。
+## 2. 决定
 
-## 2. 为什么落在内核
-
-插件**禁止** `import 'node:fs'` / 起进程（architecture.md §8、AGENTS.md §6）。LSP 客户端必然
-`spawn` 一个进程并说它的管道语言——这条线不能为了一个功能破：破了以后「路径白名单 /
-worker 隔离 / 子进程代理」就没有可以换实现的那一层了。所以是**内核服务** `ctx.lsp`，
-与 `ctx.git` 同一个形状（每 mount 一份、只读、可选能力）。
-
-## 3. 三个界面
-
-| 界面 | 本档 | 做法 |
+| 决定 | 取值 | 为什么 |
 |---|---|---|
-| **源码浏览** | ✅ | `code` 渲染器上三个手势：⌘/Ctrl+点击转定义、右键菜单（转定义 / 找引用）、悬停卡片 |
-| **git diff** | ✅ v2 | 三档读法都接了；每档的行几何不同（见 §3.1） |
-| **大纲 / 引用列表** | 服务层就位 | `documentSymbol` / `references` 都在服务上；界面未做 |
+| 谁算「这几个提交的变更」 | `git diff <from^> <to>`：起点是**最旧提交的父提交** | 这样「选 1 个」与「选 N 个」对同一个提交说的是同一件事（`git show <c>` 就是 `git diff <c^> <c>`）。第一版用 `git diff <from> <to>`，结果**选 4 个只看得到 3 个**——最旧那个提交的改动被静默丢掉 |
+| 怎么选 | 每个列表都有的规则：**单击**选这一行、**Shift 单击**选整段、**⌘ / Ctrl 单击**加减一行 | 第一版是「对比开关 + 修饰键加选」，实测别扭：单击永远只选它自己，想选一段得先找到开关。标准语义**没有要先打开的状态**，第一次单击看一个提交，第二次 Shift 单击就是对比 |
+| 哪两个是端 | 选中里**最旧与最新**的两个（按列表位置） | 列表本身就是时间序；按点击顺序会让「先点新的再点旧的」与反过来产生不同的 diff。端只是**边界**，画出来的是这一段每个提交的改动合起来 |
+| root 提交 | 起点退回**空树**（`4b825dc642cb6eb9a060e54bf8d69288fbee4904`） | 第一个提交没有父提交，`<root>^` 解析不出来；`git diff <空树> <root>` 打印的就是 `git show <root>` |
+| 中间没选的提交 | 标成「这段覆盖了它」（`data-covered` / `.diorama-history__row--between`），但**不算选中** | 这段**覆盖**它们：`a → c` 的效果就是它们合起来的效果。不标会让人以为「只比了那两行」；算进选中集则「再点一下取消」会变成不可能 |
+| 「选中」与「覆盖」 | 两个独立的概念：`aria-selected` / `#history` 只说选中，覆盖由两端的列表位置算出来 | `⌘` 点首尾 → 选中 2 个、覆盖 3 个；Shift 选整段 → 全部选中。合成一个的话两种情形就分不开了 |
+| 状态放哪 | `#history` 的值，旧的在前：`<repo>:<oldest>,…,<newest>` | 已有的槽位、已有的刷新恢复路径；sha 里没有逗号，不需要转义；单提交的值一字不变 |
+| 座位怎么知道 | `CommitSeatProps.commits?: string[]` | 可选字段：只认识 `{ commit, repo }` 的条目照旧能画（`commit` 仍是其中最新的一个） |
+| 服务端排序吗 | 不排，方向由调用方给 | 服务端不知道读者的列表哪头朝上；猜错就是「diff 反了」，而且看不出来 |
 
-### 3.1 diff 的三档读法怎么定位
+## 3. 实现
 
-diff 的行**不是**文本渲染器的行：三个读法三种形状，而且**只有一部分行能问**。
+### 3.1 内核（`packages/kernel/src/server/git.ts`、`shared/types.ts`、`client/git.ts`）
 
-| 读法 | 行上的属性 | 格子 | 前缀 |
-|---|---|---|---|
-| 行内（`inline`） | `data-new-line`（删除行**没有**） | `.diorama-diff__code` | 1（git 的 `+` / `-` / 空格） |
-| 整文件（`file`） | `data-new-line`（删除行**没有**） | 同上 | 0 |
-| 双栏（`split`） | `data-new-line`（**只在右栏**） | 同上 | 0 |
+`GitRepoView.range(from, to)` 与 `GitService.range(from, to, repo?)`：
 
-三条规则，各有各的理由：
+```ts
+const first = await this.resolveRevision(normalizeCommit(from))
+const second = await this.resolveRevision(normalizeCommit(to))
+// 起点：最旧提交的父提交；root 提交没有父提交，退回空树。
+const before = await this.parentOf(first)
+const names = await this.run(['diff', '--name-status', '-z', '--no-ext-diff', '-M', before, second])
+// 每个文件一次 git diff <before> <second> -- <path>，形状照 toEntry（与 diff()/showCommit 同源）
+```
 
-1. **只问当前文件里存在的行**。删除行在当前文件里不存在；对它问「第 12 行」，
-   服务器会回答**另一行**——比不跳更坏。所以删除行干脆没有 `data-new-line`，
-   手势在那儿找不到行，什么都不发生。
-2. **双栏只认右栏**。左栏是**旧**文件，行号是旧文件的。同一行号在左右两侧指的是不同的代码。
-3. **行内读法要减 1**。格子里是 git 的原样行（`+` / `-` / 空格在前），列号从 1 起算，
-   不减就每次点击都偏一个字符——落在相邻的词上，跳到一个看起来合理但错误的地方。
+`parentOf(sha)` 先试 `rev-parse --verify --quiet <sha>^`，失败就回 `EMPTY_TREE`。
 
-发给服务器的是**当前文件的全文**（`ctx.fs.readText` 或 `ctx.git.blob`），不是 diff 文本：
-diff 的文本没有「第 12 行」这个概念。
+- 复用 `parseCommitFiles` / `toEntry` / `MAX_DIFF_BYTES` / `MAX_DIFF_LINES` / `clip`：形状与账都和
+  `showCommit().files` **同一套**，渲染器不需要知道这份 diff 是「一个提交对它父提交」还是「两个提交互相比」。
+- `METHODS` 加 `{ name: 'range', arity: 3 }`（`from` / `to` / 可选 `repo`）；`GIT_METHODS` 同步。
+- `RangeResult` 回 `from` / `to` 的**完整 sha**（最旧 / 最新），座位据此写出「覆盖的是哪一段」。
 
-`RowGeometry`（`lineAttribute` / `cellSelector` / `trim`）就是这件事的接口，
-默认值是文本渲染器的 `TEXT_ROWS`。渲染器自己说明它的行长什么样，手势不必知道有三种读法。
+### 3.2 历史视图（`packages/plugins/git-changes/src/index.tsx`）
 
-## 4. 缓存写在哪（读者的决定）
+- **没有开关**：头部只有「N 个提交 · 已选 M 个」与刷新按钮。多选就是列表本身的行为。
+- 点击走 `choose(sha, event)`，把 `shiftKey` / `metaKey` / `ctrlKey` 原样交给纯函数；**锚点**（上次点击的行）
+  是这个视图自己的 `useState`，不进 URL——刷新后下一次点击从新的一行开始，与任何列表一致。
+- 决定「点了之后选中什么」的是纯函数 `pickCommits`（`src/history.ts`），所以排序、整段、移出都有单测。
+- 渲染时把**选中**（`picked`，即 `aria-selected`）与**覆盖**（`covered`，由两端算出的区间）分开：端用
+  `.diorama-changes__row--selected`，选中但不是端用 `--picked`，只是被覆盖用 `--between`。
 
-**`/tmp/diorama/.cache/lsp/<normalised project>`**，被浏览的目录**一个字节都不写**。
+### 3.3 纯函数（`packages/plugins/git-changes/src/history.ts`，新文件）
 
-压平规则：去掉前导 `/`、去掉尾随 `/`、**已有的 `-` 先加倍**、
-再把 `/` 换成 `-`。加倍那一步是必须的——`/a-b` 与 `/a/b` 是两个项目，
-不加倍就共用一个缓存目录（第一版漏了，单测当场抓住）。
+`historyHashValue` / `parseHistoryHash` / `pickCommits` 从 `index.tsx` 搬到这里并扩展：
 
-各服务器的指向方式（**都量过**）：
+- 值：`<repo>:<a>,<b>`，旧的在前；单提交解码出的对象**没有** `commits` 键（v0.6–v0.24 的形状）。
+- `pickCommits(chosen, anchor, sha, order, { shift, toggle })`：单击 = 只要这一行；Shift = `order` 里
+  从锚点到这一行的**切片**（两端都含，所以中间的行一次就选上了）；⌘ / Ctrl = 加入或移出。答案一律按
+  `order` 排成旧的在前（`order` 是新的在前，所以是**降序**）。
+- 锚点由调用方保存并回传：Shift 连点时锚点不动，于是整段从同一起点长出来。
 
-| 服务器 | 怎么指 | 结果 |
-|---|---|---|
-| clangd | `--compile-commands-dir=<cache>` | 编译数据库与 `.cache/clangd/index` 都跟着走，项目干净 ✅ |
-| clangd | 只改 `cwd` | **无效**：索引仍写进项目的 `.cache/` ❌ |
-| clangd | `XDG_CACHE_HOME` | **无效**：这是 Xcode 的 clangd，不读它 ❌ |
-| tsserver | `XDG_CACHE_HOME` | 它把工程状态放内存，磁盘上只写日志 |
-| gopls | `GOCACHE` | 默认会往 `~/Library/Caches/go-build`（本机 4.5 GB）写，指走它 |
+搬到 `.ts` 的理由是 `node --test` 不认 `.tsx`（m4/spec §12 的老坑）：这两件事都是决策，值得单独测。
 
-## 5. 自动安装（读者的决定）
+### 3.4 座位（`packages/plugins/git-changes/src/index.tsx`）
 
-TypeScript 的服务器缺了就 **自动 `pnpm add`** 到缓存目录。两件必须一起做：
+`CommitSeat` 拿到 `commits` 且长度 > 1 时：
 
-1. `typescript-language-server` **和** `typescript` 一起装。适配器只是壳：旁边没有编译器时它
-   直接退出（"provides no tsserver.js"），每个悬浮都是空的。
-2. `typescript` 钉在 **5.x**。registry 上的 `typescript@7` 是原生预览版、**不带**
-   `tsserver.js` —— 装上去反而更坏（第一版就是这样，症状是「装好了但一个答案都没有」）。
+- 调 `git.range(from, to, repo)`，把结果装成 `CommitDetail`（`rangeDetail`）：`sha` 是最新那个，
+  `subject` 写成 `<old7> … <new7>`，`files` 就是 range 的文件清单；
+- 头部不再画提交说明（一段历史没有说明），画两端；`data-range=""` 让 e2e 与样式能区分两种座位；
+- 清单里的每一条都画出来（`files` 是完整的）；`truncated` 为真时**不画任何提示**——清单完整、缺的只是
+  内联正文，而「点开时再读」本来就是座位的常态（没有 `text` 的行就是普通行）。提示只会把实现细节讲给读者；
+- 「整个文件」那一档读的仍是**最新那个提交**的正文（`blob(detail.sha, path)`）——range 的右端就是它。
 
-## 6. 坑（按症状查）
+### 3.5 样式（`packages/ui/src/styles.css`）
 
-| 症状 | 根因 | 规则 |
-|---|---|---|
-| 起服务器成功，但每个请求都 `ESERVICE` / 超时 | 裸 `tsserver` 不说 LSP；或者适配器旁边没有 `typescript` | 适配器 + `typescript@5` 一起装；`status()` 的 `reason` 会写出真实原因 |
-| 「装好了但一个答案都没有」 | `typescript@7` 不带 `tsserver.js` | 版本钉 5.x（§5） |
-| **第一次**定义指回自己的 `import` 行，第二次才对 | 服务器还在加载工程，此时它只认得已打开的那一个文件 | 某语言的第一次查询：等 `$/progress` 归零，再**反复问直到两次答案一致**（坑 3） |
-| 服务器一直等到超时 | 它对客户端发 `workspace/configuration` / `client/registerCapability`，没人回答 | 每个 server→client **请求**都要回（`configuration` 回 `[]`，其余回 `null`）；只回 notification 是不够的 |
-| 第一次能跳，之后再也不跳 | 同一个：服务器在等一个没人回的问题 | 同上 |
-| `node --test` 报 `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX` | 用了 TypeScript 的**参数属性**（`constructor(private readonly x)`），strip-only 模式不认 | 手写字段赋值 |
-| 手势挂不上、点了没反应 | 把 `useKernel()` 的返回值当成 `ctx` 用 | `useKernel()` 返回 `{ ctx, mount, views, registry }`：服务在 `ctx` 上，`lsp` 在 `mount` 上 |
-| 渲染器 import 不到手势 | 手势写在 piece 里 | 手势在 `diorama-ui`（两个半边不能互相 import）；piece 只发布页面全局的面 |
-| e2e 里点不中标识符 | 按固定像素偏移点，落在行首的 `const` 上 | 用 `Range` 量出那个词的矩形再点 |
-| 缓存目录撞车 | 压平把 `/a/b` 与 `/a-b` 变成同一个名字 | 先给已有的 `-` 加倍，再换分隔符 |
-| **悬浮卡片里显示的是 ```typescript` 这样的围栏标记** | 把语言服务器的 Markdown 当文本画了 | 由 `markdown` piece 发布 `renderMarkdown` 到页面全局（``__diorama_markdown__``），卡片用它渲染；返回的 HTML **已经消毒**，别再转义（会变成 `&lt;`） |
-| **点声明时只高亮自己，看不到谁在用它** | 只问了 `definition`：在声明上它的答案就是声明自己 | 同时问 `definition@@ + `references`，**先排除点击的那一处**（`isSelf`：同文件且行落在它的区间里）；剩下有定义就跳、没定义就列使用处（`chooseTargets`） |
-| 「查找使用处」**静默地什么都不返回** | `includeDeclaration` 放在了 `textDocument/references` 参数的顶层；协议要求它在 `context` 里，放错位置服务器拒掉整个请求 | `{ context: { includeDeclaration: true } }` |
-| 悬浮卡片**太容易弹出来**，扫过一行就挡代码 | 延时太短 | `HOVER_DELAY_MS = 1000`：停一秒才出现（`packages/ui/src/lsp-gestures.tsx`） |
-| 指针只是离开**这个词**，卡片还挂着 | 只在容器上挂了 `onMouseLeave`，它要指针出整个代码区才触发 | 「离开」是**离开这个词**：`mouseover` 落到非标识符上也要立刻撤卡片 |
-| 指针已经停在 token 上，**按 ⌘ 没有下划线** | 按键不产生指针事件，`mouseover` 不会再触发一次 | 记下最后一次指针位置（`onMouseMove`），`held` 变化时用 `elementFromPoint` 重新算一遍下划线 |
-| 指针移开了，卡片**还挂着** | 有宽限期 | `HOVER_GRACE_MS = 0`，`onMouseLeave` 直接撤；指针在同一个标识符上时本来就不撤，所以不需要宽限 |
-| 按下 ⌘ 后悬浮卡片**盖住了使用列表** | 卡片与列表都画在指针旁，卡片没有让路 | `held` 一变就撤卡片，并且**按住期间不再安排新的悬浮**（`onMouseOver` 里先判 `held`） |
-| 使用列表每行前面都有「使用」两个字 | 标签里带了 kind | 列表只回答一个问题，每行按构造同类；只写 `path:行号`，`kind` 留在数据里 |
-| 光标没变小手 / 整片代码都是小手 | 想用窗格级的 `cursor: pointer` | 写在**指针下那个元素**上（内联样式），离开时把原值放回；窗格级会对空白也承诺可点 |
-| **松开 ⌘ 之后下划线还留着** | 松开修饰键**不触发任何鼠标事件**，没有事件来清状态 | 在 `held` 变回 `undefined` 的 `useEffect` 里主动清掉 |
-| 下划线画在了整行上 | 想用 CSS 类贴在行上 | 下划线是**词**上的浮层：用 `Range` 量出那个词自己的矩形（与 caret 同一套度量），`position: fixed` + `pointer-events: none` |
-| 点定义只跳到第一个，另外几处**永远看不到** | 服务器回答多处（重载 / 声明 + 实现 / 两处再导出），代码取了 `locations[0]` | **一个位置就跳，多个列出来**（`chooseDefinition`）；同一位置回答两次先**去重**，否则一次跳转变成了「只有一个选项的列表」 |
-| **点一下整行右边的空白，语言服务器就死了**，之后这个 mount 上每个请求都失败 | tsserver 5.9.3 对**超出该行长度**的列抛 `Debug Failure. False expression`（`computePositionOfLineAndCharacter`）并退出 | 边界处 `clampPosition`：行夹进文件、**列夹进该行长度**。页面产生这种列是诚实的（diff 的行比它来自的那一行短） |
-| diff 里点标识符跳到**另一行** | 对着删除行 / 双栏左栏问了「当前文件的第 N 行」，而那一行在当前文件里是别的内容 | 只有当前文件存在的行才有 `data-new-line`；删除行与左栏不给这个属性 |
-| diff 里点标识符**偏一个字符**，跳到相邻的词 | 行内读法的格子带 git 的 `+` / `-` 前缀，列号多算了一个 | `RowGeometry.trim: 1`（只有行内那一档是 1） |
-| 行内 diff 里定义跳转总是落空 | 行内读法本来不读文件正文，服务器没有那个文件可问 | 有手势面时也读一次（`useLspNav()` 有面时才 `wanted`）；没有 piece 的页面读的东西不变 |
-| 卸载 mount 后 gateway 里堆了一堆 `tsserver` | 只 `kill` 了直接子进程，或者根本没关 | 先 `shutdown` 再 `exit`，500 ms 后 `SIGKILL`；关闭挂在 mount 的 disposer 上 |
+- `.diorama-changes__actions`：头部右侧那一簇按钮（现在只有刷新），`margin-left: auto`。
+- 三种行态，与三种「身份」一一对应：
+  - `.diorama-changes__row--selected`（端）：强调色左边框 + 选中底色；
+  - `.diorama-history__row--picked`（选中但不是端）：弱边框 + 弱底色；
+  - `.diorama-history__row--between`（只是被这段覆盖）：只有弱文字，没有底色——读者没选它。
 
-## 7. 测法
+## 4. 测试
 
-| 层 | 文件 | 钉住什么 |
-|---|---|---|
-| 单测 | `packages/kernel/test/lsp.test.ts` | 1-based ↔ 0-based 互逆、`NaN` 不上线、扩展名归属、缓存目录不撞车、`Location` / `LocationLink` / `DocumentSymbol` / `SymbolInformation` 四种答案解析 |
-| 单测 | `packages/ui/test/lsp-position.test.ts` | caret 落在哪个标识符上（空白、标点、行首、行尾、跨行都不串） |
-| e2e | `apps/web/tests/m33-lsp.spec.ts` | 真服务器：定义落在声明那一行且是 1-based；⌘+点击真的开 tab 并闪目标行；去掉 piece 后页面全局没有手势面 |
-| 单测 | `packages/plugins/git-changes/test/diff-rows.test.ts` | 三档 diff 的行几何：都认 `data-new-line`、只有行内那一档 `trim: 1` |
-| 单测 | `packages/ui/test/lsp-hover-definition.test.ts` | 围栏解析（一个围栏 / 多个围栏 / 空围栏）与「一个就跳、多个列出来、没有就不动、重复先去重」 |
-| 单测 | `packages/kernel/test/lsp-clamp.test.ts` | 位置夹进文本：列超出行长、行超出文件、负数、空文本 |
-| e2e | `apps/web/tests/m33-lsp-nav.spec.ts` | 点**声明**列出使用处（且不含自己）；点**使用处**直接跳声明、不弹列表；按住 ⌘ 出现下划线、松开消失 |
-| e2e | `apps/web/tests/m33-lsp-hover.spec.ts` | 卡片里是 `<pre><code>` + 上色 span 且没有反引号；重载列出两条并能选；单个定义直接跳、不弹列表；**超出行长的列不会弄死服务器** |
-| e2e | `apps/web/tests/m33-lsp-diff.spec.ts` | 三档读法各跳一次（真的落在 `src/math.ts`）；删除行没有 `data-new-line`；双栏左栏一个都没有 |
+- **内核单测**（`packages/kernel/test/git.test.ts`）：`range` 的形状、两端回 sha、**最旧提交的改动也在**
+  （首个提交创建的文件读作 `added`、内容里有它那一版）、`range(c, c)` 与 `showCommit(c).files` 一致、
+  从 root 开始的段、`ENOENT` / `EINVAL`；dispatcher 的三参形态（多给一个参数是 `EBADREQUEST`）；
+  以及**清单完整性**——40 个大文件的一次提交，`files` 仍是 40 条，超账的那些没有 `text` 也不是 `binary`，
+  用 `show()` 能单独读出来（`range` 同样验一遍）。
+- **纯函数单测**（`packages/plugins/git-changes/test/history.test.ts`，7 条）：单提交值的兼容、一段值的
+  编解码、空 / 畸形值；单击替换、Shift 取整段（上下两个方向、锚点不动）、没有锚点时 Shift 等于单击、
+  ⌘ 加选 / 取消 / 取消到空。
+- **e2e**（`apps/web/tests/m33-history-range.spec.ts`，5 条）：Shift 选整段 → 座位画这一段的改动且值是
+  最旧→最新；刷新后仍是一段；单击回到单提交；⌘ 加减单行且中间那行「被覆盖但没选中」；**选中的每个提交
+  自己的改动都在**（最旧那个创建的文件读作新增，且单选与多选对同一个提交给同样的答案）。
+
+## 5. 验证
+
+```bash
+pnpm build
+pnpm test:unit                                   # 464 条
+pnpm -r --no-sort run typecheck
+node scripts/assemble-package.mjs                # 改了 styles.css，e2e 的壳要重装
+pnpm --filter diorama-web exec playwright test   # 192 条
+```
+
+## 6. 坑
+
+1. **`export … from` 不绑定本地名字**。把 `historyHashValue` 搬到 `history.ts` 之后，`index.tsx` 里
+   `export { historyHashValue } from './history.ts'` 只做转发，同一文件的函数**用不了**这个名字——
+   要再写一行 `import { … } from './history.ts'`。
+2. **座位链路上少传一环，整段静默不生效**。`TabsView` → `CommitColumn` → `Slot props` → 条目，
+   四处都要带上 `commits`。第一版漏了 `TabsView` 那一处，页面照常工作、`data-sha` 也对，只有
+   `data-range` 永远不出现——e2e 的 `toHaveAttribute('data-range', '')` 抓到的正是这种「看起来没事」。
+3. **hash 的值会被 `encodeURIComponent` 编码**：`a,b` 在地址栏里是 `a%2Cb`。断言要比
+   `decodeURIComponent(hash)`，或者写 `%2C`——两种都对，但别以为浏览器会保留逗号。
+4. **排序方向容易写反**。列表是**新的在前**，所以「按列表位置排成旧的在前」是**降序**。
+   单测里专门有一条「先点新的再点旧的」的用例守着它（第一版写成了升序，两个端的 diff 反了）。
+5. **一段 ≠ 中间每一行都选中**。选中集只放读者点过的提交，**覆盖范围**由两端算出来；把中间的提交也塞进
+   选中集会让「再点一下把它移出」变成不可能（它本来就不在选中集里）。两种身份要分别落到 DOM 上
+   （`data-picked` / `data-covered`），否则测试没法区分「⌘ 点了首尾」与「Shift 选了整段」。
+6. **清单不能跟着正文一起截断**。`showCommit` / `range` 原来在**建清单的同一个循环里**读每个文件的
+   diff 正文，账一超就 `break`——于是文件清单本身变成前缀，界面还写着「改动的文件过多，只列出了一部分」。
+   两件事要分开：`files` 是读者**挑文件**的目录（少一行就是少一个答案），`text` 是这次调用**读进来多少**。
+   现在账用完之后剩下的条目只列行、不带 `text`，座位点开时用 `show(commit, path)` 读那一份——这条路
+   本来就有（未跟踪文件、二进制都走它），不需要新的取数方式。
+   另一个教训：**提示语要说真话**。原话暗示「有些文件不在列表里」，读者会去找一个其实就在那儿的东西。
+7. **多选的语义差点做错：选 4 个只看得到 3 个**。第一版用 `git diff <最旧> <最新>`（两个端直接比），
+   于是最旧那个提交自己的改动被静默丢掉——而只选它一个时又看得见（`git show` 是 `git diff <c^> <c>`）。
+   同一份数据两种答案，读者没法信任。改成起点取**最旧提交的父提交**之后，两个动作对同一个提交说的是同一
+   件事。教训：**多选是单选的自然延伸**，它的答案必须包含每一个被选中的东西；否则读者会以为自己的选择
+   被吞了。另外，主流 IDE（IntelliJ「Compare Versions」、GitLens）走的是两树比较，但它们**只能选两个**
+   且把动作叫「两个提交之间」——我们做成连续多选手势，就不能照抄那个语义。
+8. **第一版的交互做错了，是读者反馈出来的**。最初是「头部一个对比开关，开着时点击才加选」——单击永远
+   只选它自己，想选一段得先去找那个开关。改成标准列表语义之后，多选这件事**没有需要先打开的状态**。
+   教训：列表里的多选不该发明新范式，读者手上的肌肉记忆就是规范；新范式只在它确实更省事时才值得引入。

@@ -20,12 +20,13 @@ import type {
   GitLogEntry,
   GitRepoInfo,
   GitStatusEntry,
+  RangeResult,
   RelPath,
 } from '../shared/types.ts'
 import type { RpcClient } from './rpc.ts'
 
 /** The proxyable methods of the server's `GitService`. */
-export const GIT_METHODS = ['repos', 'status', 'diff', 'log', 'show', 'showCommit', 'blob'] as const
+export const GIT_METHODS = ['repos', 'status', 'diff', 'log', 'show', 'showCommit', 'blob', 'range'] as const
 
 export interface GitLogOptions {
   limit?: number
@@ -44,6 +45,8 @@ export interface GitClient {
   show(commit: string, path: RelPath, repo?: RelPath): Promise<DiffEntry>
   showCommit(commit: string, repo?: RelPath): Promise<CommitDetail>
   blob(commit: string, path: RelPath, repo?: RelPath): Promise<BlobResult>
+  /** The files two commits differ in (v0.25): `from` older, `to` newer. */
+  range(from: string, to: string, repo?: RelPath): Promise<RangeResult>
 }
 
 /** Build the `mountCtx.git` face over the RPC channel. */
@@ -57,6 +60,7 @@ export function createGitClient(rpc: RpcClient): GitClient {
     show: (commit, path, repo) => (repo === undefined ? remote.show(commit, path) : remote.show(commit, path, repo)),
     showCommit: (commit, repo) => (repo === undefined ? remote.showCommit(commit) : remote.showCommit(commit, repo)),
     blob: (commit, path, repo) => (repo === undefined ? remote.blob(commit, path) : remote.blob(commit, path, repo)),
+    range: (from, to, repo) => (repo === undefined ? remote.range(from, to) : remote.range(from, to, repo)),
   }
 }
 

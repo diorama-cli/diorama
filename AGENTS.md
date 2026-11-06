@@ -13,14 +13,28 @@
 | 3 | [docs/features.md](docs/features.md) | **有什么**：能力清单与档位（✅ / v1 / 未来 / 不做） |
 | 4 | 最近一档的 `docs/mN/spec.md` | **怎么实现的** + **§6.2 的坑**（见下面 §5） |
 
-最近一档是 [docs/m33/spec.md](docs/m33/spec.md)（**定义跳转与语言智能**：内核服务 `ctx.lsp`
+最近一档是 [docs/m34/spec.md](docs/m34/spec.md)（**历史视图的提交树**：`log()` 多报一列 `%P` →
+`GitLogEntry.parents`，历史行左侧一列彩色的点与连线——`layoutGraph` 是纯函数（道位 / 颜色 / 每段
+线的跨度），每行画自己的 `<svg>`（行是 `max-content`，一张大图猜不准总高），同一条道是直线、跨道是
+贝塞尔；颜色按**道**轮换（6 个 token，light/dark 两处成对），点有行底色的描边圈；行的纵向内边距挪到
+文字那一段，否则图列每行短 5px、线在行边界处断开——e2e 量「图列高度 = 行高度」、`getComputedStyle
+(path).stroke` 不是 `none`。契约 §3.2、§5.2、§46）；
+上一档是 [docs/m35/spec.md](docs/m35/spec.md)（**定义跳转与语言智能**：内核服务 `ctx.lsp`
 （每 mount 一个语言服务器进程，只转只读的那一半协议）+ 内置 piece `lsp-nav`；⌘/Ctrl+点击转定义、
 右键找引用、悬停卡片，画在 `code` 渲染器自己的行上。三件事会反复踩：裸 `tsserver` **不说 LSP**
 （适配器与 `typescript@5` 必须一起装，`typescript@7` 不带 `tsserver.js`）；语言服务器**第一次**
 回答是临时的（工程还在加载，只认得已打开的那个文件），要等 `$/progress` 归零并问到两次答案一致；
 缓存写 `/tmp/diorama/.cache/lsp/<normalised project>`，**被浏览的目录一个字节都不写**（clangd 靠
-`--compile-commands-dir`，改 `cwd` / `XDG_CACHE_HOME` 都无效）。契约 §3.12、§45）；
-上一档是 [docs/m32/spec.md](docs/m32/spec.md)（**diff 双栏的缩进**：缺陷修复——双栏的每一格**就是**
+`--compile-commands-dir`，改 `cwd` / `XDG_CACHE_HOME` 都无效）。契约 §3.12、§47）；
+上一档是 [docs/m33/spec.md](docs/m33/spec.md)（**历史视图选多个提交来对比**：用每个列表都有的选择规则
+（单击选一行 / Shift 选整段 / ⌘·Ctrl 加减一行，**没有要先打开的开关**），**最旧与最新是两端**，右侧画**这一段每个提交的改动合起来**——`ctx.git.range` 的起点是
+**最旧提交的父提交**（`git diff <from^> <to>`），所以「选 1 个」与「选 N 个」对同一个提交说的是同一件事；
+用两树比较 `git diff <from> <to>` 会**选 4 个只看得到 3 个**（最旧那个的改动被静默丢掉）；root 提交对空树；
+`#history` 的值因此可以是一段 `<repo>:<oldest>,…,<newest>`（旧的在前，sha 里没有逗号所以不转义），
+座位 props 多一个**可选**的 `commits`，`commit` 仍是其中最新的一个。坑：`export … from` 不绑定本地名字；
+座位链路上四处都要带 `commits`（漏一处就静默不生效）；列表是新的在前，所以「排成旧的在前」是**降序**。
+契约 §3.2、§3.8、§5、§5.2、§45）；
+上上档是 [docs/m32/spec.md](docs/m32/spec.md)（**diff 双栏的缩进**：缺陷修复——双栏的每一格**就是**
 行模型 `.diorama-diff__line`，于是 `display` / 对齐 / `white-space: pre` 全都跟着来，行首缩进与行内
 连续空格不再被浏览器折叠；长行在**本栏内**横向滚、不换行（换行会让左右两格高度不等、两栏错位）。
 **折叠空白不影响 `textContent`**，所以文本断言抓不到这类缺陷，要测计算样式或 `Range` 宽度；
@@ -249,16 +263,18 @@ scripts/                  生成器（图标表；`pnpm icons` 重新生成）
 | 文档里的代码块出现 `&amp;lt;` 这样的实体名 | marked 的 `token.escaped` 没透传，未知语言分支又转义了一次 | `highlightBlock(text, language, escaped)` 的第三个参数就是它：已经转义过的文本只原样交回（m31/spec §6 坑 2）|
 | 座位空着，页面底部还是多出一条 1px 线 / 一行背景 | `Slot` 的 `empty={null}` 只决定**座位里**画什么，外层 `<footer>` 照样渲染 | 画座位的组件先用 `useSeat(name)` 问有没有条目，空就 `return null`（`useSeat` 也是 hook，必须在任何提前 return 之前）（m30/spec §6 坑 2–3）|
 | **diff 双栏里的缩进没了 / 连续空格并成一个**，而 `textContent` 里空格还在 | 双栏的格子另写了一套 `display: flex`，没带上行模型 `.diorama-diff__line` 的 `white-space: pre`；`normal` 只在**排版**阶段折叠空白，所以文本断言全绿 | 格子**就是**行模型（再加 tone 类），`display` / 对齐 / 空白规则都别再另写一份；测这类缺陷要量计算样式 / `Range` 宽度（m32/spec §6 坑 1–2）|
-| **起了语言服务器，每个请求却 `ESERVICE` / 超时，或「装好了但一个答案都没有」** | 裸 `tsserver` 不说 LSP（`initialize` 永不回答）；`typescript-language-server` 只是壳，旁边没有 `typescript` 时直接退出；registry 上的 `typescript@7` 是原生预览版、**不带** `tsserver.js` | 适配器与 `typescript@5` 一起装，版本钉 5.x；`status()` 的 `reason` 写真实原因（m33/spec §5–§6） |
-| **第一次定义指回自己的 `import` 行，第二次才对** | 服务器还在加载工程，此刻它只认得已打开的那一个文件 | 某语言的第一次查询：等 `$/progress` 归零，再反复问直到**两次答案一致**（实测 2.5s → 6ms）；每个 server→client **请求**都要回，只回 notification 不够（m33/spec §6） |
-| 手势挂不上 / 渲染器 import 不到手势 | 手势写在 piece 里，或把 `useKernel()` 的返回值当 `ctx` 用 | 手势在 `diorama-ui`（两个半边不能互相 import），piece 只发布页面全局 `__diorama_lsp_nav__`；`useKernel()` 返回 `{ ctx, mount, views, registry }`——服务在 `ctx`、`lsp` 在 `mount`（m33/spec §6） |
-| **点一下整行右边的空白，语言服务器就死了**，之后这个 mount 上每个请求都失败 | tsserver 5.9.3 对**超出该行长度**的列抛 `Debug Failure` 并退出；页面产生这种列是诚实的（点在一行右边的空白、diff 的行比来源行短） | 边界处 `clampPosition`：行夹进文件、**列夹进该行长度**（m33/spec §6） |
-| 悬浮卡片里显示围栏标记（三个反引号 + 语言名） | 把语言服务器的 Markdown 当文本画了 | `markdown` piece 发布 `renderMarkdown` 到页面全局 `__diorama_markdown__`，卡片用它渲染；返回的 HTML 已消毒，**别再转义**（m33/spec §6） |
-| **点声明时只高亮自己，看不到谁在用它** | 只问了 `definition`：在声明上它的答案就是声明自己 | 同时问 `definition` + `references`，**先排除点击的那一处**；剩下有定义跳定义、没定义列使用处（`chooseTargets`，m33/spec §6） |
-| 「查找使用处」静默返回空 | `includeDeclaration` 放在了 `references` 参数顶层，协议要求它在 `context` 里 | `{ context: { includeDeclaration: true } }`（m33/spec §6） |
-| 按下 ⌘ 后悬浮卡片盖住使用列表 | 卡片与列表都画在指针旁，卡片没让路 | `held` 一变就撤卡片，按住期间不再安排新的悬浮（m33/spec §6） |
-| 松开 ⌘ 后下划线还在 | 松开修饰键不触发鼠标事件 | 在 `held` 变回 `undefined` 的 effect 里清掉；下划线是**词**上的浮层，用 `Range` 量宽（m33/spec §6） |
-| **diff 里点标识符跳到另一行 / 偏一个字符** | 对着删除行或双栏左栏问了「当前文件的第 N 行」；或没减掉行内 diff 的 `+` / `-` 前缀 | 只有当前文件存在的行才有 `data-new-line`（删除行、双栏左栏没有）；行内那一档 `trim: 1`（`RowGeometry`，m33/spec §3.1） |
+| **历史视图的提交树每行都断一截**（线在行边界处断开） | 行带着 `padding: 5px 0`，图列只占内容区高度，上下各短 5px | 纵向内边距挪到**文字那一段**（行 `padding: 0 10px`），图列才能占满整行；e2e 用「图列高度 = 行高度」锁住（m34/spec §6 坑 1）|
+| 提交树的线**看不见**，而所有文本断言全绿 | `<path>` 没有 `stroke` 时默认 `none`；`preserveAspectRatio="none"` 还会把线宽一起拉 | 颜色写 `var(--dio-graph-N)`（**按道**轮换，不按边）+ `vector-effect="non-scaling-stroke"`；e2e 读 `getComputedStyle(path).stroke`（m34/spec §6 坑 2–3）|
+| **起了语言服务器，每个请求却 `ESERVICE` / 超时，或「装好了但一个答案都没有」** | 裸 `tsserver` 不说 LSP（`initialize` 永不回答）；`typescript-language-server` 只是壳，旁边没有 `typescript` 时直接退出；registry 上的 `typescript@7` 是原生预览版、**不带** `tsserver.js` | 适配器与 `typescript@5` 一起装，版本钉 5.x；`status()` 的 `reason` 写真实原因（m35/spec §5–§6） |
+| **第一次定义指回自己的 `import` 行，第二次才对** | 服务器还在加载工程，此刻它只认得已打开的那一个文件 | 某语言的第一次查询：等 `$/progress` 归零，再反复问直到**两次答案一致**（实测 2.5s → 6ms）；每个 server→client **请求**都要回，只回 notification 不够（m35/spec §6） |
+| 手势挂不上 / 渲染器 import 不到手势 | 手势写在 piece 里，或把 `useKernel()` 的返回值当 `ctx` 用 | 手势在 `diorama-ui`（两个半边不能互相 import），piece 只发布页面全局 `__diorama_lsp_nav__`；`useKernel()` 返回 `{ ctx, mount, views, registry }`——服务在 `ctx`、`lsp` 在 `mount`（m35/spec §6） |
+| **点一下整行右边的空白，语言服务器就死了**，之后这个 mount 上每个请求都失败 | tsserver 5.9.3 对**超出该行长度**的列抛 `Debug Failure` 并退出；页面产生这种列是诚实的（点在一行右边的空白、diff 的行比来源行短） | 边界处 `clampPosition`：行夹进文件、**列夹进该行长度**（m35/spec §6） |
+| 悬浮卡片里显示围栏标记（三个反引号 + 语言名） | 把语言服务器的 Markdown 当文本画了 | `markdown` piece 发布 `renderMarkdown` 到页面全局 `__diorama_markdown__`，卡片用它渲染；返回的 HTML 已消毒，**别再转义**（m35/spec §6） |
+| **点声明时只高亮自己，看不到谁在用它** | 只问了 `definition`：在声明上它的答案就是声明自己 | 同时问 `definition` + `references`，**先排除点击的那一处**；剩下有定义跳定义、没定义列使用处（`chooseTargets`，m35/spec §6） |
+| 「查找使用处」静默返回空 | `includeDeclaration` 放在了 `references` 参数顶层，协议要求它在 `context` 里 | `{ context: { includeDeclaration: true } }`（m35/spec §6） |
+| 按下 ⌘ 后悬浮卡片盖住使用列表 | 卡片与列表都画在指针旁，卡片没让路 | `held` 一变就撤卡片，按住期间不再安排新的悬浮（m35/spec §6） |
+| 松开 ⌘ 后下划线还在 | 松开修饰键不触发鼠标事件 | 在 `held` 变回 `undefined` 的 effect 里清掉；下划线是**词**上的浮层，用 `Range` 量宽（m35/spec §6） |
+| **diff 里点标识符跳到另一行 / 偏一个字符** | 对着删除行或双栏左栏问了「当前文件的第 N 行」；或没减掉行内 diff 的 `+` / `-` 前缀 | 只有当前文件存在的行才有 `data-new-line`（删除行、双栏左栏没有）；行内那一档 `trim: 1`（`RowGeometry`，m35/spec §3.1） |
 
 ## 6. 边界（不要越过的线）
 
