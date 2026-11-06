@@ -426,7 +426,7 @@ export class GitRepoView {
       'log',
       `--max-count=${limit}`,
       '--no-color',
-      '--format=%H%x1f%h%x1f%s%x1f%an%x1f%ct',
+      '--format=%H%x1f%h%x1f%s%x1f%an%x1f%ct%x1f%P',
       '--',
       path === undefined ? this.mountInRepo || '.' : this.toRepoPath(path),
     ]
@@ -439,7 +439,7 @@ export class GitRepoView {
     const entries: GitLogEntry[] = []
     for (const line of String(output).split('\n')) {
       if (line === '') continue
-      const [sha, shortSha, subject, author, seconds] = line.split('\x1f')
+      const [sha, shortSha, subject, author, seconds, parents] = line.split('\x1f')
       if (sha === undefined || shortSha === undefined) continue
       entries.push({
         sha,
@@ -447,6 +447,10 @@ export class GitRepoView {
         subject: subject ?? '',
         author: author ?? '',
         at: Number(seconds ?? 0) * 1000,
+        // The graph needs the edges. `%P` is the full sha of each
+        // parent, first parent first; a root commit has none, so the field is
+        // empty and `split` gives `['']`, which is no parent at all.
+        parents: (parents ?? '').split(' ').filter(parent => parent !== ''),
       })
     }
     return entries

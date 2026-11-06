@@ -155,6 +155,11 @@ export interface GitLogEntry {
   author: string
   /** ms since epoch. */
   at: number
+  /**
+   * The parents' full shas, first parent first. A root commit has none
+   * (`[]`). The history view draws its graph from these.
+   */
+  parents: string[]
 }
 
 /** One commit in full, with the files it touched (contract.md §3.2, v0.6). */
