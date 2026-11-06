@@ -31,6 +31,10 @@ const halves: Record<BuiltinPluginId | KernelServiceId, HalfLoader> = {
   // mount. The *client* piece that draws it is `search-view` (below) — the two
   // ids must differ, or the map would hold one key twice.
   'search': () => import('diorama-kernel/server').then(kernel => kernel.searchHalf),
+  // Language intelligence (contract.md §3.12): a service plugin like `fs`,
+  // provided per mount. The process boundary is the kernel's job — a plugin
+  // may not spawn one (AGENTS.md §6).
+  'lsp': () => import('diorama-kernel/server').then(kernel => kernel.lspHalf),
   'layout': () => import('diorama-plugin-layout'),
   'file-tree': () => import('diorama-plugin-file-tree'),
   'tabs': () => import('diorama-plugin-tabs'),
@@ -57,6 +61,10 @@ const halves: Record<BuiltinPluginId | KernelServiceId, HalfLoader> = {
   // half of its own; it is in this map because every id in the selection is
   // resolved through it.
   'status-bar': () => import('diorama-plugin-status-bar'),
+  // Go to definition, references and hover over the code renderer's rows
+  // (contract.md §3.12). A client piece: the server side is the kernel's
+  // `lsp` service, which every mount provides whether or not this is selected.
+  'lsp-nav': () => import('diorama-plugin-lsp-nav'),
 }
 
 /** Resolve the server-half module of one plugin id. */

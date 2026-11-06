@@ -44,7 +44,7 @@ import {
   type CSSProperties,
   type MouseEvent,
 } from 'react'
-import { provideEntry, Splitter, useHighlighter, useKernel, usePaneSize, type Highlighter } from 'diorama-ui'
+import { highlighter, provideEntry, publishMarkdown, Splitter, useHighlighter, useKernel, usePaneSize, type Highlighter } from 'diorama-ui'
 import DOMPurify from 'dompurify'
 import { Marked, Renderer } from 'marked'
 import type { Tokens } from 'marked'
@@ -511,6 +511,14 @@ function readService<T>(ctx: Context, name: string): T | undefined {
 }
 
 export function apply(ctx: Context) {
+  // Publish the renderer for the pieces that hold Markdown but cannot import
+  // this one — a hover card is the first of them (contract.md §3.12, §8).
+  // It is the same `renderMarkdown` that draws a `.md` file, so a hover and a
+  // document are sanitised by one set of rules.
+  ctx.effect(
+    () => publishMarkdown(text => renderMarkdown(text, highlighter())),
+    'markdown: publish the renderer',
+  )
   provideEntry(
     ctx,
     {

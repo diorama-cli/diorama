@@ -9,6 +9,7 @@ import { DEFAULT_THEME_PREFERENCE, type MountConfig } from '../shared/config.ts'
 import { createFsClient, type FsClient } from './fs.ts'
 import { createGitClient, type GitClient } from './git.ts'
 import { createRpcClient, rpcUrl, type RpcClient } from './rpc.ts'
+import { createLspClient, type LspClient } from './lsp.ts'
 import { createSearchClient, type SearchClient } from './search.ts'
 
 export interface BootPlugin {
@@ -60,6 +61,12 @@ export interface MountHandle extends MountInfo {
    */
   search: SearchClient
   /**
+   * Language intelligence for the files of this mount (contract.md §3.12).
+   * Calls reject with `ESERVICE` when the mount has no language server; ask
+   * `hasLsp()` (from `diorama-kernel/client`) before offering a jump.
+   */
+  lsp: LspClient
+  /**
    * The mount's configuration as the page sees it (contract.md §4.1): the
    * fields a piece may act on. Read-only; defaults apply when the server sent
    * none (a unit test, an older `/plugin.json`).
@@ -86,6 +93,7 @@ export function createMountHandle(manifest: MountManifest): MountHandle {
     fs: createFsClient(rpc),
     git: createGitClient(rpc),
     search: createSearchClient(rpc),
+    lsp: createLspClient(rpc),
     // Copied, not shared: a piece must not be able to edit the page's defaults
     // by writing to the handle.
     config: {

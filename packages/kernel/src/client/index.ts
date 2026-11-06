@@ -41,6 +41,21 @@ export {
 export type { MountConfig } from '../shared/config.ts'
 export { createFsClient, FS_METHODS, type FsClient } from './fs.ts'
 export { createGitClient, GIT_METHODS, hasGit, type GitClient } from './git.ts'
+export { createLspClient, hasLsp, LSP_METHODS, type LspClient } from './lsp.ts'
+export {
+  fromLsp,
+  fromLspRange,
+  languageOfPath,
+  LSP_LANGUAGES,
+  SYMBOL_KIND_NAMES,
+  toLsp,
+  type LspHover,
+  type LspLocation,
+  type LspPosition,
+  type LspRange,
+  type LspServerInfo,
+  type LspSymbol,
+} from '../shared/lsp.ts'
 export { createSearchClient, SEARCH_METHODS, type SearchClient } from './search.ts'
 export {
   clipLine,

@@ -18,6 +18,7 @@
 > **`0.0.8`**：gateway 的索引页——`[gateway] port` 上的一个固定地址，列出全部挂载（§40）。
 > **`0.0.9`**：索引页的卡片链接跟着读者走——绑到 `0.0.0.0` 之后从别的机器打开，卡片不再是死链（§41）。
 > **`0.0.10`**：页面底部的状态栏、Markdown 围栏代码块上色、diff 双栏保住缩进（§42–§44）。
+> **未发版**：定义跳转与语言智能——内核服务 `ctx.lsp` + 内置 piece `lsp-nav`（§3.12、§45）。
 > 契约先行：这份文档是内核与插件之间的唯一约定，改它 = 破环变更。
 >
 > **状态：v0.0.10 已定稿。** v0.1 → v0.2 的差异是 M1 决策（§12），v0.2 → v0.3 是 M2 决策（§13），
@@ -915,6 +916,117 @@ interface ThemeService {
   一并注销。去掉 `theme` piece 只是没有命令与快捷键，跟随系统与第三方主题照常工作。
 - **纯客户端**：不经过 RPC，不落盘到 `$DIORAMA_HOME`（页面各自的浏览器存储即所见即所得；
   `ctx.storage`（K14）落地后可以讨论服务端同步，签名未定之前不动）。
+
+### 3.12 `ctx.lsp`（server + client 半边）✅ 新增
+
+只读的**语言智能**：转到定义、找引用、悬浮提示、文件大纲。像 `ctx.git` 一样是
+**内核服务**（每 mount 一份），不是可选插件——理由与 git 相同且更硬：客户端必须
+`spawn` 一个语言服务器进程，而插件**禁止** `import 'node:fs'` / 起进程
+（architecture.md §8、AGENTS.md §6）。进程边界是内核的事，读答案是谁的事。
+
+```ts
+/** 1-based 行 + 0-based **UTF-16** 列（页面的单位：DOM 选区与 LSP 的 character 同单位）。 */
+interface LspPosition { line: number; character: number }
+interface LspRange { start: LspPosition; end: LspPosition }
+
+/** 挂载内的一个位置；挂载外的（node_modules 里的声明、/usr/include）一律丢弃。 */
+interface LspLocation { path: RelPath; range: LspRange }
+interface LspHover { contents: string; range?: LspRange }
+interface LspSymbol { name: string; kind: number; range: LspRange; selectionRange: LspRange; children?: LspSymbol[] }
+
+interface LspServerInfo {
+  language: string                        // 'typescript' | 'c' | 'cpp' | 'go'
+  command: string
+  state: 'running' | 'installing' | 'unavailable'
+  reason?: string                         // 不可用时说明原因
+}
+
+interface LspService {
+  status(): Promise<LspServerInfo[]>
+  /** text 是**页面正在显示的那份文本**，不是磁盘上的（见下）。 */
+  definition(path: RelPath, position: LspPosition, text?: string): Promise<LspLocation[]>
+  typeDefinition(path: RelPath, position: LspPosition, text?: string): Promise<LspLocation[]>
+  references(path: RelPath, position: LspPosition, text?: string): Promise<LspLocation[]>
+  hover(path: RelPath, position: LspPosition, text?: string): Promise<LspHover | undefined>
+  documentSymbol(path: RelPath, text?: string): Promise<LspSymbol[]>
+}
+```
+
+**规则：**
+
+- **只读的那一半协议**。`rename`、`workspace/applyEdit`、`executeCommand`
+  与 `textDocument/willSave` **永不调用**：diorama 不写它正在看的目录
+  （architecture.md §13），能写的语言服务器就是第二条没人审计过的写路径。
+- **行号 1-based，列 0-based UTF-16**。协议是 0-based 行；转换只在
+  `packages/kernel/src/shared/lsp.ts` 的 `toLsp` / `fromLsp` 两处，且有单测。
+  一个 0-based 的行号漏进行号栏就是「高亮上一行」，这种错没人会立刻发现。
+- **缓存写在 `/tmp/diorama/.cache/lsp/<normalised project>`**，**绝不**写进被浏览的目录。
+  路径按「去掉前导 `/`、`/` → `-`、原有 `-` 先加倍」压平
+  （`/a-b` 与 `/a/b` 必须落在两个目录里）。各服务器的指向方式：
+  clangd 用 `--compile-commands-dir=<cache>`（实测：编译数据库与
+  `.cache/clangd/index` 都跟着走，项目一个字节不动）；tsserver / gopls 用
+  `XDG_CACHE_HOME` / `GOCACHE`。
+- **缺的服务器自动装**（读者的选择）：TypeScript 的适配器
+  `typescript-language-server` 与 `typescript@5` 一起装到上面那个缓存目录。
+  两个都要：`tsserver` 自己**不说 LSP**（`initialize` 永远不回答），适配器没有编译器时
+  直接退出；而 registry 上的 `typescript@7` 是原生预览版、不带 `tsserver.js`，
+  所以版本要钉在 5.x。装的过程中 `status()` 报 `installing`。
+- **服务永远在，能力可以不在**。`ctx.lsp` 在每个 mount 上都有（不像 `git` 是「没仓库就没有」），
+  但文件的语言没人认领、服务器起不来、进程死了，方法就回答空数组 / `undefined`，
+  **不抛错**。页面先问 `status()` 再决定要不要给手势——点一下没反应是诚实的，
+  为「没装编译器」弹横幅不是。
+- **悬浮卡片画的是 Markdown，不是文本**。语言服务器回的是 Markdown（一个围栏 + 一段文档注释），
+  按文本画就把围栏标记原样给读者看了。渲染由 `markdown` piece 发布到页面全局
+  （``__diorama_markdown__``，与高亮引擎同一个模式）：**同一份 `renderMarkdown`**，也就
+  是画 `.md` 文件的那一份，DOMPurify 已经跑过，调用方**不得再转义**。页面没有那个 piece 时
+  退回纯文本，不另写第二套渲染。
+- **转到定义 = 定义 + 使用，一起问；点击的那一处要排除**。一个手势同时问
+  `definition` 与 `references`，合并、去重、**去掉读者点的那个位置**，然后：
+  **剩下一个就跳，多个列出来，一个都没有就不动**。列表每行只写 `path:行号`，**不写
+  「定义」/「使用」前缀**：列表回答的是一件事（点了声明，它在哪里被用），每一行按构造就是同一类，
+  一排同样的字挡在唯一不同的东西前面只是噪音（`kind` 仍然留在数据里，标签不带它）。
+- **悬浮卡片的时机：停 1 秒才出现，移开立刻消失**。卡片是**阅读**辅助：指针扫过一行时弹出来
+  是噪音——它就在光标下面，挡住下面的代码，还要读者去关掉。1 秒足够表达「我停在这里了」。
+  反过来，**离开就是决定**：读者移开是因为看完了，留着的卡片挡住他正在读的地方。所以没有宽限期
+  （`HOVER_GRACE_MS = 0`）；同一个词被 highlight.js 拆成几个 span 时也不会闪——指针还在
+  同一个标识符上就不撤。
+  **「离开」指的是离开这个词**，不是离开整个窗格：`mouseleave` 只在指针出了代码区才触发，而读者
+  移开一个词通常还在代码里。所以 `mouseover` 落到非标识符（空白、标点、别的行）时也要**立刻**撤卡片。
+- **按住修饰键时悬浮卡片让路**。卡片画在指针旁，点击弹出的列表也画在指针旁——卡片留着就会盖住
+  读者正要去点的那几行。所以 `held` 一变（按下 ⌘ / Ctrl）就把卡片撤掉，并且**按住期间不再安排新的悬浮**。
+  排除自己是这条规则的关键，它让手势两个方向都成立：
+  - 点**使用处** → 剩下声明（以及别的重载声明）→ 跳到声明；
+  - 点**声明** → 剩下所有使用处 → 列出使用处。
+  不排除自己，点声明就会得到「你已经在这里」并高亮自己——这正是这条规则的由来。
+  **有定义就跳定义**（点使用处问的是「它在哪」，不是「还有谁用它」）；只有在没有定义剩下时
+  （点的是声明）才列使用处。同一位置回答两次先去重。
+- **`textDocument/references` 的 `includeDeclaration` 必须放在 `context` 里**。放在顶层
+  服务器会拒掉整个请求（`Cannot read properties of undefined (reading 'includeDeclaration')`），
+  「查找使用处」于是**静默地什么都不返回**——第一次就是这么错的。
+- **按住 ⌘ / Ctrl 时，指针下的标识符画下划线、光标变小手**。**按下的那一刻指针往往没动**——
+  按键不产生指针事件，所以「指针下面是哪个词」要从**已经记下的指针位置**回答（`elementFromPoint`），
+  不能等下一次 `mouseover`（它可能永远不来）。两样都**落在词上**，不落在行或窗格上：
+  下划线是用 `Range` 量出的矩形（与 caret 同一套度量），光标是直接写在指针下那个**元素**上的
+  `cursor: pointer` 内联样式（窗格级的 `cursor` 会对空白也承诺可点）。下划线是
+  `position: fixed` + `pointer-events: none` 的浮层，不参与布局、不被滚动窗格裁掉、
+  也不抢指针。**松开修饰键不会触发鼠标事件**，所以两样都要在 `held` 变回 `undefined` 时主动撤掉，
+  光标还要把元素**原来**的内联值放回去——一个修饰键松开后还留着小手的元素，是读者看不穿的谎话。
+- **位置在到达服务器前夹进文本**。tsserver 5.9.3 对**超出该行长度**的列会抛
+  `Debug Failure. False expression` 并**整个进程挂掉**——之后这个 mount 上每个请求都失败。
+  页面产生这种列是诚实的（点在一行右边的空白、diff 的行比它来自的那一行短），所以边界处
+  `clampPosition` 夹住：行夹进文件、列夹进该行长度。
+- **第一次查询要等工程加载完**。语言服务器刚起来时项目还没索引完，此时问定义它会拿
+  已打开的那一个文件回答（`add` 指回自己的 `import` 行）。所以某语言的**第一次**查询会：
+  等 `$/progress` 归零 → 反复问直到**两次答案一致**（实测 2.5 s → 6 ms）。之后的查询直接走。
+- **`text` 是页面显示的那份**。diff 视图画的是一个磁盘上没有的文件；用磁盘内容去问，
+  答案会差几行。服务器接受整份 overlay（实测），所以渲染器把自己的 `text` 传下去。
+- **进程归 mount**。卸载 mount 时先 `shutdown` 再 `exit`，500 ms 后 `SIGKILL`：
+  每个 mount 漏一个 `tsserver` 就是一个 gateway 攒下上百个进程。
+- **位置换算与「哪些扩展名归谁」只此一份**（`LSP_LANGUAGES`）：服务端拿它决定起哪个进程，
+  页面拿它决定要不要给手势；两张表漂了就是「请求永远没人回答」。
+
+客户端半边（`mountCtx.lsp`）是同形状的 RPC 代理，另带 `hasLsp()`：它不抛错，
+没有服务时回答 `false`。
 
 ## 4. RPC / 通信 ✅ v0.2 定 / v0.3 补事件 session 与 §4.1 配置 / v0.11 补存活与重连
 
@@ -2818,6 +2930,50 @@ URL / hash 语义、主题 token 表（新样式只用既有 token，无新 toke
 - **为什么这条缺陷长期没被发现**：`white-space: normal` 只在**排版**阶段合并空格，DOM 文本里空格还在，
   所以 `hasText` / `toContainText` 这类断言全绿。测排版要测几何（计算样式或 `Range` 宽度），
   m19 的双栏用例现在量了前导空白的实际宽度。
+
+## 45. `0.0.10` 之后：定义跳转与语言智能（`ctx.lsp`）
+
+> 2026-11-06。用户要求「调研能否接入 LSP，支持方法/变量等定义跳转，包括源码浏览 / git diff
+> 等界面」。契约**不升号**（§6：契约号只在发版时升）：新增的是**内核服务** `ctx.lsp` 与
+> 内置 piece `lsp-nav`，没有改任何既有 `ctx.*` 的签名，也没有加座位。
+
+| 条款 | 本档之前 | 本档 |
+|---|---|---|
+| §3 服务清单 | `fs` / `git` / `search` / `theme` … | 多一个 `ctx.lsp`（§3.12）：只读的语言智能，每 mount 一份，进程由内核起 |
+| §4 内置插件表 | 18 个 | 多 `lsp-nav`（19 个）：只声明「这一页有手势」，手势本身在 `diorama-ui` |
+| 页面全局 | `__diorama_highlight__` / `__diorama_layout__` / `__diorama_reveal__` / `__diorama_keys__` | 多 `__diorama_lsp_nav__`（§8：两个半边不能互相 import，只能约在页面全局） |
+| 渲染器 `code` | 只画行 | 有人发布了手势面时，行上多三个手势（⌘/Ctrl+点击、右键菜单、悬停）；没人发布时**一个字节都不变** |
+| `git-changes` 的三档 diff 读法 | 只画行 | 同样三个手势；行多一个 `data-new-line`（**当前文件**的行号），删除行与双栏左栏没有它 |
+| 行几何（`RowGeometry`） | 手势只认 `data-line-number` + `.diorama-line__text` | 渲染器自己说明「哪一行、哪个格子、前面有几个字符是前缀」（`diorama-ui` 的 `TEXT_ROWS` 是文本渲染器的默认） |
+| 页面全局 | 多一个 ``__diorama_markdown__`` | `markdown` piece 发布它的 `renderMarkdown`：悬浮卡片要画 Markdown，而两个半边不能互相 import（§8） |
+| 转到定义 | 只问 `definition`，跳到第一个位置 | 同时问 `definition@@ + `references`，**排除点击处**后：有定义跳定义、没有定义列使用处（`chooseTargets`） |
+| 按住修饰键 | 无 | 指针下的标识符画下划线（浮层，`Range` 量宽），松开即撤 |
+| 位置边界 | 原样转发 | `clampPosition` 把行夹进文件、列夹进该行长度——**超出的列会让 tsserver 整个挂掉** |
+
+细则：
+
+- **为什么是内核服务而不是插件**：LSP 客户端必须起进程，而插件被禁止碰 `node:fs`
+  （architecture.md §8）。这条线不能为了一个功能破——破了以后「路径白名单 / worker 隔离」
+  就没有可以换实现的那一层了。
+- **为什么手势在 `diorama-ui` 而不是 `lsp-nav`**：手势要用渲染器的行（caret 的行列），
+  而渲染器半边与导航半边是**两个构建**，互相 import 会把 React 之外的库复制两份。共享库是两边
+  都能看见的唯一地方；piece 只往页面全局写一句「这一页有手势」。去掉 piece 时渲染器走的是
+  与之前**逐字节相同**的分支（`useLspGestures` 返回 `undefined`）。
+- **没有为它开侧栏视图**：一个文件的定义、引用、大纲都是**这个文件**的事，属于渲染器自己
+  （与 §35 的「文件视图工具栏」同一条分工，见 m17/spec §6 坑 1）。
+- **三个 diff 读法都接了**，但「哪一行能问」按读法不同：手势靠行上的
+  `data-new-line` 找「当前文件的第 N 行」，**只有当前文件里存在的那一行才有这个属性**——
+  行内的删除行没有、双栏的左栏整列没有、整文件读法的删除行只有 `oldNumber`。对着一行
+  当前文件里不存在的文本问定义，服务器会回答**另一行**，那比不跳更坏。
+  另外行内读法的格子带 git 的 `+` / `-` / 空格前缀，列号要减 1（`RowGeometry.trim`），
+  否则每次点击都偏一个字符。发给服务器的是**当前文件的全文**（`ctx.fs.readText` /
+  `ctx.git.blob`），不是磁盘上的 diff 文本。
+- **diff 视图只在有手势面时多读一次文件**：行内读法本来不需要文件正文，为了问定义才读
+  （`useLspNav()` 有面时才 `wanted`）。没有 `lsp-nav` 的页面读的东西与之前一模一样。
+- **测法**：`packages/kernel/test/lsp.test.ts` 钉位置换算与答案解析（`Location` /
+  `LocationLink` / `DocumentSymbol` / `SymbolInformation` 四种形状）；
+  `packages/ui/test/lsp-position.test.ts` 钉「caret 落在哪个标识符上」；
+  `apps/web/tests/m33-lsp.spec.ts` 跑真服务器（定义要落在声明那一行、⌘+点击真的开 tab 并闪）。
 
 ## 待定清单（v0.4 后仍 🔲）
 

@@ -29,6 +29,23 @@ export type { BootPlugin, MountHandle, MountInfo, MountManifest } from './client
 export { DEFAULT_THEME_PREFERENCE, THEME_PREFERENCE_PATTERN, type MountConfig } from './shared/config.ts'
 export type { FsClient } from './client/fs.ts'
 export type { GitClient, GitLogOptions } from './client/git.ts'
+export type { LspClient } from './client/lsp.ts'
+export {
+  fromLsp,
+  fromLspRange,
+  languageOfPath,
+  LSP_LANGUAGES,
+  SYMBOL_KIND_NAMES,
+  toLsp,
+} from './shared/lsp.ts'
+export type {
+  LspHover,
+  LspLocation,
+  LspPosition,
+  LspRange,
+  LspServerInfo,
+  LspSymbol,
+} from './shared/lsp.ts'
 export type { RpcClient } from './client/rpc.ts'
 export type { FileMatcher, FileRendererProps } from './shared/matcher.ts'
 export type {

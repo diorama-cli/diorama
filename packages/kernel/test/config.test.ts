@@ -52,6 +52,7 @@ test('config: defaults match contract §4.1', () => {
     'git-changes',
     'search-view',
     'status-bar',
+    'lsp-nav',
   ])
 })
 
