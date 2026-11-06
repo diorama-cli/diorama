@@ -28,9 +28,18 @@ import type { RpcClient } from './rpc.ts'
 /** The proxyable methods of the server's `GitService`. */
 export const GIT_METHODS = ['repos', 'status', 'diff', 'log', 'show', 'showCommit', 'blob', 'range'] as const
 
+/**
+ * `log()`'s options: how many commits, and which repository.
+ *
+ * There is deliberately **no `path`** (v0.26). The history view picks a
+ * repository and shows that repository's complete history; narrowing it would
+ * mean a pathspec, and a pathspec makes git simplify the history — dropping
+ * commits that did not touch the path, merge commits included, while their
+ * shas stay in `%P`. A flat list just got shorter; a commit graph broke
+ * (docs/m34/spec.md §8).
+ */
 export interface GitLogOptions {
   limit?: number
-  path?: RelPath
   /** Only this repository (default: the mount's own). */
   repo?: RelPath
 }

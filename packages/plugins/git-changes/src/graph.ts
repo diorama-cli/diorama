@@ -142,6 +142,20 @@ export function layoutGraph(commits: readonly GraphCommit[]): GraphLayout {
     }
   }
 
+  // A lane still waiting when the page runs out is a parent below what is
+  // loaded. It has to reach the bottom edge of the **last** row, or the line
+  // stops at a row boundary and reads as a dead end rather than "there is more
+  // below". (The lanes that ran through earlier rows already end at that
+  // boundary; this gives the last row the segment that says so.)
+  const last = rows[rows.length - 1]
+  if (last !== undefined) {
+    for (let i = 0; i < lanes.length; i++) {
+      if (lanes[i] === null || lanes[i] === undefined) continue
+      const drawn = last.lines.some(line => line.span === 'bottom' && line.from === i)
+      if (!drawn) last.lines.push({ from: i, to: i, color: colors[i] as number, span: 'bottom' })
+    }
+  }
+
   let widest = 1
   for (const row of rows) {
     widest = Math.max(widest, row.lane + 1)
