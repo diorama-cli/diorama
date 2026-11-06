@@ -63,6 +63,16 @@
   --dio-status-modified: #b07d00;
   --dio-status-added: #2e7d32;
 
+  /* The history view's commit graph (contract.md §5.2): one colour per
+     lane. Six is the palette; a seventh lane wraps back to the first, because a
+     colour is a lane's identity and the reader only has to tell neighbours apart. */
+  --dio-graph-1: #2f6feb;
+  --dio-graph-2: #d29922;
+  --dio-graph-3: #2da44e;
+  --dio-graph-4: #a371f7;
+  --dio-graph-5: #db6d28;
+  --dio-graph-6: #bf3989;
+
   /* Search hits and the revealed line (contract.md §3.9). */
   --dio-hit-bg: rgba(255, 200, 0, 0.45);
   --dio-reveal-bg: rgba(255, 200, 0, 0.22);
@@ -121,6 +131,13 @@
 
   --dio-status-modified: #e3b341;
   --dio-status-added: #7ee787;
+
+  --dio-graph-1: #6ea0ff;
+  --dio-graph-2: #e3b341;
+  --dio-graph-3: #56d364;
+  --dio-graph-4: #d2a8ff;
+  --dio-graph-5: #ffa657;
+  --dio-graph-6: #ff7b9c;
 
   --dio-hit-bg: rgba(255, 200, 0, 0.35);
   --dio-reveal-bg: rgba(255, 200, 0, 0.18);
@@ -2198,13 +2215,21 @@ body.diorama-resizing {
   flex-direction: column;
 }
 
+/* The row is a **row**: the graph column on the left, the commit's
+   text beside it. The text keeps the old two-line stack, so the graph's height
+   is the row's height and its lines meet the neighbouring rows' at the edges. */
 .diorama-history__row {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 6px;
   width: max-content;
   min-width: 100%;
-  padding: 5px 10px;
+  /* No vertical padding on the row itself: the graph column has to run
+     the **full** height of the row, padding included, or the lines stop 5px
+     short at each edge and the graph reads as a row of dashes. The text beside
+     it carries the breathing room instead. */
+  padding: 0 10px;
   border: 0;
   border-left: 2px solid transparent;
   background: none;
@@ -2214,8 +2239,61 @@ body.diorama-resizing {
   cursor: pointer;
 }
 
+/* Subject over the meta line, beside the graph. */
+.diorama-history__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 5px 0;
+}
+
+/* The commit graph: one column per lane, lines drawn as SVG on a
+   `0..lanes × 0..100` box stretched over the whole row height. The lines are
+   stroked with `non-scaling-stroke` so the horizontal and vertical scales
+   (`preserveAspectRatio="none"`) do not stretch the line's width. */
+.diorama-graph {
+  position: relative;
+  flex: none;
+  align-self: stretch;
+}
+
+.diorama-graph__lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.diorama-graph__line {
+  stroke-width: 1.5;
+}
+
+.diorama-graph__dot {
+  position: absolute;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  margin-left: -3.5px;
+  margin-top: -3.5px;
+  border-radius: 50%;
+  /* A ring in the row's own background keeps the dot readable where two lanes
+     cross, without needing to erase the lines behind it. */
+  box-shadow: 0 0 0 1.5px var(--dio-bg);
+  pointer-events: none;
+}
+
 .diorama-history__row:hover {
   background: var(--dio-hover);
+}
+
+/* The dot's ring is the surface behind it, not the page: the hover and
+   selection tints are translucent, so the ring has to follow them or the dot
+   keeps a pale halo on a selected row. */
+.diorama-history__row:hover .diorama-graph__dot {
+  box-shadow: 0 0 0 1.5px var(--dio-hover-strong);
 }
 
 .diorama-history__row.diorama-changes__row--selected {
@@ -2223,11 +2301,21 @@ body.diorama-resizing {
   background: var(--dio-selected);
 }
 
+/* The dot's ring follows the picked / covered tints too: the graph column and
+   the multi-pick marks live on the same rows (v0.20 + v0.25). */
+.diorama-history__row.diorama-changes__row--selected .diorama-graph__dot {
+  box-shadow: 0 0 0 1.5px var(--dio-selected);
+}
+
 /* A picked row that is **not** an end of the comparison (v0.25): ⌘-clicking the
    first and the last row picks two, and the diff spans everything between. */
 .diorama-history__row--picked {
   border-left-color: var(--dio-border-strong);
   background: var(--dio-selected-soft);
+}
+
+.diorama-history__row--picked .diorama-graph__dot {
+  box-shadow: 0 0 0 1.5px var(--dio-selected-soft);
 }
 
 /* A row **inside** the stretch but not picked: it is part of what the diff

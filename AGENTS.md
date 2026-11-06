@@ -13,7 +13,13 @@
 | 3 | [docs/features.md](docs/features.md) | **有什么**：能力清单与档位（✅ / v1 / 未来 / 不做） |
 | 4 | 最近一档的 `docs/mN/spec.md` | **怎么实现的** + **§6.2 的坑**（见下面 §5） |
 
-最近一档是 [docs/m33/spec.md](docs/m33/spec.md)（**历史视图选多个提交来对比**：用每个列表都有的选择规则
+最近一档是 [docs/m34/spec.md](docs/m34/spec.md)（**历史视图的提交树**：`log()` 多报一列 `%P` →
+`GitLogEntry.parents`，历史行左侧一列彩色的点与连线——`layoutGraph` 是纯函数（道位 / 颜色 / 每段
+线的跨度），每行画自己的 `<svg>`（行是 `max-content`，一张大图猜不准总高），同一条道是直线、跨道是
+贝塞尔；颜色按**道**轮换（6 个 token，light/dark 两处成对），点有行底色的描边圈；行的纵向内边距挪到
+文字那一段，否则图列每行短 5px、线在行边界处断开——e2e 量「图列高度 = 行高度」、`getComputedStyle
+(path).stroke` 不是 `none`。契约 §3.2、§5.2、§46）；
+上一档是 [docs/m33/spec.md](docs/m33/spec.md)（**历史视图选多个提交来对比**：用每个列表都有的选择规则
 （单击选一行 / Shift 选整段 / ⌘·Ctrl 加减一行，**没有要先打开的开关**），**最旧与最新是两端**，右侧画**这一段每个提交的改动合起来**——`ctx.git.range` 的起点是
 **最旧提交的父提交**（`git diff <from^> <to>`），所以「选 1 个」与「选 N 个」对同一个提交说的是同一件事；
 用两树比较 `git diff <from> <to>` 会**选 4 个只看得到 3 个**（最旧那个的改动被静默丢掉）；root 提交对空树；
@@ -247,6 +253,8 @@ scripts/                  生成器（图标表；`pnpm icons` 重新生成）
 | 文档里的代码块出现 `&amp;lt;` 这样的实体名 | marked 的 `token.escaped` 没透传，未知语言分支又转义了一次 | `highlightBlock(text, language, escaped)` 的第三个参数就是它：已经转义过的文本只原样交回（m31/spec §6 坑 2）|
 | 座位空着，页面底部还是多出一条 1px 线 / 一行背景 | `Slot` 的 `empty={null}` 只决定**座位里**画什么，外层 `<footer>` 照样渲染 | 画座位的组件先用 `useSeat(name)` 问有没有条目，空就 `return null`（`useSeat` 也是 hook，必须在任何提前 return 之前）（m30/spec §6 坑 2–3）|
 | **diff 双栏里的缩进没了 / 连续空格并成一个**，而 `textContent` 里空格还在 | 双栏的格子另写了一套 `display: flex`，没带上行模型 `.diorama-diff__line` 的 `white-space: pre`；`normal` 只在**排版**阶段折叠空白，所以文本断言全绿 | 格子**就是**行模型（再加 tone 类），`display` / 对齐 / 空白规则都别再另写一份；测这类缺陷要量计算样式 / `Range` 宽度（m32/spec §6 坑 1–2）|
+| **历史视图的提交树每行都断一截**（线在行边界处断开） | 行带着 `padding: 5px 0`，图列只占内容区高度，上下各短 5px | 纵向内边距挪到**文字那一段**（行 `padding: 0 10px`），图列才能占满整行；e2e 用「图列高度 = 行高度」锁住（m34/spec §6 坑 1）|
+| 提交树的线**看不见**，而所有文本断言全绿 | `<path>` 没有 `stroke` 时默认 `none`；`preserveAspectRatio="none"` 还会把线宽一起拉 | 颜色写 `var(--dio-graph-N)`（**按道**轮换，不按边）+ `vector-effect="non-scaling-stroke"`；e2e 读 `getComputedStyle(path).stroke`（m34/spec §6 坑 2–3）|
 
 ## 6. 边界（不要越过的线）
 

@@ -47,6 +47,8 @@ import {
   type FileGap,
 } from './model.ts'
 import { colorFileRows, colorSplitRows } from './coloring.ts'
+import { layoutGraph } from './graph.ts'
+import { HistoryGraph } from './graphview.tsx'
 
 export const name = 'git-changes'
 export const inject = ['slots']
@@ -1464,6 +1466,10 @@ function HistoryView({ active }: { active: boolean }) {
     if (next.commits.length === 0) router?.state(HISTORY_HASH_KEY).set(undefined)
     else pick(current.repo, next.commits[next.commits.length - 1] as string, next.commits)
   }
+  // The lanes of this repository's page: laid out from the parents
+  // `log()` reports, newest first, so a branch is a column and a merge is two
+  // lines joining at a dot.
+  const graph = layoutGraph(current.commits)
   return (
     <div className="diorama-changes" data-testid="git-history">
       <div className="diorama-changes__group">
@@ -1539,6 +1545,7 @@ function HistoryView({ active }: { active: boolean }) {
               const high = ends.length === 0 ? -1 : Math.max(...ends)
               const covered = index >= low && index <= high
               const end = picked && chosen.length > 1 && (index === low || index === high)
+              const graphRow = graph.rows[index]
               return (
                 <button
                   key={`${current.repo}:${commit.sha}`}
@@ -1557,11 +1564,14 @@ function HistoryView({ active }: { active: boolean }) {
                   // remove this one. No mode to turn on first.
                   onClick={event => choose(commit.sha, event)}
                 >
-                  <span className="diorama-history__subject">{commit.subject || '(无提交说明)'}</span>
-                  <span className="diorama-history__meta">
-                    <code>{commit.shortSha}</code>
-                    <span className="diorama-history__author">{commit.author}</span>
-                    <time dateTime={new Date(commit.at).toISOString()}>{formatWhen(commit.at)}</time>
+                  {graphRow === undefined ? null : <HistoryGraph row={graphRow} lanes={graph.lanes} />}
+                  <span className="diorama-history__text">
+                    <span className="diorama-history__subject">{commit.subject || '(无提交说明)'}</span>
+                    <span className="diorama-history__meta">
+                      <code>{commit.shortSha}</code>
+                      <span className="diorama-history__author">{commit.author}</span>
+                      <time dateTime={new Date(commit.at).toISOString()}>{formatWhen(commit.at)}</time>
+                    </span>
                   </span>
                 </button>
               )
