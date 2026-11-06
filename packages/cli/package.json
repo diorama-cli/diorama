@@ -39,6 +39,7 @@
     "diorama-plugin-renderer-registry": "workspace:*",
     "diorama-plugin-search-view": "workspace:*",
     "diorama-plugin-slots": "workspace:*",
+    "diorama-plugin-lsp-nav": "workspace:*",
     "diorama-plugin-status-bar": "workspace:*",
     "diorama-plugin-tabs": "workspace:*",
     "diorama-plugin-theme": "workspace:*",

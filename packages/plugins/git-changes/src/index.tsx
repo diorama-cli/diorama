@@ -30,7 +30,7 @@ import {
 } from 'react'
 import type { ChangeTreeNode, CommitDetail, DiffEntry, DiffResult, FileInfo, GitLogEntry, GitStatusEntry, RangeResult } from 'diorama-kernel'
 import { buildChangeTree, hasGit, type GitClient, type TabsService } from 'diorama-kernel/client'
-import { FileIcon, Icon, iconSvg, provideEntry, Splitter, useHighlighter, useKernel, usePaneSize, type Highlighter } from 'diorama-ui'
+import { FileIcon, Icon, iconSvg, provideEntry, Splitter, useHighlighter, useKernel, useLspGestures, useLspNav, usePaneSize, type GestureSurface, type Highlighter } from 'diorama-ui'
 import type {} from 'diorama-plugin-slots'
 import type { CommitSeatProps, TabDiffProps } from 'diorama-plugin-slots'
 import {
@@ -46,6 +46,7 @@ import {
   type DiffLine,
   type FileGap,
 } from './model.ts'
+import { FILE_ROWS, INLINE_ROWS, SPLIT_ROWS } from './diff-rows.ts'
 import { colorFileRows, colorSplitRows } from './coloring.ts'
 import { layoutGraph } from './graph.ts'
 import { HistoryGraph } from './graphview.tsx'
@@ -772,7 +773,12 @@ function TabDiff({ tab }: TabDiffProps) {
   // The file itself is read only when a mode that shows file content is on
   // (and only for text). The two-column reader wants the old side as well:
   // the index's copy of the path, which is what the change was compared with.
-  const file = useFileText(tab.path, mode !== 'inline' && usable && !binary)
+  // The gestures need the file's own text even in the inline mode: the rows of
+  // a diff number lines of the file the diff changes, and the server is asked
+  // about that file (contract.md §3.12). A page without a navigation piece
+  // reads nothing extra.
+  const navFace = useLspNav()
+  const file = useFileText(tab.path, (mode !== 'inline' && usable && !binary) || (navFace !== undefined && usable && !binary))
   useEffect(() => {
     let live = true
     setState({ status: 'loading' })
@@ -941,6 +947,21 @@ function DiffView({
   const contentMode = mode !== 'inline' && error === undefined && !binary && whole.status !== 'note'
   const lines = splitLines(diff)
 
+  // Go to definition over the rows of whichever reader is on (contract.md
+  // §3.12). The **whole file** is what the server is told about, not the disk:
+  // in the inline mode the reader is looking at a diff, but the question is
+  // about the file the diff changes, and only that file's text has the lines
+  // the rows number. `whole` is already read for the other two modes; the
+  // inline mode reads it too (see `DiffViewProps.wanted`).
+  const { ctx: pageCtx } = useKernel()
+  const lspNav = useLspGestures({
+    ctx: pageCtx as unknown as Parameters<typeof useLspGestures>[0]['ctx'],
+    path,
+    text: whole.status === 'ready' ? whole.text : undefined,
+    host: scroller,
+    rows: mode === 'inline' ? INLINE_ROWS : mode === 'split' ? SPLIT_ROWS : FILE_ROWS,
+  })
+
   // Scrolling to the picked change: inline mode has the `@@` row's index, the
   // other two have the change's first row. Both are row indexes, so all three
   // views scroll the same way (the rows are direct children of the scroller).
@@ -1048,10 +1069,10 @@ function DiffView({
         </div>
       )}
       {contentMode && whole.status === 'ready' && mode === 'file' && (
-        <WholeFile diff={diff} text={whole.text} path={path} testId={testIds.text} />
+        <WholeFile diff={diff} text={whole.text} path={path} testId={testIds.text} surface={lspNav} />
       )}
       {contentMode && whole.status === 'ready' && mode === 'split' && (
-        <SplitFile diff={diff} text={whole.text} path={path} testId={testIds.text} />
+        <SplitFile diff={diff} text={whole.text} path={path} testId={testIds.text} surface={lspNav} />
       )}
       {!contentMode && whole.status === 'note' && (
         <div className="diorama-diff__notes" role="status" data-testid="git-diff-file-note">
@@ -1067,10 +1088,12 @@ function DiffView({
           aria-label="改动"
           tabIndex={0}
           onKeyDown={onKeyDown}
+          {...(lspNav === undefined ? {} : lspNav.handlers)}
         >
           <InlineRows rows={rows} />
         </div>
       )}
+      {lspNav?.overlay}
     </div>
   )
 }
@@ -1085,6 +1108,9 @@ function InlineRows({ rows }: { rows: readonly DiffLine[] }) {
           className={`diorama-diff__line diorama-diff__line--${row.tone}`}
           data-tone={row.tone}
           data-line={row.newLine ?? row.oldLine}
+          // A deleted line is not in the file any more: no current-file number,
+          // so the gestures find nothing there (contract.md §3.12).
+          {...(row.newLine === undefined ? {} : { 'data-new-line': row.newLine })}
         >
           <span className="diorama-diff__num" aria-hidden="true">
             {row.oldLine ?? ''}
@@ -1133,7 +1159,7 @@ function useFileHtml(text: string, path: string, highlight: Highlighter | undefi
 }
 
 /** The whole-file reader: the file with the changes laid in, long runs folded. */
-function WholeFile({ diff, text, path, testId }: { diff: string; text: string; path: string; testId: string }) {
+function WholeFile({ diff, text, path, testId, surface }: { diff: string; text: string; path: string; testId: string; surface?: GestureSurface }) {
   const rows = useMemo(() => buildFileRows(text, diff), [text, diff])
   const [open, setOpen] = useState<number | undefined>(undefined)
   const body = useMemo(() => labelHunks(collapseFileRows(rows, 3, 2, open), diff), [rows, diff, open])
@@ -1147,7 +1173,7 @@ function WholeFile({ diff, text, path, testId }: { diff: string; text: string; p
   // front of, so it is drawn once more after the last row.
   const trailing = body.gaps.get(body.rows.length)
   return (
-    <div className="diorama-diff__text" data-testid={testId} data-mode="file" data-language={highlight === undefined ? 'plaintext' : highlight.languageOf(path)} role="group" aria-label="整个文件">
+    <div className="diorama-diff__text" data-testid={testId} data-mode="file" data-language={highlight === undefined ? 'plaintext' : highlight.languageOf(path)} role="group" aria-label="整个文件" {...(surface === undefined ? {} : surface.handlers)}>
       {body.rows.map((row, index) => {
         const gap = body.gaps.get(index)
         if (gap !== undefined) {
@@ -1173,6 +1199,7 @@ function WholeFile({ diff, text, path, testId }: { diff: string; text: string; p
             className={`diorama-diff__line diorama-diff__line--${row.tone}`}
             data-tone={row.tone}
             data-line={row.number ?? row.oldNumber}
+            {...(row.number === undefined ? {} : { 'data-new-line': row.number })}
           >
             <span className="diorama-diff__num" aria-hidden="true">
               {row.oldNumber ?? ''}
@@ -1211,7 +1238,7 @@ function WholeFile({ diff, text, path, testId }: { diff: string; text: string; p
  * Long runs of unchanged lines fold into one band across the two columns, the
  * same way the whole-file reader folds them.
  */
-function SplitFile({ diff, text, path, testId }: { diff: string; text: string; path: string; testId: string }) {
+function SplitFile({ diff, text, path, testId, surface }: { diff: string; text: string; path: string; testId: string; surface?: GestureSurface }) {
   const rows = useMemo(() => buildSplitRows(text, diff), [text, diff])
   const [open, setOpen] = useState<number | undefined>(undefined)
   const body = useMemo(() => collapseSplitRows(rows, 3, 2, open), [rows, open])
@@ -1238,7 +1265,7 @@ function SplitFile({ diff, text, path, testId }: { diff: string; text: string; p
     </button>
   )
   return (
-    <div className="diorama-diff__text" data-testid={testId} data-mode="split" data-language={highlight === undefined ? 'plaintext' : highlight.languageOf(path)} role="group" aria-label="新旧文件对照">
+    <div className="diorama-diff__text" data-testid={testId} data-mode="split" data-language={highlight === undefined ? 'plaintext' : highlight.languageOf(path)} role="group" aria-label="新旧文件对照" {...(surface === undefined ? {} : surface.handlers)}>
       <div className="diorama-diff__split-head" aria-hidden="true">
         <span className="diorama-diff__split-title">旧</span>
         <span className="diorama-diff__split-title">新</span>
@@ -1264,6 +1291,9 @@ function SplitFile({ diff, text, path, testId }: { diff: string; text: string; p
                   className={`diorama-diff__split-cell diorama-diff__line${cell === undefined ? ' diorama-diff__split-cell--empty' : ` diorama-diff__line--${cell.tone}`}`}
                   data-tone={cell?.tone ?? 'empty'}
                   data-line={cell?.number}
+                  // Only the **new** column addresses the file the server knows:
+                  // the left one is the old file (contract.md §3.12).
+                  {...(side !== 1 || cell?.number === undefined ? {} : { 'data-new-line': cell.number })}
                 >
                   <span className="diorama-diff__num" aria-hidden="true">
                     {cell?.number ?? ''}
@@ -1916,7 +1946,8 @@ function CommitFileDiff({ commit, file, repo }: { commit: string; file: DiffEntr
   // change inside the file's own line numbers, and "split" needs the unchanged
   // lines for both columns. Asking for it only in `file` mode left `split` with
   // no text at all, so the button did nothing in the commit seat.
-  const whole = useCommitText(commit, file.file, mode !== 'inline' && file.binary !== true, repo)
+  const navFace = useLspNav()
+  const whole = useCommitText(commit, file.file, (mode !== 'inline' && file.binary !== true) || (navFace !== undefined && file.binary !== true), repo)
   if (state.status === 'loading') {
     return <div className="diorama-renderer" data-testid="git-commit-diff-loading">正在读取改动…</div>
   }

@@ -53,6 +53,7 @@
 | K7 | fail loud + 回退链 | ✅ M0→M1 | 加载/契约/slot/渲染/RPC 五层；渲染器抛错→标记失败→下一个→plaintext |
 | K8 | `ctx.fs`（只读） | ✅ M2→M3 | `list`（尊重 ignore）/ `stat` / `readText` / `readBytes` / `watch`（目录、300ms 合并、**mount 内共享**、`maxDirectories` 上限）；`ETOOLARGE` 上限 |
 | K20 | `ctx.theme`（client） | ✅ v0.9 | 页面配色：跟随系统 / 锁定 / 主题注册表（§3.10）；纯客户端，不 RPC |
+| K21 | `ctx.lsp`（只读） | ✅ | 语言智能：`definition` / `typeDefinition` / `references` / `hover` / `documentSymbol` / `status`；每 mount 一个语言服务器进程（TS / C / C++ / Go），首次用到才起；**只转只读的那一半协议**（rename / applyEdit / executeCommand 永不调用）；缓存写 `/tmp/diorama/.cache/lsp/<normalised project>`，**被浏览的目录一个字节不动**；缺的 TypeScript 服务器连同 `typescript@5` 自动装到缓存目录；行号 1-based、列 0-based UTF-16（转换有单测）；第一次查询等工程加载完（`$/progress` + 两次答案一致）才回答（contract §3.12）|
 | K19 | `ctx.search`（只读） | ✅ v0.8 | `search(query, { kind, caseSensitive, wholeWord, regex, scope, maxFiles, maxMatchesPerFile })`；`name`（子序列）/ `content`（逐行报 line/column/length）；上限 200 文件 / 每文件 20 条 / 扫描 2 万文件，超限**截断**并报真实总数；二进制跳过；`EINVAL` / `ENOENT`（contract §3.9）|
 | K9 | `ctx.git`（只读） | ✅ | `status` / `diff(scope)` / `log`（v0.5）；`show` / `showCommit` / `blob`、`base: 'index' \| <commit>`（v0.6）；**v0.10：一个挂载里的全部仓库**——`repos()` + 每个方法的可选 `repo`，向下走查 `.git`（`[git] maxDepth` 默认 3、`maxRepos`、`ignore` 剪枝），嵌套仓库不重复出现在外层；上限、错误码（contract §3.2）|
 | K10 | `ctx.slots` | ✅ M0→M1 | |
@@ -89,6 +90,7 @@
 | P14 | `jupyter` / `.ipynb` | **未来** | 第二轮明确不做（只要文本，但渲染形式未定）|
 | P9 | `i18n` | 🔲 待定 | 界面语言未做（主题已独立成 P20 / U12）|
 | P21 | `status-bar`（状态栏） | ✅ v0.22 | 客户端 piece：填 `layout.status`（`order: 100`），无自己的服务、无键位；读 `mountCtx` 与 `ctx.tabs`，文件数字走 `ctx.fs`（`stat` + 有上限的 `readText`），跟随 watch 与 `onReconnect` 重读 |
+| P22 | `lsp-nav`（定义跳转） | ✅ | 客户端 piece：只往页面全局写一句「这一页有手势」（`__diorama_lsp_nav__`），手势本身在 `diorama-ui`（两个半边不能互相 import）。`code` 渲染器在有人发布手势面时接上三件事：**⌘/Ctrl+点击**转到定义**或使用处**（同时问定义与引用、排除点击处：点使用处直接跳声明，点声明列出所有使用处；开 tab 并闪目标行，与搜索命中同一个 reveal store）、**右键菜单**（转到定义 / 查找引用）、**按住 ⌘/Ctrl 时指针下的标识符画下划线、光标变小手**（松手即撤）、**悬停卡片**（答案按 **Markdown 渲染**——围栏代码块上色、文档注释成段，用的是 `markdown` piece 发布的那一份渲染器）。**v2：diff 的三档读法也接了**——手势靠行上的 `data-new-line`（当前文件的行号）定位，删除行与双栏左栏没有它，所以那两处不跳；行内读法的格子带 git 的 `+`/`-` 前缀，列号减 1。没有这个 piece 时渲染器画的东西与之前逐字节相同，diff 也不会多读一次文件（contract §3.12、§45）|
 | P19 | 图标（文件类型 + 功能按钮） | ✅ v0.8 | 按钮 = Tabler 描边（语义名），文件/文件夹 = Material Icon Theme 彩色（精选 ~195 glyph + 其映射表）；插画由 shell 经 `diorama-ui/icons` 装到页面全局，半边只带读法（[m7/spec.md](m7/spec.md)）|
 
 ## 五、UI 交互
@@ -113,6 +115,7 @@
 | U7 | 图片缩放 / 适配窗口 | 🔲 待定 | O8 |
 | U8 | diff 并排 / 行内切换 | ✅ | **并排已做**（v0.10）：三档读法「改动（行内）/ 整个文件（单栏）/ 新旧对照（双栏）」+ 变更块间导航（contract §23）；**v0.24 修**：双栏的每一格是一整行，缩进与行内连续空格按文件原样保留，长行在自己那一栏里横向滚（contract §5.2、§44；docs/m32/spec.md）|
 | U27 | Markdown 里的代码片段语法高亮 | ✅ v0.23 | 围栏代码块按 info string（```ts / ```js …）上色，用的是**页面上同一个引擎**（`code` 发布到 `__diorama_highlight__` 的那份，与 diff 读法同源），颜色只有 `--dio-syn-*` 六个 token；未注册的语言、没有 info string、或者页面没有 `code` piece 时退回转义文本（不猜语言、不报错）；内联 `code` 不上色（contract §5.1、§30、§43；docs/m31/spec.md）|
+| U28 | 定义跳转（⌘/Ctrl+点击、引用、悬停） | ✅ | 源码渲染器里：**⌘/Ctrl+点击**一个标识符就打开声明所在的文件并闪那一行；右键菜单给「转到定义 / 查找引用」；指针在标识符上停 350ms 出悬浮卡片。**源码浏览与 diff 的三档读法都支持**（diff 里只对当前文件存在的行生效，删除行与双栏左栏不跳）；**没有语言服务器时什么都不发生**（不弹错、不灰按钮）；第一次查询要等语言服务器把工程加载完（实测 2.5s，之后 6ms）（contract §3.12、§45）|
 | U21 | diff 的语法高亮（单栏 / 双栏） | ✅ v0.14 | 「整个文件」与「新旧对照」两档按文件语言上色（关键字 / 字符串 / 注释 / 数字 / 函数名 / 内建），与 `code` 渲染器同一套 token 与同一张语言表；行内那档是 git 自己的文本，**不**上色；没有引擎时退回纯文本（contract §5.2、§30；docs/m19/spec.md）|
 | U9 | 状态栏 | ✅ v0.22 | 页面底部一条：左边是**实例**（挂载的**完整根目录路径**——窄了只有父路径出省略号、目录名不缩不淡、`mountId`、页面地址），中间是**当前文件**（路径、大小、行数、最后修改时间；diff tab 另有「差异」标记），右边是标签页数量。座位 `layout.status`（单，`layout` 声明与绘制）由 `status-bar` piece 填充；**去掉那个 piece 就没有栏**（座位空着不画，框架几何不变）；读不到文件时省掉那几格、不在栏里报错；行数超过 2 MiB 不数（contract §5.4、§42；docs/m30/spec.md）|
 | U10 | 多 tab 状态持久化（刷新后恢复整组 tab） | 🔲 待定 | O5；刷新只恢复**活动文件**（URL）与 hash 里的视图（`#diff`、`#history=<sha>`）|

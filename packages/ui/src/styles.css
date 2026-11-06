@@ -818,6 +818,106 @@ body.diorama-resizing {
   font-size: 11px;
 }
 
+/* The hover card a navigation piece shows over a symbol (contract.md §3.12).
+   Position is `fixed` at the pointer, like the context menu: the page's
+   containers carry no `transform` / `filter` (see the module comment in
+   `contextmenu.tsx`), so `fixed` is relative to the viewport and the card is
+   not clipped by the pane it was opened in. It is `pointer-events: none` —
+   the card must not steal the pointer from the word it describes. */
+.diorama-hover {
+  position: fixed;
+  z-index: 130;
+  max-width: 340px;
+  max-height: 240px;
+  overflow: auto;
+  padding: 6px 8px;
+  border: 1px solid var(--dio-border);
+  border-radius: 6px;
+  background: var(--dio-panel);
+  box-shadow: 0 8px 24px var(--dio-shadow);
+  font: 12px var(--dio-font);
+  color: var(--dio-text);
+  pointer-events: none;
+}
+
+.diorama-hover__code {
+  margin: 0;
+  white-space: pre;
+  font-family: var(--dio-mono);
+  font-size: 12px;
+}
+
+/* The underline a ⌘/Ctrl+click would act on (contract.md §3.12). Measured from
+   the word's own text nodes, so it follows the characters rather than the
+   row; `pointer-events: none` so it never takes the pointer away from the word it
+   describes, and `fixed` so the scrolling pane cannot clip it. */
+.diorama-link-underline {
+  position: fixed;
+  z-index: 125;
+  height: 1px;
+  background: var(--dio-accent);
+  pointer-events: none;
+}
+
+.diorama-hover__prose {
+  white-space: pre-wrap;
+}
+
+/* The hover's Markdown (contract.md §3.12). A language server answers with a
+   fence and a doc comment, so the card carries real markup: the same
+   `.diorama-markdown` class the renderer puts on a document, but with the
+   document's own spacing flattened — a card is a hint, not an article. */
+.diorama-hover__doc {
+  max-width: none;
+}
+
+.diorama-hover__doc p {
+  margin: 0 0 6px;
+}
+
+.diorama-hover__doc p:last-child {
+  margin-bottom: 0;
+}
+
+.diorama-hover__doc pre {
+  margin: 0 0 6px;
+  padding: 0;
+  background: none;
+  font-family: var(--dio-mono);
+  font-size: 12px;
+  white-space: pre;
+}
+
+.diorama-hover__doc pre:last-child {
+  margin-bottom: 0;
+}
+
+.diorama-hover__doc code {
+  padding: 0;
+  background: none;
+  font-family: var(--dio-mono);
+}
+
+.diorama-hover__doc h1,
+.diorama-hover__doc h2,
+.diorama-hover__doc h3 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.diorama-hover__doc ul,
+.diorama-hover__doc ol {
+  margin: 0 0 6px;
+  padding-left: 16px;
+}
+
+.diorama-hover__doc hr {
+  margin: 6px 0;
+  border: 0;
+  border-top: 1px solid var(--dio-border);
+}
+
 /* A refused action says why, above the rows it was asked from: a blocked
    popup or a clipboard the browser will not write are both recoverable, and
    the URL the action used is in the message. */

@@ -27,6 +27,34 @@ export { explainMismatch, parseRange, satisfies } from '../shared/semver.ts'
 export { FsService, fsHalf, MAX_BINARY_BYTES, MAX_TEXT_BYTES, resolveInside, type FsServiceOptions } from './fs.ts'
 export { SearchService, searchHalf } from './search.ts'
 export {
+  cacheDirFor,
+  clampPosition,
+  hoverText,
+  isRange,
+  locationsOf,
+  LSP_CACHE_ROOT,
+  LSP_INIT_TIMEOUT_MS,
+  LSP_INSTALL_TIMEOUT_MS,
+  LSP_REQUEST_TIMEOUT_MS,
+  LspService,
+  lspHalf,
+  symbolsOf,
+} from './lsp.ts'
+export {
+  fromLsp,
+  fromLspRange,
+  languageOfPath,
+  LSP_LANGUAGES,
+  SYMBOL_KIND_NAMES,
+  toLsp,
+  type LspHover,
+  type LspLocation,
+  type LspPosition,
+  type LspRange,
+  type LspServerInfo,
+  type LspSymbol,
+} from '../shared/lsp.ts'
+export {
   clipLine,
   compareNameMatches,
   contentMatcher,

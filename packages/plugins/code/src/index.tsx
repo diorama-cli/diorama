@@ -22,7 +22,7 @@
  */
 import type { Context } from 'cordis'
 import { useEffect, useMemo, useRef } from 'react'
-import { Icon, LineRow, LINE_NUMBERS_ICON, lineNumbersStore, publishHighlighter, provideEntry, setLineNumbers, toggleLineNumbers, useRevealLine, useStore, watchSelection } from 'diorama-ui'
+import { Icon, LineRow, LINE_NUMBERS_ICON, lineNumbersStore, publishHighlighter, provideEntry, setLineNumbers, toggleLineNumbers, useKernel, useLspGestures, useRevealLine, useStore, watchSelection } from 'diorama-ui'
 import type {} from 'diorama-plugin-slots'
 import type { FileRendererProps } from 'diorama-kernel'
 import { CODE_EXTENSIONS, CODE_LANGUAGES, escapeHtml, highlight, highlightBlock, highlightLines, languageOf } from './highlight.ts'
@@ -88,6 +88,14 @@ function Code({ file, text }: FileRendererProps) {
     return watchSelection(element)
   }, [lines])
 
+  // Go to definition / references / hover (contract.md §3.12). The gestures
+  // are wired **here**, on the renderer's own rows, because this component
+  // owns the caret: the navigation piece is a different build and cannot see
+  // them. `undefined` when no such piece is on the page — then nothing is
+  // attached and this renderer draws exactly what it drew before.
+  const kernel = useKernel()
+  const nav = useLspGestures({ ctx: kernel, path: file.path, text, host: list })
+
   return (
     <div className="diorama-code-wrap" data-testid="code" data-language={language}>
       <Toolbar path={file.path} shown={shown} />
@@ -101,6 +109,7 @@ function Code({ file, text }: FileRendererProps) {
           data-testid="code-lines"
           data-line-numbers={shown ? 'on' : 'off'}
           ref={list}
+          {...(nav === undefined ? {} : nav.handlers)}
         >
           {lines.map((html, index) => (
             <LineRow key={index} line={index + 1} revealed={revealed} revealTestId="code-reveal">
@@ -111,6 +120,7 @@ function Code({ file, text }: FileRendererProps) {
           ))}
         </div>
       )}
+      {nav?.overlay}
     </div>
   )
 }

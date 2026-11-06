@@ -74,6 +74,43 @@ export {
   type Highlighter,
 } from './highlight.ts'
 export {
+  markdownRenderer,
+  markdownStore,
+  publishMarkdown,
+  useMarkdown,
+  type MarkdownRenderer,
+} from './markdown.ts'
+export { hoverBlock, hoverIsEmpty, type HoverBlock } from './hover-card.ts'
+export {
+  chooseTargets,
+  describePlace,
+  isSelf,
+  type DefinitionChoice,
+  type DefinitionPlace,
+  type LabelledPlace,
+  type PlaceKind,
+} from './definition-list.ts'
+export { lspNav, lspNavStore, NO_LSP_NAV, publishLspNav, useLspNav, type LspNav } from './lsp-nav.ts'
+export { isWordChar, wordTextAt } from './lsp-position.ts'
+export {
+  caretOf,
+  HOVER_DELAY_MS,
+  HOVER_GRACE_MS,
+  jump,
+  positionAt,
+  TEXT_ROWS,
+  useLspGestures,
+  wordAt,
+  type GestureOptions,
+  type GestureSurface,
+  type LspFace,
+  type NavLocation,
+  type NavTarget,
+  type RowGeometry,
+  type TabsFace,
+  type TextPosition,
+} from './lsp-gestures.tsx'
+export {
   baseName,
   fileGlyph,
   FALLBACK_FILE,
