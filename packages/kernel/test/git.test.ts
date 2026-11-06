@@ -142,8 +142,73 @@ test('git: a mount inside a subdirectory only sees its own subtree', async t => 
   assert.equal(diff.entries.length, 1)
   // The repository file outside the mount is not addressable from it.
   await assert.rejects(svc.diff({ path: 'new.txt' }), /ENOENT/)
-  const log = await svc.log({ limit: 5 })
-  assert.ok(log.length >= 1, 'log() is scoped to the mount subtree but still reports commits')
+  // The log is the **repository's** history, not the subtree's (v0.26): a
+  // subdirectory mount is the same git repository seen through a narrower
+  // window, and the history view shows that repository in full.
+  const log = await svc.log({ limit: 50 })
+  const whole = await service(fixture.root).log({ limit: 50 })
+  assert.deepEqual(
+    log.map(entry => entry.sha),
+    whole.map(entry => entry.sha),
+    'a mount below its repository reports the same commits as the repository root',
+  )
+})
+
+test('git: log keeps every parent reachable, merge commits included', async t => {
+  // The shape that used to break the graph (docs/m34/spec.md §8): a branch that
+  // only touches one directory, merged into a main line that touches another.
+  // A pathspec made git drop the merge commit (and any commit that did not
+  // touch the path) from the list while their shas stayed in %P, so the graph
+  // had lines pointing at rows that were not there.
+  const root = mkdtempSync(join(tmpdir(), 'diorama-log-graph-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const write = (path: string, text: string): void => {
+    mkdirSync(join(root, path, '..'), { recursive: true })
+    writeFileSync(join(root, path), text)
+  }
+  git(root, 'init', '-q', '-b', 'main')
+  write('README.md', '# demo\n')
+  write('src/app.js', 'v1\n')
+  write('docs/guide.md', 'doc v1\n')
+  git(root, 'add', '-A')
+  git(root, 'commit', '-q', '-m', 'A: first')
+  git(root, 'checkout', '-q', '-b', 'feature')
+  write('src/app.js', 'v2\n')
+  git(root, 'commit', '-q', '-am', 'B: feature only touches src')
+  git(root, 'checkout', '-q', 'main')
+  write('README.md', 'readme v2\n')
+  git(root, 'commit', '-q', '-am', 'D: main only touches README')
+  git(root, 'merge', '-q', '--no-ff', '-m', 'E: merge feature', 'feature')
+  write('src/app.js', 'v3\n')
+  git(root, 'commit', '-q', '-am', 'F: after the merge, src again')
+
+  const entries = await service(root).log({ limit: 50 })
+  // Every commit of the repository is reported — the merge and the README-only
+  // commit included. A **set**, not a list: D and B are on parallel branches,
+  // so their relative order is the commit timestamps' business, not ours.
+  assert.deepEqual(
+    entries.map(entry => entry.subject).sort(),
+    [
+      'A: first',
+      'B: feature only touches src',
+      'D: main only touches README',
+      'E: merge feature',
+      'F: after the merge, src again',
+    ].sort(),
+  )
+  // …and therefore every parent a commit names is in the same answer: the
+  // graph can join every line to a dot.
+  const present = new Set(entries.map(entry => entry.sha))
+  for (const entry of entries) {
+    for (const parent of entry.parents) {
+      assert.ok(present.has(parent), `parent ${parent.slice(0, 7)} of ${entry.shortSha} is missing from the page`)
+    }
+  }
+  // The merge reports both parents, first parent first.
+  const merge = entries.find(entry => entry.subject === 'E: merge feature')
+  assert.equal(merge?.parents.length, 2)
+  // A root commit has none.
+  assert.deepEqual(entries.find(entry => entry.subject === 'A: first')?.parents, [])
 })
 
 test('git: binary files report binary instead of text', async t => {

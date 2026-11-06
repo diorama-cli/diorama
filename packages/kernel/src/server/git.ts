@@ -411,8 +411,24 @@ export class GitRepoView {
     return result
   }
 
-  /** Recent commits, newest first (contract.md §3.2). */
-  async log(options: { limit?: number; path?: RelPath } = {}): Promise<GitLogEntry[]> {
+  /**
+   * Recent commits of the whole repository, newest first (contract.md §3.2).
+   *
+   * **No pathspec** (v0.26): the history view picks a repository and shows that
+   * repository's complete history, so nothing here narrows it. The old call
+   * always appended `-- <path>` (`.` for a root mount, the subtree for one
+   * below its repository) and a pathspec is not free: git then runs *history
+   * simplification*, which silently drops commits that did not touch that path
+   * — merge commits included — while their shas stay in `%P`. A flat list
+   * only got shorter; the commit graph broke, because a parent that is not in
+   * the page is a line with nothing to join (docs/m34/spec.md §8).
+   *
+   * ``git log`` run **inside** a subdirectory is *not* a substitute: it
+   * reports the whole repository too (measured on git 2.54; the "subdirectory
+   * limits the log" behaviour people remember is `--relative`, not the
+   * default). Narrowing to a subtree can only be asked for with a pathspec.
+   */
+  async log(options: { limit?: number } = {}): Promise<GitLogEntry[]> {
     const limit = options.limit ?? DEFAULT_LOG_LIMIT
     if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LOG_LIMIT) {
       throw gitError('EINVAL', `log limit must be an integer in 1..${MAX_LOG_LIMIT}, got ${String(options.limit)}`)
@@ -421,14 +437,11 @@ export class GitRepoView {
     // says so by **failing** ("your current branch 'master' does not have any
     // commits yet"). That is a state, not an error: the answer is no commits.
     if (!(await this.hasHead())) return []
-    const path = options.path === undefined ? undefined : normalizeMountPath(this.root, options.path)
     const args = [
       'log',
       `--max-count=${limit}`,
       '--no-color',
       '--format=%H%x1f%h%x1f%s%x1f%an%x1f%ct%x1f%P',
-      '--',
-      path === undefined ? this.mountInRepo || '.' : this.toRepoPath(path),
     ]
     let output: Buffer | string
     try {
@@ -1053,8 +1066,7 @@ export class GitService {
   }
 
   /** Recent commits of one repository, newest first (contract.md §3.2). */
-  log(options: { limit?: number; path?: RelPath; repo?: string } = {}): Promise<GitLogEntry[]> {
-    if (options.path !== undefined) return this.viewOfPath(options.path).log(options)
+  log(options: { limit?: number; repo?: string } = {}): Promise<GitLogEntry[]> {
     return this.viewOf(options.repo).log(options)
   }
 

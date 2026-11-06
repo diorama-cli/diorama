@@ -148,3 +148,69 @@ test('graph: no commits is an empty graph, not a broken one', () => {
   assert.deepEqual(layout.rows, [])
   assert.equal(layout.lanes, 1)
 })
+
+test('graph: a page whose parents are all present never leaves a line hanging', () => {
+  // The shape the history view actually gets from log() (docs/m34/spec.md §8):
+  // a branch merged into a main line, every commit present. Every line that
+  // leaves a row has to arrive somewhere — no dead ends inside the page.
+  const commits = [
+    { sha: 'F', parents: ['E'] },
+    { sha: 'E', parents: ['B', 'D'] },
+    { sha: 'B', parents: ['A'] },
+    { sha: 'D', parents: ['A'] },
+    { sha: 'A', parents: [] },
+  ]
+  const layout = layoutGraph(commits)
+  const index = new Map(commits.map((commit, at) => [commit.sha, at]))
+  for (let row = 0; row < layout.rows.length; row++) {
+    const lines = layout.rows[row]!.lines
+    for (const line of lines) {
+      if (line.span !== 'bottom') continue
+      // A bottom segment must be picked up by the next row — unless this is the
+      // last row, where "off the bottom edge" is the honest answer.
+      if (row + 1 < layout.rows.length) {
+        const next = layout.rows[row + 1]!.lines
+        assert.ok(
+          next.some(other => other.to === line.to && (other.span === 'top' || other.span === 'full')),
+          `row ${row} leaves lane ${line.to} open but row ${row + 1} does not receive it`,
+        )
+      }
+    }
+  }
+  // Both branches are drawn, and they meet at A.
+  assert.equal(layout.lanes, 2)
+  assert.ok(index.has('A'))
+})
+
+test('graph: an open lane reaches the last row\'s bottom edge', () => {
+  // The page stops before the parent is reached (a paged history, or a
+  // pathspec-filtered one). The lane must run to the **bottom edge of the last
+  // row**: stopping at a row boundary reads as a dead end, not as "more below".
+  const layout = layoutGraph([
+    { sha: 'c0', parents: ['c1'] },
+    { sha: 'c1', parents: ['c2'] },
+  ])
+  const last = layout.rows[layout.rows.length - 1]!
+  assert.ok(
+    last.lines.some(line => line.span === 'bottom' && line.from === 0 && line.to === 0),
+    'the lane still waiting for c2 must leave the last row at its bottom edge',
+  )
+})
+
+test('graph: a parent that is not in the page leaves no line pointing at nothing', () => {
+  // The historical bug (docs/m34/spec.md §8): log() dropped the merge commit,
+  // so a child named a parent that had no row. Nothing may be drawn towards a
+  // row that does not exist — the lane either continues to the bottom edge of
+  // the page or ends at a dot that is there.
+  const layout = layoutGraph([
+    { sha: 'F', parents: ['E'] },
+    { sha: 'C', parents: ['B'] },
+    { sha: 'B', parents: ['A'] },
+    { sha: 'A', parents: [] },
+  ])
+  const present = new Set(layout.rows.map(row => row.sha))
+  // E is missing: F's lane stays open and runs off the bottom of the page.
+  assert.ok(!present.has('E'))
+  const lanesAtBottom = layout.rows[layout.rows.length - 1]!.lines.filter(line => line.span === 'bottom')
+  assert.ok(lanesAtBottom.length >= 1, 'an open lane has to be drawn to the bottom edge')
+})
