@@ -250,9 +250,9 @@ scripts/                  生成器（图标表；pnpm icons 重新生成）
 ```bash
 pnpm install
 pnpm build                 # 全量构建（含各包的类型声明产出）
-pnpm test:unit             # node --test，454 条单测
+pnpm test:unit             # node --test，524 条单测
 pnpm -r --no-sort run typecheck   # 注意：不要用 pnpm typecheck（任务图成环，会失败）
-pnpm --filter diorama-web exec playwright test   # 188 条端到端，真实 CLI + Chromium
+pnpm --filter diorama-web exec playwright test   # 212 条端到端，真实 CLI + Chromium
 ```
 
 端到端测试跑的是构建产物（`packages/*/lib`、`apps/web/dist`），改了源码先 `pnpm build` 再跑；每个用例使用独立的 `DIORAMA_HOME` 与 gateway，不碰真实的 `~/.diorama`。
@@ -283,6 +283,6 @@ README 的截图用 `scripts/refresh-readme-shots.mjs` 重新截：先 `diorama-
 ## 状态与许可
 
 - 契约版本 `0.0.11`（pre-1.0 线：破坏性变更以 `0.0.x` 递增表达；插件声明 `>=0.0.11 <0.1.0`）。
-- 已实现：文件树、多标签、五类渲染器、git 变更与历史（diff 三档读法：行内 / 整文件单栏 / 新旧双栏，后两档带语法高亮）、文件搜索、命令面板与快捷键体系（按住 ⌘ / Ctrl / ⌥ 时浮出快捷键）、watch、URL 深链、图标、明暗主题（跟随系统 / 锁定 / 第三方主题注册 / 每个目录一个起点）、gateway 多目录挂载与**索引页**、`diorama.toml` 配置与 `diorama config`、挂载的 `--json` 输出、`diorama stop`、**一个目录里的多个 git 仓库**（并列与嵌套；历史视图下拉切换）、**可拖动的窗格**与长名字横滚、**侧栏可收起**、**文件视图工具栏**（定位到正在浏览的文件）、**文件的原件链接**（`/~raw~/<path>`）、**行号与跳转到行**（`path:42`、`:` 开头的 go to line、跨行圈选是一整块）、**Markdown 的公式 / 图表 / 文档内大纲**、**网页标题是目录名**、**页面底部的状态栏**、**Markdown 里的代码片段上色**、**历史视图的提交树与多提交对比**、**定义跳转与语言智能**（`ctx.lsp`）、**搜索的已解码文本缓存与可选 ripgrep 窄化**。454 条单测 + 188 条端到端全部通过。
+- 已实现：文件树、多标签、五类渲染器、git 变更与历史（diff 三档读法：行内 / 整文件单栏 / 新旧双栏，后两档带语法高亮）、文件搜索、命令面板与快捷键体系（按住 ⌘ / Ctrl / ⌥ 时浮出快捷键）、watch、URL 深链、图标、明暗主题（跟随系统 / 锁定 / 第三方主题注册 / 每个目录一个起点）、gateway 多目录挂载与**索引页**、`diorama.toml` 配置与 `diorama config`、挂载的 `--json` 输出、`diorama stop`、**一个目录里的多个 git 仓库**（并列与嵌套；历史视图下拉切换）、**可拖动的窗格**与长名字横滚、**侧栏可收起**、**文件视图工具栏**（定位到正在浏览的文件）、**文件的原件链接**（`/~raw~/<path>`）、**行号与跳转到行**（`path:42`、`:` 开头的 go to line、跨行圈选是一整块）、**Markdown 的公式 / 图表 / 文档内大纲**、**网页标题是目录名**、**页面底部的状态栏**、**Markdown 里的代码片段上色**、**历史视图的提交树与多提交对比**、**定义跳转与语言智能**（`ctx.lsp`）、**搜索的已解码文本缓存与可选 ripgrep 窄化**。524 条单测 + 212 条端到端全部通过。
 - 尚未做：外部插件加载（`~/.diorama/plugins` 与 npm 来源）、界面语言（i18n）、编辑能力（永远不会做——这是只读查看器）。
 - [MIT](LICENSE)
