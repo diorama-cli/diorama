@@ -1681,7 +1681,8 @@ body.diorama-resizing {
 }
 
 .diorama-changes__reload,
-.diorama-diff__reload {
+.diorama-diff__reload,
+.diorama-changes__compare {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -1691,6 +1692,35 @@ body.diorama-resizing {
   font: inherit;
   cursor: pointer;
   padding: 0;
+}
+
+/* The compare toggle of the history view (v0.25): "on" reads as a mode, not a
+   hover, so it keeps its tint until the reader turns it off. */
+.diorama-changes__compare {
+  padding: 1px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* The buttons at the right end of a view's header row, in one cluster: the
+   count keeps the left, and the controls do not push each other apart. */
+.diorama-changes__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.diorama-changes__compare:hover {
+  background: var(--dio-hover);
+}
+
+.diorama-changes__compare--on {
+  border-color: var(--dio-accent);
+  background: var(--dio-selected);
+  color: var(--dio-text);
 }
 
 .diorama-changes__row {
@@ -2191,6 +2221,20 @@ body.diorama-resizing {
 .diorama-history__row.diorama-changes__row--selected {
   border-left-color: var(--dio-accent);
   background: var(--dio-selected);
+}
+
+/* A picked row that is **not** an end of the comparison (v0.25): ⌘-clicking the
+   first and the last row picks two, and the diff spans everything between. */
+.diorama-history__row--picked {
+  border-left-color: var(--dio-border-strong);
+  background: var(--dio-selected-soft);
+}
+
+/* A row **inside** the stretch but not picked: it is part of what the diff
+   covers, so it is marked — faintly, because nothing was selected here. */
+.diorama-history__row--between {
+  border-left-color: var(--dio-border);
+  color: var(--dio-muted);
 }
 
 .diorama-history__subject {

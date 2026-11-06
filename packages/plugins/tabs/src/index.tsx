@@ -12,7 +12,7 @@
  */
 import type { Context } from 'cordis'
 import { useCallback, useEffect, useRef, useSyncExternalStore, type ReactElement } from 'react'
-import type {} from 'diorama-plugin-slots'
+import type { CommitSeatProps } from 'diorama-plugin-slots'
 import { bindMethods, FileIcon, Icon, KeyHint, provideEntry, Slot, useHeldModifier, useKernel, useStore } from 'diorama-ui'
 import { createTabsService, type CommandsService, type TabInfo } from 'diorama-kernel/client'
 
@@ -195,29 +195,47 @@ interface PickedCommit {
   /** The repository's mount-relative path (`''` = the mount's own). */
   repo: string
   commit: string
+  /**
+   * The other commits of a **multi-commit** pick (v0.25), oldest first — the
+   * value is then `<repo>:<oldest>,…,<newest>` and `commit` is the newest.
+   * Absent for a single pick, which is what every older value is.
+   */
+  commits?: string[]
 }
 
 /**
  * Decode `#history`. The repository is optional and a repository path never
  * contains `:` (mount paths are POSIX, §3.1), so the first `:` separates the
  * two when there is one.
+ *
+ * v0.25: a value may name **several** commits of one repository, comma
+ * separated and oldest first (`<repo>:<a>,<b>,<c>`). A commit is a sha, which
+ * contains no comma, so splitting on it needs no escaping; a value with one
+ * commit decodes to exactly what it always did.
  */
 function parsePickedCommit(value: string | undefined): PickedCommit | undefined {
   if (value === undefined || value === '') return undefined
   const at = value.indexOf(':')
-  if (at <= 0) return { repo: '', commit: value }
-  return { repo: value.slice(0, at), commit: value.slice(at + 1) }
+  const repo = at <= 0 ? '' : value.slice(0, at)
+  const commits = (at <= 0 ? value : value.slice(at + 1)).split(',').filter(part => part !== '')
+  if (commits.length === 0) return undefined
+  const newest = commits[commits.length - 1] as string
+  if (commits.length === 1) return { repo, commit: newest }
+  return { repo, commit: newest, commits }
 }
 
-/** The picked commit, drawn in `seats.git-commit` in place of the tabs (v0.6). */
-function CommitColumn({ commit, repo }: PickedCommit) {
+/**
+ * The picked commit (or stretch of history), drawn in `seats.git-commit` in
+ * place of the tabs (v0.6, v0.25 for more than one commit).
+ */
+function CommitColumn({ commit, repo, commits }: PickedCommit) {
   const { registry } = useKernel()
   if (registry?.owned?.('seats.git-commit') !== true) return null
   return (
     <section className="diorama-tabs diorama-tabs--commit" data-testid="tabs-commit">
       <Slot
         name="seats.git-commit"
-        props={{ commit, repo }}
+        props={{ commit, repo, ...(commits === undefined ? {} : { commits }) }}
         empty={null}
         exhausted={errors => (
           <div className="diorama-renderer__error" role="alert">
@@ -226,8 +244,8 @@ function CommitColumn({ commit, repo }: PickedCommit) {
         )}
         fallback={null}
         render={entry => {
-          const Commit = entry.component as unknown as (props: { commit: string; repo?: string }) => ReactElement | null
-          return <Commit commit={commit} repo={repo} />
+          const Commit = entry.component as unknown as (props: CommitSeatProps) => ReactElement | null
+          return <Commit commit={commit} repo={repo} {...(commits === undefined ? {} : { commits })} />
         }}
       />
     </section>
@@ -331,7 +349,7 @@ function TabsView() {
   // A commit being looked at takes the right column; the tabs (and their
   // per-tab state) stay mounted underneath the whole time.
   const commit = usePickedCommit(tabs)
-  if (commit !== undefined) return <CommitColumn commit={commit.commit} repo={commit.repo} />
+  if (commit !== undefined) return <CommitColumn commit={commit.commit} repo={commit.repo} commits={commit.commits} />
   if (snapshot.tabs.length === 0) {
     return (
       <section className="diorama-tabs" data-testid="tabs">

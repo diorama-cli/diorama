@@ -28,6 +28,7 @@ import type {
   GitLogEntry,
   GitRepoInfo,
   GitStatusEntry,
+  RangeResult,
   RelPath,
 } from '../shared/types.ts'
 import { resolveInside } from './fs.ts'
@@ -57,6 +58,13 @@ export const MAX_LOG_LIMIT = 500
 /** Bytes of one file's content `blob()` may return (same threshold as `readText`). */
 export const MAX_BLOB_BYTES = 8 * 1024 * 1024
 
+/**
+ * Git's empty tree: the "before" side of a repository's first commit, which has
+ * no parent to compare with. `git diff <this> <root>` prints exactly what
+ * `git show <root>` prints.
+ */
+export const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
+
 const METHODS: MethodDescriptor[] = [
   // v0.10: every method takes an optional trailing `repo` (the mount's own
   // repository when absent), so the arities are the widest accepted shape.
@@ -67,6 +75,8 @@ const METHODS: MethodDescriptor[] = [
   { name: 'show', arity: 3 },
   { name: 'showCommit', arity: 2 },
   { name: 'blob', arity: 3 },
+  // v0.25: two commits compared with each other (from … to).
+  { name: 'range', arity: 3 },
 ]
 
 /** A commit argument as callers pass it (full sha, short sha, `HEAD~1`). */
@@ -481,28 +491,109 @@ export class GitRepoView {
       repo: this.repoPath,
       files: [],
     }
-    // The file list is the diff of the commit against its parent, one entry
-    // per file, under the same 4 MiB / 2000 line account `diff()` uses.
+    // The file list is the diff of the commit against its parent. **Every**
+    // changed file is listed — the reader picks one out of the list, so a
+    // dropped row would be a missing answer — and the diff budget (the same
+    // 4 MiB / 2000 lines `diff()` uses) only decides **which entries carry
+    // their text inline**. Once it runs out the remaining files are listed
+    // without `text` and read one at a time through `show()` when opened.
     const names = await this.run(['show', '--no-color', '--name-status', '-z', '--format=', '-M', sha])
     let bytes = 0
     let lines = 0
     for (const change of this.parseCommitFiles(names)) {
+      if (detail.truncated === true) {
+        // The budget is spent: the row is still part of the answer.
+        detail.files.push(this.toEntry(change.file, '', change.kind, change.oldPath, change.status, { withoutText: true }))
+        continue
+      }
       const text = await this.run(['show', '--no-color', '--no-ext-diff', '-M', '--format=', sha, '--', this.toRepoPath(change.file)])
       const entry = this.toEntry(change.file, text, change.kind, change.oldPath, change.status)
       const entryBytes = entry.text === undefined ? 0 : Buffer.byteLength(entry.text, 'utf8')
       const entryLines = entry.text === undefined ? 0 : countLines(entry.text)
       if (bytes + entryBytes > MAX_DIFF_BYTES || lines + entryLines > MAX_DIFF_LINES) {
+        // This entry does not fit: keep its row, drop its text, and stop
+        // reading bodies (the rest are listed without them).
         detail.truncated = true
-        if (bytes === 0 && lines === 0 && entry.text !== undefined) {
-          detail.files.push({ ...entry, text: clip(entry.text, MAX_DIFF_BYTES, MAX_DIFF_LINES), truncated: true })
-        }
-        break
+        const clipped =
+          bytes === 0 && lines === 0 && entry.text !== undefined
+            ? { ...entry, text: clip(entry.text, MAX_DIFF_BYTES, MAX_DIFF_LINES), truncated: true as const }
+            : this.toEntry(change.file, '', change.kind, change.oldPath, change.status, { withoutText: true })
+        detail.files.push(clipped)
+        continue
       }
       bytes += entryBytes
       lines += entryLines
       detail.files.push(entry)
     }
     return detail
+  }
+
+  /**
+   * **The changes of a stretch of history**: what the commits from `from` to
+   * `to` (oldest first, both included) did together (contract.md §3.2, v0.25).
+   *
+   * The comparison is `git diff <from^> <to>` — the state **before** the
+   * oldest picked commit, against the newest. That is the one reading that
+   * agrees with picking a single commit: `git show <c>` is `git diff <c^> <c>`,
+   * so "pick c" and "pick just c out of a range" say the same thing about c.
+   * Comparing `<from>` with `<to>` instead would silently drop the oldest
+   * commit's own change — pick four commits, see three — which is why this is
+   * not the two-tree comparison `git diff a b` spells.
+   *
+   * A root commit has no parent: the empty tree is its "before" (`git diff
+   * <empty-tree> <root>` is exactly the root commit's change, which git also
+   * uses for `git show` on a root commit).
+   *
+   * Every entry is shaped like `diff()`'s (same `kind` / `text` / `binary` /
+   * `truncated`), so the readers draw a range without knowing where it came
+   * from.
+   */
+  async range(from: string, to: string): Promise<RangeResult> {
+    const first = await this.resolveRevision(normalizeCommit(from))
+    const second = await this.resolveRevision(normalizeCommit(to))
+    // The "before" side: the oldest picked commit's parent, or the empty tree
+    // when it is the repository's root commit (which has none).
+    const before = await this.parentOf(first)
+    const names = await this.run(['diff', '--name-status', '-z', '--no-ext-diff', '-M', before, second])
+    const result: RangeResult = { from: first, to: second, files: [] }
+    // Every changed file is listed; the diff budget (4 MiB / 2000 lines, the
+    // same account `diff()` and `showCommit()` use) only decides which entries
+    // carry their text inline (contract.md §3.2). The rest are read one at a
+    // time through `show()` when the reader opens them.
+    let bytes = 0
+    let lines = 0
+    for (const change of this.parseCommitFiles(names)) {
+      if (result.truncated === true) {
+        result.files.push(this.toEntry(change.file, '', change.kind, change.oldPath, change.status, { withoutText: true }))
+        continue
+      }
+      const text = await this.run([
+        'diff',
+        '--no-color',
+        '--no-ext-diff',
+        '-M',
+        before,
+        second,
+        '--',
+        this.toRepoPath(change.file),
+      ])
+      const entry = this.toEntry(change.file, text, change.kind, change.oldPath, change.status)
+      const entryBytes = entry.text === undefined ? 0 : Buffer.byteLength(entry.text, 'utf8')
+      const entryLines = entry.text === undefined ? 0 : countLines(entry.text)
+      if (bytes + entryBytes > MAX_DIFF_BYTES || lines + entryLines > MAX_DIFF_LINES) {
+        result.truncated = true
+        const clipped =
+          bytes === 0 && lines === 0 && entry.text !== undefined
+            ? { ...entry, text: clip(entry.text, MAX_DIFF_BYTES, MAX_DIFF_LINES), truncated: true as const }
+            : this.toEntry(change.file, '', change.kind, change.oldPath, change.status, { withoutText: true })
+        result.files.push(clipped)
+        continue
+      }
+      bytes += entryBytes
+      lines += entryLines
+      result.files.push(entry)
+    }
+    return result
   }
 
   /** One file's content in one commit, not a diff (contract.md §3.2). */
@@ -533,6 +624,24 @@ export class GitRepoView {
       return { text, size, truncated: true }
     }
     return { text, size }
+  }
+
+  /**
+   * The tree to compare "before" a commit with: its parent, or the **empty
+   * tree** when it is a root commit (a repository's first commit has no parent,
+   * and `<root>^` does not resolve). `git diff <empty-tree> <root>` is exactly
+   * what `git show <root>` prints, so a range that starts at the root commit
+   * reads like picking that commit alone.
+   */
+  private async parentOf(sha: string): Promise<string> {
+    try {
+      const output = await runGit(this.repoRoot, ['rev-parse', '--verify', '--quiet', `${sha}^`])
+      const parent = String(output).trim()
+      if (parent !== '') return parent
+    } catch {
+      // No parent (a root commit): fall through to the empty tree.
+    }
+    return EMPTY_TREE
   }
 
   /**
@@ -626,15 +735,25 @@ export class GitRepoView {
     return files
   }
 
-  /** Attach diff text (or `binary` / `truncated`) to a change description. */
+  /**
+   * Attach diff text (or `binary` / `truncated`) to a change description.
+   *
+   * `withoutText` produces the **row only**: a file list is complete whether or
+   * not this call had the budget to read every file's diff, and a row with no
+   * `text` is exactly what the reader's "read this file when opened" path
+   * already handles (an untracked entry, a `diff()` past its limit). It is not
+   * `binary`: nothing was read, so nothing is claimed about the content.
+   */
   private toEntry(
     file: RelPath,
     text: string,
     kind: GitStatusEntry['kind'],
     oldPath?: RelPath,
     status = kind === 'added' ? 'A ' : kind === 'deleted' ? 'D ' : 'M ',
+    options: { withoutText?: boolean } = {},
   ): DiffEntry {
     const base: DiffEntry = { file, kind, status, repo: this.repoPath, ...(oldPath === undefined ? {} : { oldPath }) }
+    if (options.withoutText === true) return base
     if (looksBinary(text)) return { ...base, binary: true }
     if (Buffer.byteLength(text, 'utf8') > MAX_DIFF_BYTES || countLines(text) > MAX_DIFF_LINES) {
       return { ...base, text: clip(text, MAX_DIFF_BYTES, MAX_DIFF_LINES), truncated: true }
@@ -943,6 +1062,11 @@ export class GitService {
   /** One commit in full (contract.md §3.2). */
   showCommit(commit: string, repo?: string): Promise<CommitDetail> {
     return this.viewOf(repo).showCommit(commit)
+  }
+
+  /** Two commits of one repository compared with each other (contract.md §3.2, v0.25). */
+  range(from: string, to: string, repo?: string): Promise<RangeResult> {
+    return this.viewOf(repo).range(from, to)
   }
 
   /** One file's content in one commit (contract.md §3.2). */

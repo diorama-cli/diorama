@@ -14,6 +14,7 @@ export type {
   GitChangeKind,
   GitLogEntry,
   GitStatusEntry,
+  RangeResult,
   RelPath,
   TabInfo,
 } from '../shared/types.ts'
