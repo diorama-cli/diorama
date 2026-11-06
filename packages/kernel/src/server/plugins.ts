@@ -314,7 +314,8 @@ export interface MountTree {
 /**
  * Services every mount may provide, each isolated per mount (see
  * {@link mountScope}). A kernel service with a server half that a mount
- * provides belongs here; today that is `fs` and `git` (contract.md §3.1, §3.2).
+ * provides belongs here; today that is `fs`, `git`, `search` and `lsp`
+ * (contract.md §3.1, §3.2, §3.9, §3.12).
  */
 export const MOUNT_SERVICES = ['fs', 'git', 'search', 'lsp'] as const
 

@@ -25,7 +25,7 @@ export { RAW_PREFIX } from '../shared/types.ts'
 export { explainMismatch, parseRange, satisfies } from '../shared/semver.ts'
 
 export { FsService, fsHalf, MAX_BINARY_BYTES, MAX_TEXT_BYTES, resolveInside, type FsServiceOptions } from './fs.ts'
-export { SearchService, searchHalf } from './search.ts'
+export { SEARCH_CACHE_MAX_BYTES, SEARCH_CACHE_MAX_FILES, SearchService, searchHalf } from './search.ts'
 export {
   cacheDirFor,
   clampPosition,
@@ -64,6 +64,7 @@ export {
   SEARCH_LINE_MAX_CHARS,
   SEARCH_MAX_FILES,
   SEARCH_MAX_MATCHES_PER_FILE,
+  SEARCH_MAX_PATHS,
   SEARCH_MAX_QUERY_CHARS,
   SEARCH_MAX_SCANNED_FILES,
   type SearchFile,

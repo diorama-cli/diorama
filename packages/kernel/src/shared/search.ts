@@ -83,6 +83,14 @@ export const SEARCH_MAX_MATCHES_PER_FILE = 20
  */
 export const SEARCH_MAX_SCANNED_FILES = 20_000
 
+/**
+ * Paths `search.paths()` returns at most (contract.md §3.9): quick open lists
+ * every file of the mount, and a mount with more than this many files is a
+ * directory whose quick open is a scan, not a list. The cap is the walk's, so
+ * the answer is a prefix rather than a slow call.
+ */
+export const SEARCH_MAX_PATHS = 20_000
+
 /** Characters of one line kept for display (the hit is always inside the clip). */
 export const SEARCH_LINE_MAX_CHARS = 240
 

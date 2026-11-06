@@ -13,7 +13,14 @@
 | 3 | [docs/features.md](docs/features.md) | **有什么**：能力清单与档位（✅ / v1 / 未来 / 不做） |
 | 4 | 最近一档的 `docs/mN/spec.md` | **怎么实现的** + **§6.2 的坑**（见下面 §5） |
 
-最近一档是 [docs/m34/spec.md](docs/m34/spec.md)（**历史视图的提交树**：`log()` 多报一列 `%P` →
+最近一档是 [docs/m36/spec.md](docs/m36/spec.md)（**搜索的性能**：内容搜索的代价一直是**每个文件一次
+`open`**，不是匹配——所以本档加的是「每个 mount 一份已解码文本缓存（32 MiB / 2 万文件，按
+mtime + ctime + size 校验）」与「字面量走 `indexOf`、只有命中该针的文件才切行」，而不是并发或索引：
+`UV_THREADPOOL_SIZE` 从 4 到 64 耗时不动（293–320 ms）。重复查询 200–400 → 140–156 ms，首次仍是 300 ms 上下
+（读盘的地板）。新增 `search.paths(scope?)` 让快速打开一次取全部路径（原来逐目录 `fs.list`）。
+**ripgrep 只做窄化**（v0.27）：`fs.list` 仍列出候选（`ignore` 仍是唯一强制点），引擎拿**显式文件清单**回答「哪些文件命中」，行/列/预览仍由 JavaScript 产出——两条路径结果逐字段相同，罕见词首次 165 → 26 ms。命中面过半或缓存已满时退回。
+契约 §3.9、§49、§50）；
+上一档是 [docs/m34/spec.md](docs/m34/spec.md)（**历史视图的提交树**：`log()` 多报一列 `%P` →
 `GitLogEntry.parents`，历史行左侧一列彩色的点与连线——`layoutGraph` 是纯函数（道位 / 颜色 / 每段
 线的跨度），每行画自己的 `<svg>`（行是 `max-content`，一张大图猜不准总高），同一条道是直线、跨道是
 贝塞尔；颜色按**道**轮换（6 个 token，light/dark 两处成对），点有行底色的描边圈；行的纵向内边距挪到
@@ -154,7 +161,7 @@ scripts/                  生成器（图标表；`pnpm icons` 重新生成）
 | 仓库发现（向下走查、深度/忽略/上限、嵌套） | `kernel/src/server/repos.ts`、`kernel/src/server/config.ts` 的 `[git]` 表 |
 | `ctx.fs` 的大小上限（两端共用一个数） | `kernel/src/shared/limits.ts` |
 | 页面配色 token（light / dark 调色板、主题覆盖的集合） | `ui/src/styles.css`（`:root` 与 `[data-scheme='dark']` 两处**一起改**）；防白闪脚本在 `apps/web/index.html` |
-| `ctx.search`（文件名 / 内容搜索、上限、reveal store） | `kernel/src/server/search.ts`、`kernel/src/shared/search.ts`、`kernel/src/client/search.ts`、`ui/src/reveal.ts` |
+| `ctx.search`（文件名 / 内容搜索、上限、**已解码文本缓存**、**可选的 ripgrep 窄化**、reveal store） | `kernel/src/server/search.ts`、`kernel/src/server/ripgrep.ts`、`kernel/src/shared/search.ts`、`kernel/src/client/search.ts`、`ui/src/reveal.ts` |
 | `ctx.lsp`（语言服务器进程、只读方法、缓存目录） | `kernel/src/server/lsp.ts`、`kernel/src/client/lsp.ts`、`kernel/src/shared/lsp.ts` |
 | 定义跳转的手势（caret → 行列、悬停卡片、右键菜单） | `ui/src/lsp-gestures.tsx`、`ui/src/lsp-position.ts`、`ui/src/lsp-nav.ts`（页面全局的手势面）、`ui/src/hover-card.ts`（围栏解析）、`ui/src/definition-list.ts`（一个就跳 / 多个列出来） |
 | 页面的 Markdown 渲染器（悬浮卡片等跨半边共用） | `ui/src/markdown.ts`（页面全局 `__diorama_markdown__`）；发布方是 `plugins/markdown` |
@@ -276,6 +283,11 @@ scripts/                  生成器（图标表；`pnpm icons` 重新生成）
 | 按下 ⌘ 后悬浮卡片盖住使用列表 | 卡片与列表都画在指针旁，卡片没让路 | `held` 一变就撤卡片，按住期间不再安排新的悬浮（m35/spec §6） |
 | 松开 ⌘ 后下划线还在 | 松开修饰键不触发鼠标事件 | 在 `held` 变回 `undefined` 的 effect 里清掉；下划线是**词**上的浮层，用 `Range` 量宽（m35/spec §6） |
 | **diff 里点标识符跳到另一行 / 偏一个字符** | 对着删除行或双栏左栏问了「当前文件的第 N 行」；或没减掉行内 diff 的 `+` / `-` 前缀 | 只有当前文件存在的行才有 `data-new-line`（删除行、双栏左栏没有）；行内那一档 `trim: 1`（`RowGeometry`，m35/spec §3.1） |
+| **内容搜索第二次查询还是 300 ms 量级**，于是去调并发 / 换库 | 代价在**每个文件一次 `open`**（macOS 上约 0.3 ms/次，与线程数无关）：`UV_THREADPOOL_SIZE` 4→64 耗时不动，换 ripgrep 也只省下匹配（6–10 ms） | 先量再改：搜索的成本是读盘，重复查询靠**已解码文本缓存**（mtime + ctime + size 校验）兑现，不是靠并发或索引（m36/spec §6 坑 1–2）|
+| 缓存命中后「文件明明改了却搜到旧内容」 | `mtime` 在部分文件系统上只有**秒级**粒度，同一秒内的等长重写看不出来 | 校验要 **mtime + ctime + size** 三项，都取自同一次 `stat`（m36/spec §6 坑 3）|
+| **把目录交给 ripgrep**，以为省事 | 那会绕过 `fs.list`，`ignore` 就有了第二套口径（`.gitignore` 与配置的 `ignore` 不是一回事） | 只把**显式文件清单**交给它（`--no-ignore`），候选仍由 `fs.list` 列出（m36/spec §50）|
+| **以为 rg 的正则方言与 JS 不同，所以只敢让它处理字面量** | 方言差异确实存在（`\b` 是否 Unicode、`\p{…}` 名字），但它只影响**候选集**，而候选集宽一点是安全的 | 让它窄化正则（`--engine auto`），细节仍由 JS 判定；非法正则先由 JS 验一遍再交出去（m36/spec §50）|
+| **解析 `rg --json` 的逐命中帧**想直接拿行/列 | 输出**随命中数**膨胀（本仓库一次查询 12 MB、25 ms 纯解析），宽命中时反而比 JS 慢；且 `column` 是**字节**偏移 | 只用 `--files-with-matches` 窄化候选，细节由 JS 产出；两条路径必须**逐字段相同**（m36/spec §50）|
 
 ## 6. 边界（不要越过的线）
 

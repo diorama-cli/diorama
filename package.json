@@ -35,6 +35,7 @@
   },
   "dependencies": {
     "@cordisjs/plugin-timer": "^1.1.4",
+    "@vscode/ripgrep": "^1.18.0",
     "smol-toml": "^1.9.1"
   }
 }
