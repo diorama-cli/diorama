@@ -280,6 +280,125 @@ test('git: showCommit carries the message and the file list', async t => {
   await assert.rejects(svc.showCommit('HEAD...HEAD'), /EINVAL/)
 })
 
+/**
+ * A commit with more changed files than the diff budget can hold still lists
+ * **every** file: the budget decides which rows carry their text inline, not
+ * which rows exist. The reader picks a file out of the list, so a dropped row
+ * would be a missing answer — and the seat reads a text-less row on demand
+ * (`show(commit, path)`), which is the path an untracked file already takes.
+ */
+test('git: showCommit lists every changed file even past the diff budget', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'diorama-git-bigcommit-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const write = (path: string, text: string): void => {
+    const target = join(root, path)
+    mkdirSync(join(target, '..'), { recursive: true })
+    writeFileSync(target, text)
+  }
+  git(root, 'init', '-q', '-b', 'main')
+  write('seed.txt', 'seed\n')
+  git(root, 'add', '-A')
+  git(root, 'commit', '-q', '-m', 'first')
+  // Enough files, each big enough, that the 4 MiB budget cannot hold them all.
+  const COUNT = 40
+  const LINES = 1200
+  const body = Array.from({ length: LINES }, (_, index) => `line ${index} of a file that is long enough`).join('\n')
+  for (let index = 0; index < COUNT; index++) write(`big/file-${String(index).padStart(2, '0')}.txt`, `${body}\n`)
+  git(root, 'add', '-A')
+  git(root, 'commit', '-q', '-m', 'many big files')
+  const sha = git(root, 'rev-parse', 'HEAD').trim()
+  const svc = service(root)
+
+  const detail = await svc.showCommit(sha)
+  // The list is complete — all 40, not the first few that fit.
+  assert.equal(detail.files.length, COUNT)
+  assert.deepEqual(
+    detail.files.map(file => file.file).sort(),
+    Array.from({ length: COUNT }, (_, index) => `big/file-${String(index).padStart(2, '0')}.txt`).sort(),
+  )
+  // The budget ran out, so some rows have no inline text…
+  assert.equal(detail.truncated, true)
+  const withoutText = detail.files.filter(file => file.text === undefined)
+  assert.ok(withoutText.length > 0, 'expected some rows to carry no text')
+  // …and those are **not** binary: nothing was read, so nothing is claimed.
+  assert.equal(withoutText.every(file => file.binary === undefined), true)
+  // Opening one reads it on demand, which is what the seat does.
+  const opened = await svc.show(sha, withoutText[0]!.file)
+  assert.match(opened.text ?? '', /^new file mode /m)
+
+  // A range over the same stretch behaves the same way — and it covers the
+  // **first** commit too (which created seed.txt), so there is one more row.
+  const range = await svc.range('HEAD~1', 'HEAD')
+  assert.equal(range.files.length, COUNT + 1)
+  assert.ok(range.files.some(file => file.file === 'seed.txt'))
+  assert.equal(range.truncated, true)
+  const rangeOpened = await svc.show(sha, range.files.find(file => file.text === undefined)!.file)
+  assert.ok((rangeOpened.text ?? '').length > 0)
+})
+/**
+ * v0.25: **the changes of a stretch of history**. `range(from, to)` answers with
+ * what the commits `from` … `to` (oldest first, both included) did together,
+ * so picking a commit on its own and picking it as the oldest of a stretch say
+ * the same thing about it.
+ *
+ * The comparison is `git diff <from^> <to>` — the state *before* the oldest
+ * picked commit. `git diff <from> <to>` would drop the oldest commit's own
+ * change (pick four, see three), which is the bug this test locks down.
+ */
+test('git: range covers every picked commit, the oldest one included', async t => {
+  const fixture = history()
+  t.after(() => fixture.dispose())
+  const svc = service(fixture.root)
+  const result = await svc.range(fixture.first, fixture.second)
+  // The ends are resolved to full shas, so the seat can name them.
+  assert.equal(result.from, fixture.first)
+  assert.equal(result.to, fixture.second)
+  assert.equal(result.truncated, undefined)
+  // Both commits' changes: the first commit created README.md and src/app.js,
+  // the second modified app.js, added the binary and renamed README → GUIDE.
+  // A two-tree comparison would leave out everything the first commit did.
+  const byPath = new Map(result.files.map(file => [file.file, file]))
+  assert.deepEqual([...byPath.keys()].sort(), ['GUIDE.md', 'blob.bin', 'src/app.js'])
+  // The first commit **created** src/app.js and the range starts before it, so
+  // the file reads as an addition — that is what "these two commits' changes"
+  // means. A two-tree comparison would call it merely modified.
+  assert.equal(byPath.get('src/app.js')?.kind, 'added')
+  // Both commits' content is in the diff, not just the newer one's.
+  assert.match(byPath.get('src/app.js')?.text ?? '', /\+one/)
+  assert.match(byPath.get('src/app.js')?.text ?? '', /\+TWO/)
+  // GUIDE.md did not exist before the range, so the rename reads as an
+  // addition: the "before" side has no README.md to pair it with.
+  assert.equal(byPath.get('GUIDE.md')?.kind, 'added')
+  assert.equal(byPath.get('blob.bin')?.binary, true)
+  assert.equal(byPath.get('blob.bin')?.text, undefined)
+
+  // Picking one commit is the same reading: `range(c, c)` is that commit's own
+  // change, exactly what `showCommit(c).files` gives.
+  const single = await svc.range(fixture.second, fixture.second)
+  const singlePaths = single.files.map(file => file.file).sort()
+  const detailPaths = (await svc.showCommit(fixture.second)).files.map(file => file.file).sort()
+  assert.deepEqual(singlePaths, detailPaths)
+  // …and a range that starts at the root commit still works: there is no
+  // parent to compare with, so the empty tree stands in for it.
+  const fromRoot = await svc.range(fixture.first, fixture.second)
+  assert.match(fromRoot.files.find(file => file.file === 'src/app.js')?.text ?? '', /^new file mode /m)
+  assert.match((await svc.range(fixture.first, fixture.first)).files.find(file => file.file === 'src/app.js')?.text ?? '', /\+one/)
+
+  await assert.rejects(svc.range(fixture.first, 'no-such-branch'), /ENOENT/)
+  await assert.rejects(svc.range('HEAD...HEAD', fixture.second), /EINVAL/)
+})
+
+test('git: the dispatcher proxies range with its three-argument shape', async t => {
+  const fixture = history()
+  t.after(() => fixture.dispose())
+  const svc = service(fixture.root)
+  const dispatcher = createDispatcher(() => ({ git: svc }))
+  const result = (await dispatcher.call('git.range', [fixture.first, fixture.second])) as { files: { file: string }[] }
+  assert.ok(result.files.some(file => file.file === 'src/app.js'))
+  // A fourth argument is not part of the method.
+  await assert.rejects(dispatcher.call('git.range', [fixture.first, fixture.second, '', 'x']), /EBADREQUEST/)
+})
+
 test('git: blob returns the content at a commit, binary or text', async t => {
   const fixture = history()
   t.after(() => fixture.dispose())

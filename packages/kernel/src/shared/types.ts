@@ -169,9 +169,50 @@ export interface CommitDetail {
   at: number
   /** The whole commit message, verbatim (subject and body). */
   message: string
-  /** The files it changed, shaped like `diff()` entries (mount-relative). */
+  /**
+   * **Every** file the commit changed, shaped like `diff()` entries
+   * (mount-relative). The list is never a prefix: a reader picks a file out of
+   * it, so a missing row is a missing answer.
+   */
   files: DiffEntry[]
-  /** `files` exceeded the diff limit (4 MiB / 2000 lines): it is a prefix. */
+  /**
+   * Some entries carry no inline `text` because this call's diff budget
+   * (4 MiB / 2000 lines) ran out — they are read one at a time when the reader
+   * opens them (`show(commit, path)`). The **file list itself is complete**;
+   * this flag says the call was big, not that rows were dropped.
+   */
+  truncated?: true
+}
+
+/**
+ * A stretch of history to read the changes of (contract.md §3.2, v0.25): the
+ * commits from `from` to `to`, **oldest first, both included**. It is not a
+ * two-tree comparison — the "before" side is the oldest commit's **parent**, so
+ * every picked commit's own change is part of the answer (a root commit is
+ * compared with the empty tree).
+ */
+export interface CommitRange {
+  /** The oldest picked commit: a sha or any revision git resolves. */
+  from: string
+  /** The newest picked commit. */
+  to: string
+}
+
+/** The result of one `range()` call (contract.md §3.2, v0.25). */
+export interface RangeResult {
+  /** The **oldest** picked commit, as git resolved it (a full sha). */
+  from: string
+  /** The **newest** picked commit (a full sha). */
+  to: string
+  /**
+   * **Every** file the two commits differ in, shaped like `diff()` entries
+   * (mount-relative). Never a prefix — see `CommitDetail.files`.
+   */
+  files: DiffEntry[]
+  /**
+   * Some entries carry no inline `text` (this call's diff budget ran out);
+   * they are read one at a time when the reader opens them.
+   */
   truncated?: true
 }
 

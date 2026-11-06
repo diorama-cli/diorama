@@ -50,7 +50,7 @@ export interface TabDiffProps {
   tab: TabInfo
 }
 
-/** Props one `seats.git-commit` entry receives (contract.md §5, v0.6 / v0.10). */
+/** Props one `seats.git-commit` entry receives (contract.md §5, v0.6 / v0.10 / v0.25). */
 export interface CommitSeatProps {
   /** The commit being shown: full sha, short sha or a revision. */
   commit: string
@@ -61,6 +61,15 @@ export interface CommitSeatProps {
    * still gets the old meaning.
    */
   repo?: string
+  /**
+   * The stretch of history the reader picked (v0.25), oldest first, when they
+   * picked **more than one** commit. Then `commit` is the newest of them (the
+   * single-commit meaning still holds for a piece that ignores this field) and
+   * the seat draws the **net change** of the range rather than one commit's
+   * change. Absent for a single pick — which is every value a v0.6–v0.24 page
+   * could produce.
+   */
+  commits?: string[]
 }
 
 /**

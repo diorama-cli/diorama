@@ -28,7 +28,7 @@ import {
   type CSSProperties,
   type ReactElement,
 } from 'react'
-import type { ChangeTreeNode, CommitDetail, DiffEntry, DiffResult, FileInfo, GitLogEntry, GitStatusEntry } from 'diorama-kernel'
+import type { ChangeTreeNode, CommitDetail, DiffEntry, DiffResult, FileInfo, GitLogEntry, GitStatusEntry, RangeResult } from 'diorama-kernel'
 import { buildChangeTree, hasGit, type GitClient, type TabsService } from 'diorama-kernel/client'
 import { FileIcon, Icon, iconSvg, provideEntry, Splitter, useHighlighter, useKernel, usePaneSize, type Highlighter } from 'diorama-ui'
 import type {} from 'diorama-plugin-slots'
@@ -76,29 +76,20 @@ export const HISTORY_VIEW = 'history'
  * the bare sha when it is in the mount's own repository (which is what every
  * v0.6–v0.9 URL already holds). Repository paths contain `/` but never `:`,
  * so the first `:` is the separator.
+ *
+ * v0.25: the value may name **several** commits of that repository — the
+ * reader picked a stretch of history and wants the net change of it. They are
+ * comma separated and written **oldest first** (`<repo>:<oldest>,…,<newest>`),
+ * so the two ends of the range are the first and the last part. A sha holds no
+ * comma, so nothing is escaped; one commit stays the bare sha it always was.
+ * The encoding itself lives in `history.ts`, where `node --test` can reach it.
  */
 export const HISTORY_HASH_KEY = 'history'
 
-/** A history hash value split into its repository and commit. */
-export interface PickedCommit {
-  /** The repository's mount-relative path (`''` = the mount's own repository). */
-  repo: string
-  /** The commit, as the history row spells it (a full sha). */
-  commit: string
-}
-
-/** Encode a picked commit for `#history` (see {@link HISTORY_HASH_KEY}). */
-export function historyHashValue(repo: string, commit: string): string {
-  return repo === '' ? commit : `${repo}:${commit}`
-}
-
-/** Decode a `#history` value; `undefined` for the empty (or absent) value. */
-export function parseHistoryHash(value: string | undefined): PickedCommit | undefined {
-  if (value === undefined || value === '') return undefined
-  const at = value.indexOf(':')
-  if (at <= 0) return { repo: '', commit: value }
-  return { repo: value.slice(0, at), commit: value.slice(at + 1) }
-}
+export { historyHashValue, parseHistoryHash, pickCommits, type PickedCommit, type RangeChoice } from './history.ts'
+// Re-exported for the piece's own use as well: the file's functions below read
+// and write the value, and `export … from` does not bind a local name.
+import { historyHashValue, parseHistoryHash, pickCommits, type PickedCommit } from './history.ts'
 
 /** The changes view's switcher icon (docs/m7/spec.md §3: the button table). */
 export const CHANGES_ICON = iconSvg('git-changes')
@@ -1411,6 +1402,10 @@ function HistoryView({ active }: { active: boolean }) {
   const history = useHistory(git)
   const router = ctx.router
   const selected = useHistorySelection(ctx)
+  // The row a Shift-click stretches from (v0.25): the one clicked last. It is
+  // this view's own state, not the URL's — a refresh picks one commit and the
+  // next click starts a new stretch, which is what every list does.
+  const [anchor, setAnchor] = useState<string | undefined>(undefined)
   // Which repository is on show (v0.19): the picker at the top switches between
   // them, one repository's commits at a time. `null` = "nothing picked yet, show
   // the first one", so the reader's choice survives a reload of the list; a
@@ -1439,11 +1434,12 @@ function HistoryView({ active }: { active: boolean }) {
       </div>
     )
   }
-  const pick = (repo: string, sha: string): void => {
+  const pick = (repo: string, sha: string, range: readonly string[] | undefined): void => {
     // The value carries the commit **and its repository** (v0.10): the same sha
     // is a different commit in another repository. `''` would mean "nothing
-    // picked".
-    router?.state(HISTORY_HASH_KEY).set(historyHashValue(repo, sha))
+    // picked". A stretch of history is one value (v0.25), oldest first, so the
+    // seat and a refreshed page read the same range.
+    router?.state(HISTORY_HASH_KEY).set(historyHashValue(repo, range ?? [sha]))
   }
   // One repository on show, never several at once (v0.19): the picker is the
   // only way from one to another, so the column shows one list, not a stack of
@@ -1451,20 +1447,42 @@ function HistoryView({ active }: { active: boolean }) {
   // picker would only repeat what the column already is.
   const current = (history.groups.find(group => group.repo === picked) ?? history.groups[0])!
   const showPicker = history.groups.length > 1
+  // The commits of the pick, oldest first, and the range they spell out when
+  // the reader has more than one (v0.25). `selected.commits` is absent for a
+  // single pick, which is the v0.6–v0.24 shape.
+  const selection = selected?.repo === current.repo ? selected : undefined
+  const chosen = selection?.commits ?? (selection === undefined ? [] : [selection.commit])
+  // A click picks: plain replaces, Shift takes the stretch from the anchor,
+  // ⌘ / Ctrl adds or removes one row. What it leaves behind is `pickCommits`'s
+  // decision (a pure function — the ordering rule is worth testing on its own).
+  const choose = (sha: string, event: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }): void => {
+    const next = pickCommits(chosen, anchor, sha, current.commits.map(commit => commit.sha), {
+      shift: event.shiftKey,
+      toggle: event.metaKey || event.ctrlKey,
+    })
+    setAnchor(next.anchor)
+    if (next.commits.length === 0) router?.state(HISTORY_HASH_KEY).set(undefined)
+    else pick(current.repo, next.commits[next.commits.length - 1] as string, next.commits)
+  }
   return (
     <div className="diorama-changes" data-testid="git-history">
       <div className="diorama-changes__group">
-        <span>{total} 个提交</span>
-        <button
-          type="button"
-          className="diorama-changes__reload"
-          data-testid="git-history-reload"
-          title="刷新提交历史"
-          aria-label="刷新提交历史"
-          onClick={history.reload}
-        >
-          <Icon name="reload" size={14} />
-        </button>
+        <span>
+          {total} 个提交
+          {chosen.length > 1 ? ` · 已选 ${chosen.length} 个` : ''}
+        </span>
+        <span className="diorama-changes__actions">
+          <button
+            type="button"
+            className="diorama-changes__reload"
+            data-testid="git-history-reload"
+            title="刷新提交历史"
+            aria-label="刷新提交历史"
+            onClick={history.reload}
+          >
+            <Icon name="reload" size={14} />
+          </button>
+        </span>
       </div>
       {showPicker ? (
         // The picker is one control. A native `select` cannot hold an SVG, so
@@ -1507,20 +1525,37 @@ function HistoryView({ active }: { active: boolean }) {
           </div>
         ) : (
           <div className="diorama-history" role="listbox" aria-label="提交历史">
-            {current.commits.map(commit => {
-              const chosen = commit.sha === selected?.commit && current.repo === selected.repo
+            {current.commits.map((commit, index) => {
+              // Two different things, deliberately kept apart: **picked** is
+              // what the reader selected (that is `aria-selected`, and what the
+              // URL carries); **covered** is the stretch between the outermost
+              // picks, which is what the diff spans. A ⌘-click on the first and
+              // the last row picks two and covers three.
+              const picked = chosen.includes(commit.sha)
+              const ends = chosen
+                .map(sha => current.commits.findIndex(item => item.sha === sha))
+                .filter(at => at !== -1)
+              const low = ends.length === 0 ? -1 : Math.min(...ends)
+              const high = ends.length === 0 ? -1 : Math.max(...ends)
+              const covered = index >= low && index <= high
+              const end = picked && chosen.length > 1 && (index === low || index === high)
               return (
                 <button
                   key={`${current.repo}:${commit.sha}`}
                   type="button"
                   role="option"
-                  aria-selected={chosen}
-                  className={`diorama-history__row${chosen ? ' diorama-changes__row--selected' : ''}`}
+                  aria-selected={picked}
+                  className={`diorama-history__row${end ? ' diorama-changes__row--selected' : ''}${picked && !end ? ' diorama-history__row--picked' : ''}${covered && !picked ? ' diorama-history__row--between' : ''}`}
                   data-sha={commit.sha}
                   data-repo={current.repo}
+                  data-picked={picked ? '' : undefined}
+                  data-covered={covered ? '' : undefined}
                   data-testid="git-history-commit"
                   title={`${commit.sha}\n${commit.author} · ${formatWhen(commit.at)}`}
-                  onClick={() => pick(current.repo, commit.sha)}
+                  // The selection rules of every list: plain click = this row,
+                  // Shift = the stretch from the last click, ⌘ / Ctrl = add or
+                  // remove this one. No mode to turn on first.
+                  onClick={event => choose(commit.sha, event)}
                 >
                   <span className="diorama-history__subject">{commit.subject || '(无提交说明)'}</span>
                   <span className="diorama-history__meta">
@@ -1542,6 +1577,31 @@ function HistoryView({ active }: { active: boolean }) {
       )}
     </div>
   )
+}
+
+/**
+ * The changes of a stretch of history, in the shape the seat draws (v0.25).
+ *
+ * `range()` answers with the files and the two commits it compared; the seat
+ * wants a `CommitDetail`, which is "a thing with a message and a file list".
+ * A range has no message of its own — it is not one commit — so the subject
+ * names the two ends, and `sha` is the newer one (a range *is* "everything up
+ * to here"), which is also the side the whole-file reader takes its text from:
+ * the file as the newest commit of the range left it.
+ */
+function rangeDetail(result: RangeResult, repo?: string): CommitDetail {
+  const subject = `${result.from.slice(0, 7)} … ${result.to.slice(0, 7)}`
+  return {
+    sha: result.to,
+    shortSha: result.to.slice(0, 7),
+    subject,
+    author: '',
+    at: 0,
+    message: '',
+    repo,
+    files: result.files,
+    ...(result.truncated === true ? { truncated: true as const } : {}),
+  }
 }
 
 /** A repository as the picker spells it (`''` is the mount's own repository). */
@@ -1586,9 +1646,18 @@ function readHistoryHash(ctx: unknown): PickedCommit | undefined {
  * commit touched. Picking a file shows its change in that commit, with a
  * toggle for the file's content at that commit (`blob()`).
  */
-function CommitSeat({ commit, repo }: CommitSeatProps) {
+function CommitSeat({ commit, repo, commits }: CommitSeatProps) {
   const { mount } = useKernel()
   const git = mount.git
+  // Two or more commits: the seat shows their **net change** instead of one
+  // commit's change (v0.25). `commits` is oldest first; the ends are what the
+  // diff is between.
+  const range = commits !== undefined && commits.length > 1 ? commits : undefined
+  const from = range?.[0] as string | undefined
+  const to = range === undefined ? undefined : (range[range.length - 1] as string)
+  // A single commit reads its detail (`showCommit`); a range reads the two
+  // ends' net change (`range`), which is the same `CommitDetail` shape with the
+  // two commits named instead of one (v0.25).
   const [state, setState] = useState<{ status: string; detail?: CommitDetail; error?: string }>({ status: 'loading' })
   const [picked, setPicked] = useState<string | undefined>(undefined)
   // The file list is a pane of its own, and its width is the reader's: a long
@@ -1606,7 +1675,11 @@ function CommitSeat({ commit, repo }: CommitSeatProps) {
     setPicked(undefined)
     // The repository matters (v0.10): the same sha is a different commit in
     // another repository, and the mount's own repository is only the default.
-    git.showCommit(commit, repo).then(
+    const load =
+      from !== undefined && to !== undefined
+        ? git.range(from, to, repo).then(result => rangeDetail(result, repo))
+        : git.showCommit(commit, repo)
+    load.then(
       detail => {
         if (!live) return
         setState({ status: 'ready', detail })
@@ -1620,7 +1693,7 @@ function CommitSeat({ commit, repo }: CommitSeatProps) {
     return () => {
       live = false
     }
-  }, [git, commit, repo])
+  }, [git, commit, repo, from, to])
   if (state.status === 'loading') {
     return (
       <div className="diorama-diff" data-testid="git-commit-loading">
@@ -1638,19 +1711,31 @@ function CommitSeat({ commit, repo }: CommitSeatProps) {
   const detail = state.detail as CommitDetail
   const file = picked === undefined ? undefined : detail.files.find(item => item.file === picked)
   return (
-    <div className="diorama-diff" data-testid="git-commit" data-sha={detail.sha}>
+    <div className="diorama-diff" data-testid="git-commit" data-sha={detail.sha} data-range={range === undefined ? undefined : ''}>
       <div className="diorama-diff__header">
-        <code className="diorama-git-commit__sha">{detail.shortSha}</code>
-        <CommitMessage detail={detail} />
+        {/* A range names **both** ends in its subject, so the lone short sha
+            would say the newer one twice. */}
+        {range === undefined && <code className="diorama-git-commit__sha">{detail.shortSha}</code>}
+        {range === undefined ? (
+          <CommitMessage detail={detail} />
+        ) : (
+          // A range has no message of its own: name the two commits the change
+          // is between, oldest first. The ends are all the range is — every
+          // commit between them is covered by the same comparison.
+          <span className="diorama-diff__path diorama-git-commit__subject" data-testid="git-commit-message">
+            {range[0]?.slice(0, 7)} … {detail.shortSha}
+          </span>
+        )}
       </div>
       <div className="diorama-git-commit__meta">
-        {detail.author} · {formatWhen(detail.at)}
+        {range === undefined
+          ? `${detail.author} · ${formatWhen(detail.at)}`
+          : `这 ${range.length} 个提交的改动：${range[0]?.slice(0, 7)} → ${detail.shortSha}`}
       </div>
-      {detail.truncated === true && (
-        <div className="diorama-diff__notes" role="status">
-          改动的文件过多，只列出了一部分
-        </div>
-      )}
+      {/* A commit big enough to exhaust the inline diff budget says nothing:
+          the file list is complete either way, and reading a file on demand
+          is how the seat already works (a text-less row is a normal row).
+          A note here would only describe an implementation detail. */}
       <div
         ref={body}
         className="diorama-git-commit__body"
@@ -1687,7 +1772,7 @@ function CommitSeat({ commit, repo }: CommitSeatProps) {
         <div className="diorama-git-commit__panel">
           {file === undefined && (
             <div className="diorama-renderer__empty" role="status" data-testid="git-commit-empty">
-              这个提交没有改动
+              {range === undefined ? '这个提交没有改动' : '选中的提交之间没有差异'}
             </div>
           )}
           {file !== undefined && <CommitFileDiff commit={detail.sha} file={file} repo={repo} />}
