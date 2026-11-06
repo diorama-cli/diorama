@@ -54,7 +54,7 @@
 | K8 | `ctx.fs`（只读） | ✅ M2→M3 | `list`（尊重 ignore）/ `stat` / `readText` / `readBytes` / `watch`（目录、300ms 合并、**mount 内共享**、`maxDirectories` 上限）；`ETOOLARGE` 上限 |
 | K20 | `ctx.theme`（client） | ✅ v0.9 | 页面配色：跟随系统 / 锁定 / 主题注册表（§3.10）；纯客户端，不 RPC |
 | K21 | `ctx.lsp`（只读） | ✅ | 语言智能：`definition` / `typeDefinition` / `references` / `hover` / `documentSymbol` / `status`；每 mount 一个语言服务器进程（TS / C / C++ / Go），首次用到才起；**只转只读的那一半协议**（rename / applyEdit / executeCommand 永不调用）；缓存写 `/tmp/diorama/.cache/lsp/<normalised project>`，**被浏览的目录一个字节不动**；缺的 TypeScript 服务器连同 `typescript@5` 自动装到缓存目录；行号 1-based、列 0-based UTF-16（转换有单测）；第一次查询等工程加载完（`$/progress` + 两次答案一致）才回答（contract §3.12）|
-| K19 | `ctx.search`（只读） | ✅ v0.8 | `search(query, { kind, caseSensitive, wholeWord, regex, scope, maxFiles, maxMatchesPerFile })`；`name`（子序列）/ `content`（逐行报 line/column/length）；上限 200 文件 / 每文件 20 条 / 扫描 2 万文件，超限**截断**并报真实总数；二进制跳过；`EINVAL` / `ENOENT`（contract §3.9）|
+| K19 | `ctx.search`（只读） | ✅ v0.8 / v0.26 | `search(query, { kind, caseSensitive, wholeWord, regex, scope, maxFiles, maxMatchesPerFile })`；`name`（子序列）/ `content`（逐行报 line/column/length）；上限 200 文件 / 每文件 20 条 / 扫描 2 万文件，超限**截断**并报真实总数；二进制跳过；`EINVAL` / `ENOENT`。**v0.26 性能**：每个 mount 一份已解码文本缓存（32 MiB / 2 万文件，按 mtime + ctime + size 校验）、字面量走 `indexOf`、二进制扩展名不打开、新增 `paths(scope?)` 一次列出全部路径（上限 `SEARCH_MAX_PATHS` = 2 万）——重复查询 200–400 → 140–156 ms（contract §3.9、§49）。**v0.27 可选 ripgrep 引擎**：装了 `@vscode/ripgrep` 时先由它回答「哪些文件命中」（`--files-with-matches`），细节仍由 JavaScript 产出，两条路径结果逐字段相同；引擎只拿显式文件清单、不拿目录，`ignore` 仍是唯一强制点；正则也用它窄化（`--engine auto`，方言差异只会多给文件、不会少给，非法正则仍由 JavaScript 判定 `EINVAL`）；没装 / 命中面过宽 / 缓存已覆盖时静默退回（罕见词首次 165 → 26 ms，正则 176 → 76 ms，contract §3.9、§50）|
 | K9 | `ctx.git`（只读） | ✅ | `status` / `diff(scope)` / `log`（v0.5）；`show` / `showCommit` / `blob`、`base: 'index' \| <commit>`（v0.6）；**v0.10：一个挂载里的全部仓库**——`repos()` + 每个方法的可选 `repo`，向下走查 `.git`（`[git] maxDepth` 默认 3、`maxRepos`、`ignore` 剪枝），嵌套仓库不重复出现在外层；上限、错误码（contract §3.2）|
 | K10 | `ctx.slots` | ✅ M0→M1 | |
 | K11 | `ctx.commands` | ✅ M2 | 内核内置：命令 id fail loud、快捷键字面冲突抛错、`CommandContext` 内核采集、单一 keydown 分发 |
@@ -86,7 +86,7 @@
 | P17 | `html` 渲染器 | ✅ | `ext: ['html', 'htm']` 的唯一 owner；**样式阶段**：页面 CSS（内联 / `style=` / 外链）与外部图片放行，脚本不跑；**脚本阶段**：逐文件确认后 `allow-scripts`（无 `allow-same-origin`）执行页面脚本；另有源码视图。切换在渲染器头部（contract §5.1）。**`[html] scripts = true` 让含脚本的页面打开即进脚本阶段**（默认 `false`，仍逐文件确认；contract §4.1、§28）|
 | P12 | `git-changes`（变更视图 + diff 座位） | ✅ | 左栏「变更」（`sidebar.views` 的 `changes` 视图，`order: 20`）；该 tab 以 `view: 'diff'` 渲染 unified diff；**v0.6：由 `fs.watch` 驱动重算**（不再 5 秒轮询）；**v0.10：按仓库分组、组头可折叠**（多仓库挂载）；一个仓库都没有时两个 git 视图都不出现；**还没 commit 过的仓库照常出现**（变更全是新增、历史为空，契约 §38）。**v0.10：diff 三种读法**（「改动」= 着色的 unified diff；「整个文件」= 单栏，把改动放进文件自己的行号里；「新旧对照」= 双栏，左旧右新、删除在左、新增在右；长段未改动行都折成可展开的横带；偏好存 `localStorage`、对工作区 tab 与提交座位同时生效）+ 头部 ‹ › 与 ↑/↓ 在变更块之间循环跳转、`+a −r` 计数 |
 | P16 | `git-changes`（历史视图 + 提交座位） | ✅ 本轮 | 左栏「历史」（`history`，`order: 30`）：提交列表（每页 50，上限 500），**v0.10 起按仓库分组、组头可折叠**，**v0.19 起改为顶部下拉切换仓库（一次只画一个仓库，契约 §37）**；**提交树（契约 §46）**：每行左侧画彩色的点与连线（`log()` 的 `parents` 驱动，6 色按道循环，跨道父子是曲线）；点提交写 `#history=<sha>`，右侧 `seats.git-commit` 显示**标题行**（正文展开/收起）、作者、文件清单与「改动 / 提交时的内容」；**打开文件（含再点当前文件）或切走侧栏视图即回到 tab 列表**，`#history` 随之清掉。**v0.25：选多个提交来对比**——标准列表选择（单击选一行 / **Shift 选整段** / **⌘ 或 Ctrl 加减一行**，没有要先打开的开关），被选中的提交里最旧与最新是两个端，右侧画这一段的**全部改动**（`ctx.git.range`，起点是最旧提交的父提交，所以每个被选中的提交都在），值写进 `#history=<oldest>,…,<newest>`、刷新后仍在（契约 §45）|
-| P13 | `search-view`（文件搜索） | ✅ v0.8 | 左栏「搜索」视图（`order: 40`）：**按内容**（字面量 / 正则、大小写、全字）与**按文件名**（子序列，VS Code 的 `Ctrl+P` 口径）两种模式；结果按文件折叠，点一条打开文件并**跳到那一行**。另注册 `mod+p` 快速打开覆盖层（`layout.overlay`，`order: 300`）。服务是内核的 `ctx.search`（§3.9），只走 `ctx.fs`，因此 `ignore` 对树与搜索一致 |
+| P13 | `search-view`（文件搜索） | ✅ v0.8 | 左栏「搜索」视图（`order: 40`）：**按内容**（字面量 / 正则、大小写、全字）与**按文件名**（子序列，VS Code 的 `Ctrl+P` 口径）两种模式；结果按文件折叠，点一条打开文件并**跳到那一行**。另注册 `mod+p` 快速打开覆盖层（`layout.overlay`，`order: 300`），**v0.26 起一次 `search.paths()` 取全部路径**（原来逐目录 `fs.list`）。服务是内核的 `ctx.search`（§3.9），只走 `ctx.fs`，因此 `ignore` 对树与搜索一致 |
 | P14 | `jupyter` / `.ipynb` | **未来** | 第二轮明确不做（只要文本，但渲染形式未定）|
 | P9 | `i18n` | 🔲 待定 | 界面语言未做（主题已独立成 P20 / U12）|
 | P21 | `status-bar`（状态栏） | ✅ v0.22 | 客户端 piece：填 `layout.status`（`order: 100`），无自己的服务、无键位；读 `mountCtx` 与 `ctx.tabs`，文件数字走 `ctx.fs`（`stat` + 有上限的 `readText`），跟随 watch 与 `onReconnect` 重读 |
@@ -140,7 +140,7 @@
 
 这些是我认为「一个文件查看器通常会想要、但你没提过」的，列出来供你取舍：
 
-1. ~~**全文搜索（命令面板附带文件搜索）**~~ —— **v0.8 已做**：不是塞进命令面板，而是独立的「搜索」视图 + `mod+p` 快速打开（见 P13 / K19 / U14）。不做索引：每次查询现场走目录（上限见 contract §3.9）。
+1. ~~**全文搜索（命令面板附带文件搜索）**~~ —— **v0.8 已做**：不是塞进命令面板，而是独立的「搜索」视图 + `mod+p` 快速打开（见 P13 / K19 / U14）。不做索引：每次查询现场走目录（上限见 contract §3.9）；**v0.26 加了已解码文本缓存**，重复查询不再重读磁盘（§49）；**v0.27 可选 ripgrep 引擎**只做「哪些文件命中」的窄化，细节与语义不变（§50）。
 2. **主题 / 外观配置** —— 至少要不要支持跟随系统深色模式。（**两轮都明确不做**；等 `ctx.storage` 定签名）
 3. **URL 可分享** —— `#/path/to/file`，打开链接直达某文件。
 4. **多 tab 记忆** —— 刷新后恢复上次打开的 tab。（**待定**：现在只恢复活动文件与 hash 里的视图）

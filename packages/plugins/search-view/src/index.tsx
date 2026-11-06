@@ -380,10 +380,12 @@ function QuickOpen() {
     const timer = setTimeout(() => input.current?.focus(), 0)
     let live = true
     // One listing per opening, not per key: quick open needs *every* path, and
-    // `ctx.search` only answers for a query (an empty one returns nothing —
-    // a search is never a directory listing, contract.md §3.9). So the paths
-    // come from `fs.list`, and the ranking runs here on every keystroke.
-    listFiles(mount).then(
+    // a search only answers for a query (an empty one returns nothing — a
+    // search is never a directory listing, contract.md §3.9). So the paths come
+    // from `search.paths` — the server walks the tree once, in one round trip
+    // instead of one per directory — and the ranking runs here on every
+    // keystroke.
+    mount.search.paths('').then(
       paths => {
         if (live) setPaths(paths)
       },
@@ -554,30 +556,6 @@ export function apply(ctx: Context) {
     },
   })
   commands.bind({ keys: 'mod+shift+f', command: 'search.open' })
-}
-
-/**
- * Every file path of the mount, walked through `fs.list` (the same door the
- * file tree uses). Hidden entries are already absent (contract.md §3.1), so
- * quick open and the tree agree by construction.
- */
-async function listFiles(mount: MountHandle, limit = 20_000): Promise<string[]> {
-  const out: string[] = []
-  const queue: string[] = ['']
-  while (queue.length > 0 && out.length < limit) {
-    const directory = queue.shift() as string
-    let entries: FileInfo[]
-    try {
-      entries = await mount.fs.list(directory)
-    } catch {
-      continue
-    }
-    for (const entry of entries) {
-      if (entry.kind === 'dir') queue.push(entry.path)
-      else out.push(entry.path)
-    }
-  }
-  return out
 }
 
 /**
