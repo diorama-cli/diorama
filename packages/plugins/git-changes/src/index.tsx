@@ -1135,11 +1135,11 @@ function InlineRows({ rows }: { rows: readonly DiffLine[] }) {
  * same rule the `code` renderer follows (contract.md §5.1). An empty line
  * keeps a non-breaking space so the row still has its height.
  */
-function CodeCell({ html, text }: { html: string | undefined; text: string }) {
+function CodeCell({ html, text, style }: { html: string | undefined; text: string; style?: React.CSSProperties }) {
   // An empty line is still a line: it keeps a non-breaking space so the row
   // has its height whether or not the engine had anything to colour.
-  if (html === undefined) return <span className="diorama-diff__code">{text === '' ? '\u00a0' : text}</span>
-  return <span className="diorama-diff__code" dangerouslySetInnerHTML={{ __html: html === '' ? '\u00a0' : html }} />
+  if (html === undefined) return <span className="diorama-diff__code" style={style}>{text === '' ? '\u00a0' : text}</span>
+  return <span className="diorama-diff__code" style={style} dangerouslySetInnerHTML={{ __html: html === '' ? '\u00a0' : html }} />
 }
 
 /**
@@ -1230,6 +1230,75 @@ function WholeFile({ diff, text, path, testId, surface }: { diff: string; text: 
 }
 
 /**
+ * The side-by-side reader pans **a column** — one offset per side, not one
+ * scroller per line (docs/m37/spec.md).
+ *
+ * A cell is one line tall, so giving each cell its own `overflow-x: auto` made
+ * every row a scroller: pan once and the whole column flashes a scrollbar per
+ * line, and a wheel or trackpad gesture reaches only the line under the
+ * pointer. Instead the offset lives in React state, one number per side, and
+ * the code columns are shifted by it with `transform`. The gutter is outside
+ * that transform, so the line numbers stay put while the text slides under
+ * them, and no element scrolls sideways — there is no scrollbar to show.
+ *
+ * Shift + wheel is handled by hand because the browser does not translate it
+ * into a horizontal scroll inside a cell (measured: the wheel event arrives and
+ * nothing moves); a touchpad pan arrives as `deltaX`.
+ */
+function useColumnPan(): [
+  React.RefObject<HTMLDivElement | null>,
+  (side: number, delta: number) => void,
+  readonly [number, number],
+] {
+  const ref = useRef<HTMLDivElement | null>(null)
+  const [offsets, setOffsets] = useState<readonly [number, number]>([0, 0])
+  // The furthest a side can travel is the longest line's overflow — measured
+  // from the DOM, because only the browser knows how wide the text came out.
+  const limit = (side: number): number => {
+    const root = ref.current
+    if (root === null) return 0
+    let max = 0
+    for (const code of root.querySelectorAll<HTMLElement>('.diorama-diff__split-cell[data-side="' + side + '"] .diorama-diff__code')) {
+      max = Math.max(max, code.scrollWidth - code.clientWidth)
+    }
+    return max
+  }
+  const pan = (side: number, delta: number): void => {
+    setOffsets(previous => {
+      const at = previous[side] ?? 0
+      const moved = Math.max(0, Math.min(limit(side), at + delta))
+      if (moved === at) return previous
+      const next: [number, number] = [previous[0], previous[1]]
+      next[side] = moved
+      return next
+    })
+  }
+  useEffect(() => {
+    const root = ref.current
+    if (root === null) return
+    const sideOf = (node: EventTarget | null): number | null => {
+      if (!(node instanceof Element)) return null
+      const cell = node.closest('.diorama-diff__split-cell')
+      const side = cell?.getAttribute('data-side')
+      return side === null || side === undefined ? null : Number(side)
+    }
+    const onWheel = (event: WheelEvent): void => {
+      const delta = event.deltaX !== 0 ? event.deltaX : event.shiftKey ? event.deltaY : 0
+      if (delta === 0) return
+      const side = sideOf(event.target)
+      if (side === null) return
+      // Nothing to pan: leave the gesture to the reader (vertical scrolling).
+      if (limit(side) <= 0) return
+      event.preventDefault()
+      pan(side, delta)
+    }
+    root.addEventListener('wheel', onWheel, { passive: false })
+    return () => root.removeEventListener('wheel', onWheel)
+  }, [])
+  return [ref, pan, offsets]
+}
+
+/**
  * The side-by-side reader: the old file on the left, the new one on the right,
  * the change shown in both (deletions on the left, insertions on the right).
  *
@@ -1239,6 +1308,7 @@ function WholeFile({ diff, text, path, testId, surface }: { diff: string; text: 
  * same way the whole-file reader folds them.
  */
 function SplitFile({ diff, text, path, testId, surface }: { diff: string; text: string; path: string; testId: string; surface?: GestureSurface }) {
+  const [reader, , offsets] = useColumnPan()
   const rows = useMemo(() => buildSplitRows(text, diff), [text, diff])
   const [open, setOpen] = useState<number | undefined>(undefined)
   const body = useMemo(() => collapseSplitRows(rows, 3, 2, open), [rows, open])
@@ -1265,7 +1335,7 @@ function SplitFile({ diff, text, path, testId, surface }: { diff: string; text: 
     </button>
   )
   return (
-    <div className="diorama-diff__text" data-testid={testId} data-mode="split" data-language={highlight === undefined ? 'plaintext' : highlight.languageOf(path)} role="group" aria-label="新旧文件对照" {...(surface === undefined ? {} : surface.handlers)}>
+    <div ref={reader} className="diorama-diff__text" data-testid={testId} data-mode="split" data-language={highlight === undefined ? 'plaintext' : highlight.languageOf(path)} role="group" aria-label="新旧文件对照" {...(surface === undefined ? {} : surface.handlers)}>
       <div className="diorama-diff__split-head" aria-hidden="true">
         <span className="diorama-diff__split-title">旧</span>
         <span className="diorama-diff__split-title">新</span>
@@ -1280,6 +1350,9 @@ function SplitFile({ diff, text, path, testId, surface }: { diff: string; text: 
               // row's markup is the same on either side; only a deleted cell
               // has a fragment of its own (it is not in the file).
               const html = cells?.[index]?.[side === 0 ? 'old' : 'next']
+              // The whole side slides by one offset, so every line stays lined
+              // up with every other and nothing scrolls on its own.
+              const offsetStyle = offsets[side] === 0 ? undefined : { '--dio-split-shift': `-${offsets[side]}px` } as React.CSSProperties
               return (
                 <div
                   key={side}
@@ -1290,6 +1363,7 @@ function SplitFile({ diff, text, path, testId, surface }: { diff: string; text: 
                   // (docs/m32/spec.md). The tone class is still the row's own.
                   className={`diorama-diff__split-cell diorama-diff__line${cell === undefined ? ' diorama-diff__split-cell--empty' : ` diorama-diff__line--${cell.tone}`}`}
                   data-tone={cell?.tone ?? 'empty'}
+                  data-side={side}
                   data-line={cell?.number}
                   // Only the **new** column addresses the file the server knows:
                   // the left one is the old file (contract.md §3.12).
@@ -1299,9 +1373,9 @@ function SplitFile({ diff, text, path, testId, surface }: { diff: string; text: 
                     {cell?.number ?? ''}
                   </span>
                   {cell === undefined ? (
-                    <span className="diorama-diff__code">{'\u00a0'}</span>
+                    <span className="diorama-diff__code" style={offsetStyle}>{'\u00a0'}</span>
                   ) : (
-                    <CodeCell html={html} text={cell.text} />
+                    <CodeCell html={html} text={cell.text} style={offsetStyle} />
                   )}
                 </div>
               )
