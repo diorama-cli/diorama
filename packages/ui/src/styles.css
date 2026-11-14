@@ -2237,20 +2237,24 @@ body.diorama-resizing {
    that is where `white-space: pre` comes from: a line's indentation is part of
    the line, so a cell that let the browser collapse runs of spaces showed the
    reader a re-indented file (docs/m32/spec.md). The cell is half a row wide, so
-   it drops the row's right padding. */
+   it drops the row's right padding.
+
+   `overflow: hidden` clips the text to the cell — **not** `auto`: a cell is one
+   line tall, so its own scroller would put a scrollbar on every row of the
+   column at once (docs/m37/spec.md). The side slides as a whole instead. */
 .diorama-diff__split-cell {
   min-width: 0;
   padding: 0;
+  overflow: hidden;
 }
 
-/* A long line scrolls **its own column** (the gutter stays put, the seam stays
-   in the middle) instead of wrapping — the same reading as the one-column
-   reader, which scrolls rather than folding a line in two. */
+/* The code column slides by the side's offset — one number for the whole side,
+   written as `--dio-split-shift` by the reader. `white-space: pre` means the
+   column is as wide as its line, so the text runs under the clipped edge; the
+   gutter is outside this transform and never moves. */
 .diorama-diff__split-cell .diorama-diff__code {
   min-width: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: thin;
+  transform: translateX(var(--dio-split-shift, 0));
 }
 
 .diorama-diff__split-cell + .diorama-diff__split-cell {
