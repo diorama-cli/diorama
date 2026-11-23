@@ -155,6 +155,51 @@ test('search: fuzzyMatch prefers consecutive runs and basename matches', () => {
   assert.notEqual(fuzzyMatch('README.md', 'readme'), undefined)
 })
 
+test('search: fuzzyMatch takes the best alignment, so the highlight covers the query', () => {
+  // The reported defect (m38): a left-to-right scan matched the t...r...i...p...o
+  // of the *directory* and then the basename, so the exact file scored below a
+  // shorter one and the `tripo` half of the name was left unhighlighted.
+  const path = 'code/AI3DJobConsumeAgent/task/impl/tripo/tripo_texture.go'
+  const exact = fuzzyMatch(path, 'tripo_texture.go')
+  const shorter = fuzzyMatch('code/AI3DJobConsumeAgent/task/impl/tripo/dto_texture.go', 'tripo_texture.go')
+  assert.ok(exact !== undefined && shorter !== undefined)
+  // The whole name, character for character, outranks a subsequence of another.
+  assert.ok(exact.score > shorter.score)
+  const name = path.slice(path.lastIndexOf('/') + 1)
+  const offset = path.length - name.length
+  const inName = exact.positions.filter(position => position >= offset).map(position => position - offset)
+  assert.deepEqual(inName, [...name].map((_, index) => index))
+
+  // A best alignment also wins inside one name: the later `texture` is the one
+  // a reader means, not the earlier run that ends at the same place.
+  const test = fuzzyMatch('src/dto_texture_test.go', 'texture_test')
+  assert.ok(test !== undefined)
+  assert.deepEqual(test.positions, [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19])
+
+  // An exact file name beats every subsequence hit of the same query.
+  const exactName = fuzzyMatch('a/b/app.ts', 'app.ts')
+  const subsequence = fuzzyMatch('apps.ts', 'app.ts')
+  assert.ok(exactName !== undefined && subsequence !== undefined)
+  assert.ok(exactName.score > subsequence.score)
+})
+
+test('search: a match in the basename wins a tie against one in a directory', () => {
+  // The second reported defect (m38): typing `tripo` scored the *directory*
+  // `tripo/` for every file under it, so the basename had no highlighted
+  // character at all and a shorter, unrelated file came first.
+  const base = 'code/AI3DJobConsumeAgent/task/impl/tripo/'
+  const own = fuzzyMatch(base + 'tripo_texture.go', 'tripo')
+  const other = fuzzyMatch(base + 'dto_texture.go', 'tripo')
+  assert.ok(own !== undefined && other !== undefined)
+  // The file whose *name* starts with the query comes first.
+  assert.ok(own.score > other.score)
+  // And the highlight lands in the name, so a row has something to draw.
+  const name = 'tripo_texture.go'
+  const offset = base.length + 'tripo_texture.go'.length - name.length
+  const inName = own.positions.filter(position => position >= offset).map(position => position - offset)
+  assert.deepEqual(inName, [0, 1, 2, 3, 4])
+})
+
 test('search: contentMatcher escapes literals and clipLine keeps the hit visible', () => {
   const literal = contentMatcher({ query: 'a.b' })
   assert.ok(literal !== undefined)
