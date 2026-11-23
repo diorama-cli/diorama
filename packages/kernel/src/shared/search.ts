@@ -100,11 +100,22 @@ export const SEARCH_MAX_QUERY_CHARS = 200
 /**
  * The character scores of a fuzzy match. Matched characters score by what they
  * follow, so `app` scores higher in `app.ts` than in `x/a/x/p/p.ts`.
+ *
+ * Two more rules rank the **whole** match, not one character:
+ *
+ * - a matched run that starts a segment (the basename, or a word inside it:
+ *   `tripo_texture.go` has `tripo` and `texture`) scores `SCORE_SEGMENT` per
+ *   character, so `tripo_texture.go` beats `dto_texture.go` for `tripo_texture.go`
+ *   — the file that *is* what was typed, not the one that merely ends the same;
+ * - the matched characters covering the whole file name is the strongest thing
+ *   a row can be, so `SCORE_EXACT_NAME` puts it above every subsequence hit.
  */
 const SCORE_BASE = 1
 const SCORE_CONSECUTIVE = 4
 const SCORE_SEPARATOR = 6
 const SCORE_CAMEL = 3
+const SCORE_SEGMENT = 2
+const SCORE_EXACT_NAME = 20
 const PENALTY_GAP = 0.5
 
 /** A subsequence match of `query` in `text`, with the positions it used. */
@@ -129,14 +140,54 @@ export function isSubsequence(text: string, query: string): boolean {
  * Score one subsequence match, preferring consecutive runs, matches right after
  * a separator (`/`, `.`, `-`, `_`) and camel-case boundaries — the usual
  * "quick open" ranking. Returns `undefined` when the text does not match.
+ *
+ * The match is the **best** alignment, not the first one a left-to-right scan
+ * happens to find: `tripo_texture.go` for `tripo_texture.go` must not be read as
+ * `t`…`r`…`i`…`p`…`o` (the `tripo` of the directory above, then `_` and the
+ * basename), which both under-scores it and highlights the wrong characters.
  */
 export function fuzzyMatch(text: string, query: string): FuzzyMatch | undefined {
   if (query === '') return { positions: [], score: 0 }
   const haystack = text.toLowerCase()
   const needle = query.toLowerCase()
+  const first = needle[0] ?? ''
+  const slash = text.lastIndexOf('/')
+  const name = text.slice(slash + 1)
+  let best: FuzzyMatch | undefined
+  let bestRank = -Infinity
+  // Every place the first character could be is a candidate start; the scan
+  // inside one alignment still walks forward, which is what a subsequence is.
+  for (let start = haystack.indexOf(first); start !== -1; start = haystack.indexOf(first, start + 1)) {
+    const match = align(text, haystack, needle, start)
+    if (match === undefined) continue
+    // An alignment inside the basename wins a tie against one of the same
+    // quality in a directory above it: for `tripo` the reader means
+    // `tripo_texture.go`, not "any file under a directory called tripo". The
+    // rank carries the bonus the final score gets anyway, so the two agree.
+    const rank = match.score + ((match.positions[0] ?? 0) > slash ? SCORE_SEPARATOR : 0)
+    if (rank > bestRank) {
+      best = match
+      bestRank = rank
+    }
+  }
+  if (best === undefined) return undefined
+  // The basename matters more than the directories above it.
+  if ((best.positions[0] ?? 0) > slash) best.score += SCORE_SEPARATOR
+  // A run that starts a segment — the basename itself, or a word inside it —
+  // is what a reader typing a file name means.
+  best.score += SCORE_SEGMENT * segmentStarts(text, best.positions)
+  // The whole file name, character for character: nothing outranks that.
+  if (best.positions.length === name.length && name.toLowerCase() === needle) best.score += SCORE_EXACT_NAME
+  // A shorter path is the more likely target when the scores tie.
+  best.score -= text.length * 0.01
+  return best
+}
+
+/** Score one alignment of `needle` in `haystack`, starting at `start`. */
+function align(text: string, haystack: string, needle: string, start: number): FuzzyMatch | undefined {
   const positions: number[] = []
   let score = 0
-  let cursor = 0
+  let cursor = start
   let previous = -2
   for (const char of needle) {
     const found = haystack.indexOf(char, cursor)
@@ -151,11 +202,23 @@ export function fuzzyMatch(text: string, query: string): FuzzyMatch | undefined 
     previous = found
     cursor = found + 1
   }
-  // The basename matters more than the directories above it.
-  const slash = text.lastIndexOf('/')
-  if (positions.length > 0 && (positions[0] ?? 0) > slash) score += SCORE_SEPARATOR
-  // A shorter path is the more likely target when the scores tie.
-  return { positions, score: score - text.length * 0.01 }
+  return { positions, score }
+}
+
+/**
+ * How many of the matched characters start a segment: the first one after a
+ * separator (`_` counts — that is the defect this rule was written for), and
+ * the first of a run (a match that is contiguous from there).
+ */
+function segmentStarts(text: string, positions: readonly number[]): number {
+  let count = 0
+  let previous = -2
+  for (const position of positions) {
+    const before = position === 0 ? '' : (text[position - 1] ?? '')
+    if (position !== previous + 1 || SEPARATORS.has(before)) count++
+    previous = position
+  }
+  return count
 }
 
 const SEPARATORS = new Set(['/', '\\', '.', '-', '_', ' '])

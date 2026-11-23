@@ -113,6 +113,45 @@ test('search: quick open jumps to a file by a subsequence of its path', async ({
   }
 })
 
+test('search: quick open ranks the exact name first and highlights the whole query', async ({ page }) => {
+  // The reported defect (m38): typing a full file name put a *shorter* file that
+  // merely ended the same way on top, and the highlighted characters on the
+  // real file stopped at `_` — the `tripo` half of the name was plain text.
+  const directory = fixture({
+    'code/task/impl/tripo/dto_texture.go': 'package tripo\n',
+    'code/task/impl/tripo/tripo_texture.go': 'package tripo\n',
+  })
+  const server = await startDiorama(directory.root)
+  try {
+    await page.goto(server.url)
+    await waitForPage(page)
+    await page.keyboard.press(`${MOD}+p`)
+    const input = page.getByTestId('quick-open-input')
+    await expect(input).toBeFocused()
+
+    await input.fill('tripo_texture.go')
+    const rows = page.getByTestId('quick-open-row')
+    await expect(rows).toHaveCount(2)
+    // The file that *is* what was typed comes first, not the shorter one.
+    await expect(rows.first()).toHaveAttribute('data-path', 'code/task/impl/tripo/tripo_texture.go')
+    // Every character of the query is highlighted, `tripo` included.
+    await expect(rows.first().locator('mark')).toHaveText(['tripo_texture.go'])
+    // The row it outranks highlights only the tail it actually shares.
+    await expect(rows.nth(1).locator('mark')).toHaveText(['_texture.go'])
+
+    // A short query highlights in the **name**: `tripo` also matches the
+    // directory of the same name, and that alignment leaves the basename with
+    // no highlighted character at all (the reported defect).
+    await input.fill('tripo')
+    const short = page.getByTestId('quick-open-row')
+    await expect(short.first()).toHaveAttribute('data-path', 'code/task/impl/tripo/tripo_texture.go')
+    await expect(short.first().locator('mark')).toHaveText(['tripo'])
+  } finally {
+    await server.stop()
+    directory.dispose()
+  }
+})
+
 test('search: the view has a switcher shortcut and stays mounted when hidden', async ({ page }) => {
   const directory = searchable()
   const server = await startDiorama(directory.root)
