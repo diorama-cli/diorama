@@ -3,6 +3,22 @@
 Every published version of `@diorama-cli/diorama`, newest first. Generated from
 the commit log by `pnpm release` — see [docs/release.md](docs/release.md).
 
+## 0.0.12 (2026-11-23)
+
+### Fixes
+
+- **search:** rank an exact name first and highlight the whole query
+- **git-changes:** the side-by-side reader pans a whole side, with no scrollbar per line
+
+### Documentation
+
+- **release:** file the 0.0.12 change lists under their version
+
+### Other
+
+- Merge branch 'dsh-814afd08-fa75'
+- the side-by-side diff reader pans a whole side
+
 ## 0.0.11 (2026-11-06)
 
 ### Features
